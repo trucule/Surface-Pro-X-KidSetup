@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Music Box</title>
+<!--
+  Music Box v2. Two pages.
+
+  Song: a 16-step tone matrix. Eight scale notes (three scales: happy, spooky, dreamy, all consonant so any pattern
+  sounds fine), three percussion rows (drum, clap, shaker) and one row per recorded voice that is switched "in song".
+  Five synthesized instruments plus "Me" (a recorded voice pitched up and down the scale). Speed, swing, a surprise
+  dice and three song slots. Songs are kept in localStorage (musicbox-v2); the old musicbox-song key is migrated.
+
+  Voice Lab: six pads. Tap the mic on a pad, say something, and it is kept (IndexedDB, raw PCM, so it survives
+  restarts). Each pad has an emoji name, effects (chipmunk, giant, backwards, robot, echo), a "use for notes" star
+  (that voice becomes the Me instrument) and an "in song" switch (adds its own row to the grid). A keyboard of eight
+  animal keys plays the current instrument or the selected voice up the scale.
+
+  Everything is Web Audio; nothing is fetched. Offline, no API. Recording uses getUserMedia on file://, which the
+  tablet pre-approves for her local apps.
+-->
+<style>
+  :root { --ink: #2B2140; --paper: #FFF9F0; --pink: #FF4F8B; --sun: #FFC93C; --sky: #58C7F0; --leaf: #5CD38B; --grape: #9B6BFF; }
+  html, body { margin: 0; height: 100%; background: var(--paper); overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); }
+  body { touch-action: none; user-select: none; -webkit-user-select: none; }
+  button { font-family: inherit; color: inherit; }
+  #app { position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr auto; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  header { display: flex; align-items: center; gap: 8px; padding: 8px 14px; flex-wrap: wrap; }
+  header h1 { font-size: 24px; margin: 0 12px 0 0; font-weight: 900; }
+  .pill { border: 3px solid var(--ink); background: #fff; border-radius: 999px; padding: 7px 14px; font-size: 19px; font-weight: 800; cursor: pointer; }
+  .pill.on { background: var(--sun); }
+  .pill.tab { background: #efe8fb; } .pill.tab.on { background: var(--grape); color: #fff; }
+  .pill[hidden] { display: none; }
+  #insts { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+  main { min-height: 0; padding: 4px 14px; }
+  .page { height: 100%; display: none; } .page.on { display: block; }
+
+  /* Song page */
+  #grid { display: grid; grid-template-columns: 54px repeat(16, 1fr); gap: 4px; width: 100%; height: 100%; max-width: 1280px; margin: 0 auto; }
+  .lbl { display: grid; place-items: center; font-size: 24px; }
+  .lbl.bounce { animation: bounce .25s; }
+  @keyframes bounce { 30% { transform: translateY(-10px) scale(1.25); } 100% { transform: none; } }
+  .cell { border: 3px solid #e4dbf0; border-radius: 9px; background: #fff; cursor: pointer; transition: transform .08s, background .08s; touch-action: none; min-height: 0; }
+  .cell.bar { border-color: #cfc3e3; }
+  .cell.on { background: var(--note); border-color: var(--ink); }
+  .cell.hit { transform: scale(1.18); box-shadow: 0 0 14px var(--note); }
+  .cell.head { background: #f3eefc; }
+  .cell.on.head { background: var(--note); filter: brightness(1.15); }
+  .cell.perc.on { background: var(--note); }
+
+  /* Lab page */
+  #lab { height: 100%; display: grid; grid-template-rows: 1fr auto auto; gap: 10px; max-width: 1280px; margin: 0 auto; }
+  #pads { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; min-height: 0; }
+  .pad { border: 4px solid #e4dbf0; border-radius: 18px; background: #fff; display: grid; grid-template-rows: auto 1fr auto; padding: 8px 10px; gap: 4px; position: relative; cursor: pointer; min-height: 0; }
+  .pad.sel { border-color: var(--ink); box-shadow: 0 0 0 4px var(--sun); }
+  .pad.rec { border-color: var(--pink); animation: pulse .8s infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 0 8px rgba(255,79,139,.35); } }
+  .pad .top { display: flex; align-items: center; gap: 8px; }
+  .pad .emoji { font-size: 34px; width: 48px; height: 48px; display: grid; place-items: center; border-radius: 12px; background: #f3eefc; }
+  .pad .status { font-weight: 800; font-size: 17px; flex: 1; }
+  .pad .mic { margin-left: auto; width: 54px; height: 54px; border-radius: 50%; border: 3px solid var(--ink); background: var(--pink); color: #fff; font-size: 26px; cursor: pointer; }
+  .pad canvas { width: 100%; height: 100%; display: block; min-height: 0; }
+  .pad .level { height: 10px; border-radius: 5px; background: #f3eefc; overflow: hidden; }
+  .pad .level i { display: block; height: 100%; width: 0; background: var(--leaf); transition: width .05s; }
+  .pad .flags { display: flex; gap: 6px; font-size: 15px; font-weight: 800; min-height: 20px; }
+  .pad .flags span { background: #f3eefc; border-radius: 8px; padding: 1px 7px; }
+  #fx { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; justify-content: center; }
+  #fx .pill { font-size: 18px; }
+  #fx .pill.star.on { background: var(--sun); } #fx .pill.song.on { background: var(--leaf); }
+  #keys { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; height: 96px; }
+  .key { border: 4px solid var(--ink); border-radius: 14px; background: var(--k); font-size: 36px; display: grid; place-items: center; cursor: pointer; transition: transform .06s; }
+  .key.hit { transform: scale(.94); filter: brightness(1.15); }
+
+  footer { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 8px 14px 14px; flex-wrap: wrap; }
+  footer button { border: 4px solid var(--ink); background: #fff; border-radius: 50%; width: 70px; height: 70px; font-size: 30px; cursor: pointer; }
+  footer button.big { width: 92px; height: 92px; background: var(--leaf); font-size: 42px; }
+  footer button.big.on { background: var(--pink); }
+  footer button.on { background: var(--sun); }
+  #tempo { display: flex; align-items: center; gap: 6px; margin-left: 10px; }
+  #tempo button { width: 58px; height: 58px; font-size: 26px; }
+  #slots { display: flex; gap: 6px; margin-left: 10px; }
+  #slots button { width: 58px; height: 58px; font-size: 24px; }
+  #slots button.on { background: var(--grape); color: #fff; }
+  #toast { position: fixed; left: 50%; bottom: 120px; transform: translateX(-50%); background: var(--ink); color: #fff; font-weight: 800; font-size: 20px; padding: 10px 20px; border-radius: 999px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.on { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Music Box</h1>
+    <button class="pill tab on" data-page="song">🎼 Song</button>
+    <button class="pill tab" data-page="lab">🎤 Voice Lab</button>
+    <div id="insts">
+      <button class="pill" data-inst="bell">🔔 Bell</button>
+      <button class="pill" data-inst="flute">🎵 Flute</button>
+      <button class="pill" data-inst="pluck">🎸 Pluck</button>
+      <button class="pill" data-inst="marimba">🪵 Marimba</button>
+      <button class="pill" data-inst="organ">🎹 Organ</button>
+      <button class="pill" data-inst="voice" id="voiceInst" hidden>🎤 Me</button>
+    </div>
+  </header>
+  <main>
+    <div class="page on" id="page-song"><div id="grid"></div></div>
+    <div class="page" id="page-lab">
+      <div id="lab">
+        <div id="pads"></div>
+        <div id="fx">
+          <button class="pill" data-fx="speed" data-v="chip">🐿️ Chipmunk</button>
+          <button class="pill" data-fx="speed" data-v="giant">🐻 Giant</button>
+          <button class="pill" data-fx="reverse">↩️ Backwards</button>
+          <button class="pill" data-fx="robot">🤖 Robot</button>
+          <button class="pill" data-fx="echo">🏔️ Echo</button>
+          <button class="pill star" data-fx="star">⭐ Sing my notes</button>
+          <button class="pill song" data-fx="song">🎼 In my song</button>
+          <button class="pill" data-fx="delete">🗑️</button>
+        </div>
+        <div id="keys"></div>
+      </div>
+    </div>
+  </main>
+  <footer>
+    <button id="play" class="big" title="Play">▶</button>
+    <button id="clear" title="Clear">💧</button>
+    <button id="random" title="Surprise song">🎲</button>
+    <button id="scale" title="Scale">😊</button>
+    <button id="swing" title="Swing">🪩</button>
+    <div id="tempo"><button id="slower">🐢</button><button id="faster">🐇</button></div>
+    <div id="slots"><button data-slot="0">1</button><button data-slot="1">2</button><button data-slot="2">3</button></div>
+  </footer>
+</div>
+<div id="toast"></div>
+<script id="voicepack"></script>
+<script>
+const STEPS = 16, ROWS = 8, PERC = 3, PADS = 6;
+// Three scales, high note at the top. All of them are consonant, so any pattern sounds fine.
+const SCALES = {
+  happy:  { icon: '😊', notes: [1046.5, 880, 783.99, 659.25, 523.25, 440, 392, 329.63] },        // C major pentatonic
+  spooky: { icon: '👻', notes: [1046.5, 880, 783.99, 659.25, 587.33, 523.25, 440, 392] },        // A minor pentatonic
+  dreamy: { icon: '🌙', notes: [1046.5, 932.33, 830.61, 739.99, 659.25, 587.33, 523.25, 466.16] } // whole tone
+};
+const SCALE_ORDER = ['happy', 'spooky', 'dreamy'];
+const COLORS = ['#FF4F8B', '#FF8C42', '#FFC93C', '#5CD38B', '#58C7F0', '#9B6BFF', '#F06292', '#4DB6AC'];
+const LABELS = ['🐦', '🐱', '🐸', '🐶', '🐮', '🦁', '🐻', '🐘'];
+const PERC_DEF = [{ icon: '🥁', color: '#2B2140' }, { icon: '👏', color: '#8C6A3F' }, { icon: '🪇', color: '#6E7F8C' }];
+const PAD_EMOJI = ['🎤', '🐶', '🐱', '🦖', '🚀', '🍓', '👻', '🌈', '🐸', '⭐', '🎈', '🤖'];
+const INST_NAMES = { bell: '🔔', flute: '🎵', pluck: '🎸', marimba: '🪵', organ: '🎹', voice: '🎤' };
+const BASE = 523.25; // a recorded voice played as-is counts as this note (middle of the grid)
+
+// --- State -------------------------------------------------------------------
+function emptyGrid() {
+  return { notes: Array.from({ length: ROWS }, () => Array(STEPS).fill(false)),
+           perc: Array.from({ length: PERC }, () => Array(STEPS).fill(false)),
+           samp: Array.from({ length: PADS }, () => Array(STEPS).fill(false)) };
+}
+function emptySong() { return { grid: emptyGrid(), bpm: 110, inst: 'bell', scale: 'happy', swing: false }; }
+let songs = [emptySong(), emptySong(), emptySong()], slot = 0;
+try {
+  const v2 = JSON.parse(localStorage.getItem('musicbox-v2') || 'null');
+  if (v2 && v2.songs && v2.songs.length === 3) { songs = v2.songs.map(s => Object.assign(emptySong(), s)); slot = v2.slot || 0; }
+  else {
+    const old = JSON.parse(localStorage.getItem('musicbox-song') || 'null');
+    if (old && old.grid && old.grid.length === ROWS + 1) {
+      songs[0].grid.notes = old.grid.slice(0, ROWS); songs[0].grid.perc[0] = old.grid[ROWS]; songs[0].bpm = old.bpm || 110; songs[0].inst = old.inst || 'bell';
+    }
+  }
+} catch (e) {}
+let song = songs[slot];
+function save() { try { localStorage.setItem('musicbox-v2', JSON.stringify({ songs, slot })); } catch (e) {} }
+
+// samples[i] = { rate, data: Float32Array, emoji, fx: { speed, reverse, robot, echo }, star, inSong } or null
+const samples = Array(PADS).fill(null);
+let selPad = 0, playing = false, step = 0, timer = null, ctx = null, noiseBuf = null;
+
+// --- Storage for voices (IndexedDB keeps the raw audio, localStorage is too small) ---
+const DB = {
+  open() {
+    if (this.p) return this.p;
+    this.p = new Promise((res, rej) => {
+      let r; try { r = indexedDB.open('musicbox', 1); } catch (e) { return rej(e); }
+      r.onupgradeneeded = () => r.result.createObjectStore('samples');
+      r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+    });
+    return this.p;
+  },
+  async put(i, s) { try { const db = await this.open(); const tx = db.transaction('samples', 'readwrite'); if (s) tx.objectStore('samples').put(s, i); else tx.objectStore('samples').delete(i); } catch (e) {} },
+  async loadAll() {
+    try {
+      const db = await this.open();
+      await Promise.all(Array.from({ length: PADS }, (_, i) => new Promise(res => {
+        const r = db.transaction('samples').objectStore('samples').get(i);
+        r.onsuccess = () => { if (r.result && r.result.data && r.result.data.length) samples[i] = Object.assign({ emoji: '🎤', fx: {}, star: false, inSong: false }, r.result); res(); };
+        r.onerror = () => res();
+      })));
+    } catch (e) {}
+  }
+};
+
+// --- Audio -------------------------------------------------------------------
+function audio() {
+  if (!ctx) { try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+  if (ctx && ctx.state === 'suspended') ctx.resume();
+  return ctx;
+}
+function noise(a) {
+  if (!noiseBuf) { noiseBuf = a.createBuffer(1, a.sampleRate, a.sampleRate); const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1; }
+  const s = a.createBufferSource(); s.buffer = noiseBuf; return s;
+}
+function note(freq, when, instName) {
+  const a = audio(); if (!a) return; when = when || a.currentTime; const inst = instName || song.inst;
+  if (inst === 'voice') { const s = starSample(); if (s) playSample(s, when, freq / BASE); return; }
+  const g = a.createGain(); g.connect(a.destination);
+  if (inst === 'bell') {
+    const o = a.createOscillator(), o2 = a.createOscillator(); o.type = 'sine'; o2.type = 'sine'; o.frequency.value = freq; o2.frequency.value = freq * 2.76;
+    const g2 = a.createGain(); g2.gain.value = 0.18; o2.connect(g2).connect(g); o.connect(g);
+    g.gain.setValueAtTime(0.0001, when); g.gain.exponentialRampToValueAtTime(0.35, when + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, when + 1.1);
+    o.start(when); o2.start(when); o.stop(when + 1.2); o2.stop(when + 1.2);
+  } else if (inst === 'flute') {
+    const o = a.createOscillator(); o.type = 'triangle'; o.frequency.value = freq; o.connect(g);
+    g.gain.setValueAtTime(0.0001, when); g.gain.exponentialRampToValueAtTime(0.3, when + 0.06); g.gain.setValueAtTime(0.3, when + 0.2); g.gain.exponentialRampToValueAtTime(0.0001, when + 0.45);
+    o.start(when); o.stop(when + 0.5);
+  } else if (inst === 'marimba') {
+    const o = a.createOscillator(), o2 = a.createOscillator(); o.type = 'sine'; o2.type = 'sine'; o.frequency.value = freq; o2.frequency.value = freq * 4;
+    const g2 = a.createGain(); g2.gain.setValueAtTime(0.25, when); g2.gain.exponentialRampToValueAtTime(0.0001, when + 0.08); o2.connect(g2).connect(g); o.connect(g);
+    g.gain.setValueAtTime(0.0001, when); g.gain.exponentialRampToValueAtTime(0.4, when + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, when + 0.35);
+    o.start(when); o2.start(when); o.stop(when + 0.4); o2.stop(when + 0.4);
+  } else if (inst === 'organ') {
+    const os = [1, 2, 3].map(m => { const o = a.createOscillator(); o.type = 'sine'; o.frequency.value = freq * m; const gg = a.createGain(); gg.gain.value = m === 1 ? 0.22 : m === 2 ? 0.12 : 0.06; o.connect(gg).connect(g); return o; });
+    g.gain.setValueAtTime(0.0001, when); g.gain.exponentialRampToValueAtTime(1, when + 0.02); g.gain.setValueAtTime(1, when + 0.22); g.gain.exponentialRampToValueAtTime(0.0001, when + 0.32);
+    os.forEach(o => { o.start(when); o.stop(when + 0.35); });
+  } else {
+    const o = a.createOscillator(); o.type = 'sawtooth'; o.frequency.value = freq;
+    const f = a.createBiquadFilter(); f.type = 'lowpass'; f.frequency.setValueAtTime(freq * 6, when); f.frequency.exponentialRampToValueAtTime(freq * 1.2, when + 0.3);
+    o.connect(f).connect(g); g.gain.setValueAtTime(0.0001, when); g.gain.exponentialRampToValueAtTime(0.28, when + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, when + 0.5);
+    o.start(when); o.stop(when + 0.55);
+  }
+}
+function perc(i, when) {
+  const a = audio(); if (!a) return; when = when || a.currentTime;
+  const g = a.createGain(); g.connect(a.destination);
+  if (i === 0) {
+    const o = a.createOscillator(); o.type = 'sine';
+    o.frequency.setValueAtTime(160, when); o.frequency.exponentialRampToValueAtTime(45, when + 0.18);
+    g.gain.setValueAtTime(0.9, when); g.gain.exponentialRampToValueAtTime(0.0001, when + 0.25);
+    o.connect(g); o.start(when); o.stop(when + 0.3);
+  } else if (i === 1) {
+    const n = noise(a), f = a.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1800; f.Q.value = 0.8;
+    g.gain.setValueAtTime(0.0001, when);
+    [0, 0.012, 0.024].forEach(t => { g.gain.setValueAtTime(0.7, when + t); g.gain.exponentialRampToValueAtTime(0.1, when + t + 0.011); });
+    g.gain.setValueAtTime(0.6, when + 0.036); g.gain.exponentialRampToValueAtTime(0.0001, when + 0.2);
+    n.connect(f).connect(g); n.start(when); n.stop(when + 0.25);
+  } else {
+    const n = noise(a), f = a.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 6000;
+    g.gain.setValueAtTime(0.35, when); g.gain.exponentialRampToValueAtTime(0.0001, when + 0.07);
+    n.connect(f).connect(g); n.start(when); n.stop(when + 0.1);
+  }
+}
+function sampleBuffer(s) {
+  const a = audio();
+  if (!s.buf || s.bufRev !== !!s.fx.reverse) {
+    s.buf = a.createBuffer(1, s.data.length, s.rate);
+    const d = s.buf.getChannelData(0);
+    if (s.fx.reverse) { for (let i = 0; i < s.data.length; i++) d[i] = s.data[s.data.length - 1 - i]; } else d.set(s.data);
+    s.bufRev = !!s.fx.reverse;
+  }
+  return s.buf;
+}
+function playSample(s, when, rate) {
+  const a = audio(); if (!a || !s) return; when = when || a.currentTime; rate = rate || 1;
+  if (s.fx.speed === 'chip') rate *= 1.6; else if (s.fx.speed === 'giant') rate *= 0.6;
+  const src = a.createBufferSource(); src.buffer = sampleBuffer(s); src.playbackRate.value = rate;
+  let head = src;
+  if (s.fx.robot) {
+    const ring = a.createGain(); ring.gain.value = 0; const lfo = a.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 42;
+    lfo.connect(ring.gain); head.connect(ring); head = ring; lfo.start(when); lfo.stop(when + 6);
+  }
+  const out = a.createGain(); out.gain.value = 0.9; head.connect(out).connect(a.destination);
+  if (s.fx.echo) {
+    const d = a.createDelay(1); d.delayTime.value = 0.26; const fb = a.createGain(); fb.gain.value = 0.42; const wet = a.createGain(); wet.gain.value = 0.5;
+    head.connect(d); d.connect(fb).connect(d); d.connect(wet).connect(a.destination);
+  }
+  src.start(when);
+}
+function starSample() { return samples.find(s => s && s.star) || null; }
+
+// --- Speech prompts (pre-rendered pack if present, else the Windows voice) ----
+const PROMPTS = { ready: 'Get ready...', go: 'Say something!', got: 'Got it!', quiet: 'I did not hear anything. Try again!', nomic: 'I cannot hear the microphone.', star: 'Now your voice can sing!' };
+function say(key) {
+  const text = PROMPTS[key]; const pack = window.VOICE_PACK || {};
+  const a = audio();
+  if (pack[text] && a) {
+    try {
+      const bin = atob(pack[text]); const bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      a.decodeAudioData(bytes.buffer, buf => { const s = a.createBufferSource(); s.buffer = buf; s.connect(a.destination); s.start(); }, () => systemSay(text));
+      return;
+    } catch (e) {}
+  }
+  systemSay(text);
+}
+function systemSay(text) { try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.rate = 0.95; u.pitch = 1.1; speechSynthesis.speak(u); } catch (e) {} }
+function toast(t, ms) { const el = document.getElementById('toast'); el.textContent = t; el.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('on'), ms || 1600); }
+
+// --- Song grid -----------------------------------------------------------------
+const el = document.getElementById('grid'); let rowsDef = [], cells = [], lbls = [], paintMode = true;
+function rowList() {
+  const r = [];
+  for (let i = 0; i < ROWS; i++) r.push({ kind: 'notes', i, icon: LABELS[i], color: COLORS[i] });
+  for (let i = 0; i < PERC; i++) r.push({ kind: 'perc', i, icon: PERC_DEF[i].icon, color: PERC_DEF[i].color });
+  samples.forEach((s, i) => { if (s && s.inSong) r.push({ kind: 'samp', i, icon: s.emoji, color: '#FF8C42' }); });
+  return r;
+}
+function build() {
+  rowsDef = rowList(); el.innerHTML = ''; cells = []; lbls = [];
+  el.style.gridTemplateRows = `repeat(${rowsDef.length}, 1fr)`;
+  rowsDef.forEach((row, r) => {
+    const lbl = document.createElement('div'); lbl.className = 'lbl'; lbl.textContent = row.icon; el.appendChild(lbl); lbls[r] = lbl;
+    cells[r] = [];
+    for (let c = 0; c < STEPS; c++) {
+      const d = document.createElement('div'); d.className = 'cell' + (row.kind !== 'notes' ? ' perc' : '') + (c % 4 === 0 ? ' bar' : '') + (song.grid[row.kind][row.i][c] ? ' on' : '');
+      d.style.setProperty('--note', row.color);
+      d.addEventListener('pointerdown', e => { e.preventDefault(); paintMode = !song.grid[row.kind][row.i][c]; toggle(r, c, paintMode); });
+      d.addEventListener('pointerenter', e => { if (e.buttons || e.pressure > 0) toggle(r, c, paintMode); });
+      el.appendChild(d); cells[r][c] = d;
+    }
+  });
+}
+function trigger(r, when) {
+  const row = rowsDef[r];
+  if (row.kind === 'notes') note(SCALES[song.scale].notes[row.i], when);
+  else if (row.kind === 'perc') perc(row.i, when);
+  else playSample(samples[row.i], when);
+}
+function toggle(r, c, on) {
+  const row = rowsDef[r]; if (song.grid[row.kind][row.i][c] === on) return;
+  song.grid[row.kind][row.i][c] = on; cells[r][c].classList.toggle('on', on); save();
+  if (on && !playing) { trigger(r); flash(r, c); }
+}
+function flash(r, c) {
+  cells[r][c].classList.add('hit'); setTimeout(() => cells[r][c].classList.remove('hit'), 120);
+  lbls[r].classList.remove('bounce'); void lbls[r].offsetWidth; lbls[r].classList.add('bounce');
+}
+
+// --- Transport -----------------------------------------------------------------
+function stepMs() { const base = 60000 / song.bpm / 2; return song.swing ? base * (step % 2 ? 0.68 : 1.32) : base; }
+function tick() {
+  for (let r = 0; r < rowsDef.length; r++) { cells[r][(step + STEPS - 1) % STEPS].classList.remove('head'); cells[r][step].classList.add('head'); }
+  for (let r = 0; r < rowsDef.length; r++) { const row = rowsDef[r]; if (song.grid[row.kind][row.i][step]) { trigger(r); flash(r, step); } }
+  const ms = stepMs(); step = (step + 1) % STEPS;
+  timer = setTimeout(tick, ms);
+}
+function setPlaying(on) {
+  playing = on; const b = document.getElementById('play'); b.textContent = on ? '⏸' : '▶'; b.classList.toggle('on', on);
+  clearTimeout(timer); timer = null;
+  if (on) { audio(); step = 0; tick(); }
+  else cells.forEach(row => row.forEach(d => d.classList.remove('head')));
+}
+document.getElementById('play').onclick = () => setPlaying(!playing);
+document.getElementById('clear').onclick = () => { song.grid = emptyGrid(); build(); save(); };
+document.getElementById('random').onclick = () => {
+  const g = emptyGrid();
+  // A short motif repeated with small changes sounds like a tune rather than noise.
+  const motif = Array.from({ length: 8 }, () => Math.random() < 0.6 ? Math.floor(Math.random() * ROWS) : -1);
+  for (let c = 0; c < STEPS; c++) { let r = motif[c % 8]; if (r >= 0 && c >= 8 && Math.random() < 0.3) r = Math.max(0, Math.min(ROWS - 1, r + (Math.random() < 0.5 ? -1 : 1))); if (r >= 0) g.notes[r][c] = true; }
+  for (let c = 0; c < STEPS; c++) { g.perc[0][c] = c % 4 === 0 || Math.random() < 0.08; g.perc[1][c] = c % 8 === 4; g.perc[2][c] = c % 2 === 1 && Math.random() < 0.7; }
+  samples.forEach((s, i) => { if (s && s.inSong) for (let c = 0; c < STEPS; c++) g.samp[i][c] = Math.random() < 0.1; });
+  song.grid = g; build(); save(); if (!playing) setPlaying(true);
+};
+function setBpm(v) { song.bpm = Math.max(60, Math.min(200, v)); save(); toast(song.bpm <= 80 ? '🐢 Slow' : song.bpm >= 160 ? '🐇 Fast!' : '🚶 Medium', 700); }
+document.getElementById('slower').onclick = () => setBpm(song.bpm - 15);
+document.getElementById('faster').onclick = () => setBpm(song.bpm + 15);
+document.getElementById('scale').onclick = () => {
+  song.scale = SCALE_ORDER[(SCALE_ORDER.indexOf(song.scale) + 1) % SCALE_ORDER.length]; save(); refreshButtons();
+  const a = audio(); const n = SCALES[song.scale].notes; if (a) [7, 5, 3, 1].forEach((i, k) => note(n[i], a.currentTime + k * 0.13));
+};
+document.getElementById('swing').onclick = () => { song.swing = !song.swing; save(); refreshButtons(); };
+document.querySelectorAll('#slots button').forEach(b => b.onclick = () => { if (playing) setPlaying(false); slot = +b.dataset.slot; song = songs[slot]; save(); build(); refreshButtons(); toast('Song ' + (slot + 1), 700); });
+document.querySelectorAll('.pill[data-inst]').forEach(b => b.onclick = () => { song.inst = b.dataset.inst; save(); refreshButtons(); note(BASE); });
+function refreshButtons() {
+  document.querySelectorAll('.pill[data-inst]').forEach(x => x.classList.toggle('on', x.dataset.inst === song.inst));
+  document.getElementById('voiceInst').hidden = !starSample();
+  if (song.inst === 'voice' && !starSample()) { song.inst = 'bell'; document.querySelector('.pill[data-inst=bell]').classList.add('on'); }
+  document.getElementById('scale').textContent = SCALES[song.scale].icon;
+  document.getElementById('swing').classList.toggle('on', song.swing);
+  document.querySelectorAll('#slots button').forEach(x => x.classList.toggle('on', +x.dataset.slot === slot));
+}
+
+// --- Voice Lab -------------------------------------------------------------------
+const padsEl = document.getElementById('pads'), padEls = [];
+function buildPads() {
+  padsEl.innerHTML = ''; padEls.length = 0;
+  for (let i = 0; i < PADS; i++) {
+    const p = document.createElement('div'); p.className = 'pad'; p.dataset.i = i;
+    p.innerHTML = '<div class="top"><div class="emoji"></div><div class="status"></div><button class="mic" title="Record">🎤</button></div><canvas></canvas><div class="level"><i></i></div><div class="flags"></div>';
+    p.querySelector('.emoji').addEventListener('pointerdown', e => { e.stopPropagation(); const s = samples[i]; if (!s) return; s.emoji = PAD_EMOJI[(PAD_EMOJI.indexOf(s.emoji) + 1) % PAD_EMOJI.length]; DB.put(i, plain(s)); drawPad(i); build(); });
+    p.querySelector('.mic').addEventListener('pointerdown', e => { e.stopPropagation(); selPad = i; drawPads(); record(i); });
+    p.addEventListener('pointerdown', () => { selPad = i; drawPads(); if (samples[i]) playSample(samples[i]); });
+    padsEl.appendChild(p); padEls[i] = p;
+  }
+}
+function plain(s) { return { rate: s.rate, data: s.data, emoji: s.emoji, fx: s.fx, star: s.star, inSong: s.inSong }; }
+function drawPads() { for (let i = 0; i < PADS; i++) drawPad(i); refreshFx(); }
+function drawPad(i) {
+  const p = padEls[i], s = samples[i]; p.classList.toggle('sel', i === selPad);
+  p.querySelector('.emoji').textContent = s ? s.emoji : '·';
+  if (!p.classList.contains('rec')) p.querySelector('.status').textContent = s ? 'Tap to hear' : 'Tap 🎤 and talk';
+  const flags = []; if (s) { if (s.star) flags.push('⭐'); if (s.inSong) flags.push('🎼'); if (s.fx.speed === 'chip') flags.push('🐿️'); if (s.fx.speed === 'giant') flags.push('🐻'); if (s.fx.reverse) flags.push('↩️'); if (s.fx.robot) flags.push('🤖'); if (s.fx.echo) flags.push('🏔️'); }
+  p.querySelector('.flags').innerHTML = flags.map(f => '<span>' + f + '</span>').join('');
+  const cv = p.querySelector('canvas'); const W = cv.width = cv.clientWidth || 300, H = cv.height = cv.clientHeight || 60; const g = cv.getContext('2d'); g.clearRect(0, 0, W, H);
+  if (!s) { g.fillStyle = '#f3eefc'; g.fillRect(0, H / 2 - 2, W, 4); return; }
+  g.fillStyle = COLORS[i % COLORS.length]; const n = 90, chunk = Math.max(1, Math.floor(s.data.length / n)), bw = W / n;
+  for (let k = 0; k < n; k++) { let m = 0; for (let j = k * chunk; j < (k + 1) * chunk && j < s.data.length; j += 4) m = Math.max(m, Math.abs(s.data[j])); const h = Math.max(3, m * H); g.fillRect(k * bw + 1, (H - h) / 2, bw - 2, h); }
+}
+function refreshFx() {
+  const s = samples[selPad];
+  document.querySelectorAll('#fx .pill').forEach(b => {
+    const f = b.dataset.fx; let on = false;
+    if (s) { if (f === 'speed') on = s.fx.speed === b.dataset.v; else if (f === 'star') on = s.star; else if (f === 'song') on = s.inSong; else if (f !== 'delete') on = !!s.fx[f]; }
+    b.classList.toggle('on', on); b.disabled = !s; b.style.opacity = s ? 1 : 0.4;
+  });
+}
+document.querySelectorAll('#fx .pill').forEach(b => b.onclick = () => {
+  const s = samples[selPad]; if (!s) return; const f = b.dataset.fx;
+  if (f === 'delete') { samples[selPad] = null; DB.put(selPad, null); drawPads(); refreshButtons(); build(); return; }
+  if (f === 'speed') s.fx.speed = s.fx.speed === b.dataset.v ? 'normal' : b.dataset.v;
+  else if (f === 'star') { const was = s.star; samples.forEach(x => { if (x) x.star = false; }); s.star = !was; if (s.star) { song.inst = 'voice'; save(); say('star'); } samples.forEach((x, i) => { if (x && i !== selPad) DB.put(i, plain(x)); }); }
+  else if (f === 'song') s.inSong = !s.inSong;
+  else s.fx[f] = !s.fx[f];
+  DB.put(selPad, plain(s)); drawPads(); refreshButtons(); build();
+  if (f !== 'song' && f !== 'star') playSample(s);
+});
+
+let recording = false;
+async function record(i) {
+  if (recording) return; const a = audio(); if (!a || !navigator.mediaDevices) { say('nomic'); return; }
+  const p = padEls[i], status = p.querySelector('.status'), level = p.querySelector('.level i');
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); }
+  catch (e) { status.textContent = 'No microphone'; say('nomic'); return; }
+  recording = true; p.classList.add('rec'); status.textContent = 'Ready…'; say('ready');
+  const src = a.createMediaStreamSource(stream), proc = a.createScriptProcessor(2048, 1, 1), sink = a.createGain(); sink.gain.value = 0;
+  const chunks = []; let armed = false, heard = false, quiet = 0, total = 0; const rate = a.sampleRate;
+  const finish = () => {
+    if (!recording) return; recording = false;
+    try { proc.disconnect(); src.disconnect(); } catch (e) {} stream.getTracks().forEach(t => t.stop());
+    p.classList.remove('rec'); level.style.width = '0';
+    const s = trim(concat(chunks), rate);
+    if (!s) { status.textContent = 'Try again'; say('quiet'); drawPad(i); return; }
+    const old = samples[i];
+    samples[i] = { rate, data: s, emoji: old ? old.emoji : PAD_EMOJI[i % PAD_EMOJI.length], fx: old ? old.fx : {}, star: old ? old.star : false, inSong: old ? old.inSong : false };
+    DB.put(i, plain(samples[i])); say('got'); drawPads(); refreshButtons(); build();
+    setTimeout(() => playSample(samples[i]), 700);
+  };
+  proc.onaudioprocess = e => {
+    if (!armed) return;
+    const d = e.inputBuffer.getChannelData(0); let sum = 0; for (let k = 0; k < d.length; k++) sum += d[k] * d[k]; const rms = Math.sqrt(sum / d.length);
+    level.style.width = Math.min(100, rms * 400) + '%';
+    chunks.push(new Float32Array(d)); total += d.length;
+    if (rms > 0.02) { heard = true; quiet = 0; } else if (heard) quiet += d.length;
+    if ((heard && quiet > rate * 0.7) || total > rate * 4) finish();
+  };
+  src.connect(proc); proc.connect(sink).connect(a.destination);
+  setTimeout(() => { if (!recording) return; armed = true; status.textContent = '🔴 Talk!'; say('go'); }, 900);
+  setTimeout(() => { if (recording) finish(); }, 7000);
+}
+function concat(chunks) { const n = chunks.reduce((s, c) => s + c.length, 0); const out = new Float32Array(n); let o = 0; chunks.forEach(c => { out.set(c, o); o += c.length; }); return out; }
+function trim(d, rate) {
+  let peak = 0; for (let i = 0; i < d.length; i++) peak = Math.max(peak, Math.abs(d[i]));
+  if (peak < 0.02) return null;
+  const th = Math.max(0.01, peak * 0.06), pad = Math.floor(rate * 0.06);
+  let s = 0, e = d.length - 1; while (s < e && Math.abs(d[s]) < th) s++; while (e > s && Math.abs(d[e]) < th) e--;
+  s = Math.max(0, s - pad); e = Math.min(d.length, e + pad + 1);
+  if (e - s < rate * 0.08) return null;
+  const out = new Float32Array(e - s); const gain = 0.9 / peak; const fade = Math.floor(rate * 0.008);
+  for (let i = 0; i < out.length; i++) { let g = gain; if (i < fade) g *= i / fade; if (out.length - i < fade) g *= (out.length - i) / fade; out[i] = d[s + i] * g; }
+  return out;
+}
+
+// Keyboard: eight animal keys that play the current instrument, or the selected voice, up the scale.
+const keysEl = document.getElementById('keys');
+LABELS.slice().reverse().forEach((icon, k) => {
+  const r = ROWS - 1 - k; const b = document.createElement('div'); b.className = 'key'; b.textContent = icon; b.style.setProperty('--k', COLORS[r]);
+  b.addEventListener('pointerdown', e => {
+    e.preventDefault(); const f = SCALES[song.scale].notes[r]; const s = samples[selPad];
+    if (s) playSample(s, 0, f / BASE); else note(f);
+    b.classList.add('hit'); setTimeout(() => b.classList.remove('hit'), 120);
+  });
+  keysEl.appendChild(b);
+});
+
+// Pages
+document.querySelectorAll('.pill.tab').forEach(b => b.onclick = () => {
+  document.querySelectorAll('.pill.tab').forEach(x => x.classList.toggle('on', x === b));
+  document.querySelectorAll('.page').forEach(pg => pg.classList.toggle('on', pg.id === 'page-' + b.dataset.page));
+  document.getElementById('insts').style.visibility = b.dataset.page === 'song' ? 'visible' : 'hidden';
+  if (b.dataset.page === 'lab') drawPads();
+});
+
+buildPads(); build(); refreshButtons();
+DB.loadAll().then(() => { drawPads(); refreshButtons(); build(); });
+window.MB = { samples, song: () => song, build, playSample, trim, record, note, perc, setPlaying, DB };
+</script>
+</body>
+</html>

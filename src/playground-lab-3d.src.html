@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Playground Lab</title>
+<!--
+  Playground Lab. A 3D physics playground for a five-year-old, one file, offline, no API.
+  Bundled: three.js r149 (MIT) for drawing, cannon-es 0.20 (MIT) for the physics.
+  A slingshot, a counterweight catapult, a seesaw, a trampoline, a slide into a rack of bowling pins, dominoes, and a
+  toolbox of balls, crates, balloons and feathers. She drags anything with a finger; the slingshot and catapult fire
+  for real. Moon gravity, slow motion and wind are the experiment knobs. Sounds are synthesized.
+-->
+<style>
+  :root { --ink: #2B2140; --pink: #FF4F8B; --sun: #FFC93C; --sky: #58C7F0; --leaf: #5CD38B; --grape: #9B6BFF; }
+  html, body { margin: 0; height: 100%; background: #9BDDFA; overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); }
+  body { touch-action: none; user-select: none; -webkit-user-select: none; }
+  #c { display: block; width: 100vw; height: 100vh; touch-action: none; }
+  .rail { position: fixed; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 8px; padding: 10px 8px; border-radius: 999px; background: rgba(43,33,64,.38); backdrop-filter: blur(8px); }
+  #tools { left: max(10px, env(safe-area-inset-left)); } #knobs { right: max(10px, env(safe-area-inset-right)); }
+  .rail button { width: 58px; height: 58px; border-radius: 50%; border: 3px solid var(--ink); background: rgba(250,246,255,.94); font-size: 30px; cursor: pointer; display: grid; place-items: center; padding: 0; touch-action: none; }
+  .rail button:active { transform: scale(.92); } .rail button.on { background: var(--sun); }
+  #fire { position: fixed; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); border: 4px solid var(--ink); border-radius: 999px; background: var(--pink); color: #fff; font: 900 26px system-ui, sans-serif; padding: 12px 30px; cursor: pointer; touch-action: none; }
+  #fire:active { transform: translateX(-50%) scale(.95); }
+  #toast { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); background: #fff; border: 3px solid var(--ink); border-radius: 999px; padding: 6px 20px; font-size: 22px; font-weight: 900; opacity: 0; transition: opacity .3s; pointer-events: none; }
+  #toast.on { opacity: 1; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="tools" class="rail" aria-label="Toolbox">
+  <button data-add="beach" title="Beach ball">🏐</button><button data-add="bowling" title="Bowling ball">🎳</button><button data-add="tennis" title="Bouncy ball">🎾</button>
+  <button data-add="crate" title="Crate">📦</button><button data-add="pins" title="More pins">🔺</button><button data-add="balloon" title="Balloon">🎈</button>
+  <button data-add="feather" title="Feather">🪶</button><button data-add="broom" title="Clear">🧹</button>
+</div>
+<div id="knobs" class="rail" aria-label="Experiments">
+  <button id="moon" title="Moon gravity">🌙</button><button id="slow" title="Slow motion">🐢</button><button id="wind" title="Wind">💨</button>
+  <button id="look" title="Look from the other side">🔄</button><button id="sound" title="Sound">🔊</button><button id="reset" title="Set it all up again">🔁</button>
+</div>
+<button id="fire">Fire the catapult! 🚀</button>
+<div id="toast"></div>
+<script>/*THREE_JS*/</script>
+<script>const CANNON = (() => { const module = { exports: {} }; const exports = module.exports; /*CANNON_ES*/ return module.exports; })();</script>
+<script>
+const cv = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas: cv, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5)); renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x9BDDFA); scene.fog = new THREE.Fog(0x9BDDFA, 40, 90);
+const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 200);
+const CAMS = [{ pos: [0, 9, 19], at: [0, 1.6, 0] }, { pos: [0, 9, -19], at: [0, 1.6, 0] }]; let camIdx = 0;
+function setCam() { const c = CAMS[camIdx]; camera.position.set(...c.pos); camera.lookAt(...c.at); }
+setCam();
+scene.add(new THREE.HemisphereLight(0xdff5ff, 0x4a8f4a, 0.9));
+const sun = new THREE.DirectionalLight(0xfff2d0, 1.1); sun.position.set(-10, 18, 8); sun.castShadow = true; sun.shadow.mapSize.set(1024, 1024);
+Object.assign(sun.shadow.camera, { left: -18, right: 18, top: 18, bottom: -18, near: 1, far: 50 }); scene.add(sun);
+
+// ---------------------------------------------------------------------------
+// Physics
+// ---------------------------------------------------------------------------
+const world = new CANNON.World({ gravity: new CANNON.Vec3(0, -9.82, 0) });
+world.broadphase = new CANNON.SAPBroadphase(world); world.allowSleep = false;
+(world.solver).iterations = 14;
+const MAT = { ground: new CANNON.Material('ground'), tramp: new CANNON.Material('tramp'), ball: new CANNON.Material('ball'), thing: new CANNON.Material('thing'), slide: new CANNON.Material('slide') };
+world.defaultContactMaterial.friction = 0.4; world.defaultContactMaterial.restitution = 0.15;
+world.addContactMaterial(new CANNON.ContactMaterial(MAT.tramp, MAT.ball, { friction: 0.3, restitution: 1.15 }));
+world.addContactMaterial(new CANNON.ContactMaterial(MAT.tramp, MAT.thing, { friction: 0.3, restitution: 0.8 }));
+world.addContactMaterial(new CANNON.ContactMaterial(MAT.slide, MAT.ball, { friction: 0.02, restitution: 0.05 }));
+world.addContactMaterial(new CANNON.ContactMaterial(MAT.ground, MAT.ball, { friction: 0.25, restitution: 0.35 }));
+let slow = false, moon = false, muted = false;
+const things = [];          // { body, mesh, kind } she can add or knock about
+const fixtures = [];        // static or scripted parts of the playground
+const meshes = new Map();   // body -> mesh
+
+// ---------------------------------------------------------------------------
+// Sound (synthesized)
+// ---------------------------------------------------------------------------
+let actx = null; const lastSfx = {};
+function audio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } if (actx && actx.state === 'suspended') actx.resume(); return actx; }
+function tone(f, dur, type, vol, slide) {
+  const a = audio(); if (!a || muted) return;
+  const o = a.createOscillator(), gn = a.createGain(), t = a.currentTime;
+  o.type = type || 'sine'; o.frequency.setValueAtTime(f, t); if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, f + slide), t + dur);
+  gn.gain.setValueAtTime(vol || 0.15, t); gn.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(gn).connect(a.destination); o.start(t); o.stop(t + dur + 0.02);
+}
+function sfx(name, strength) {
+  const now = performance.now(); if (lastSfx[name] && now - lastSfx[name] < 70) return; lastSfx[name] = now;
+  const v = Math.min(0.35, 0.05 + (strength || 0) * 0.03);
+  ({ ball: () => tone(220, 0.12, 'sine', v, -120), pin: () => tone(900, 0.08, 'square', v * 0.6, 300), crate: () => tone(120, 0.15, 'triangle', v, -60),
+     boing: () => tone(180, 0.35, 'sine', 0.25, 400), twang: () => tone(300, 0.3, 'sawtooth', 0.2, 200), whoosh: () => tone(500, 0.4, 'triangle', 0.2, -400) })[name]();
+}
+
+// ---------------------------------------------------------------------------
+// Shapes: each kind makes a body and a mesh
+// ---------------------------------------------------------------------------
+const COL = { beach: 0xFF4F8B, bowling: 0x2B2140, tennis: 0xC8F542, crate: 0xC98B4F, balloon: 0xFF6B6B, feather: 0xFFFFFF, pin: 0xFFFFFF, domino: 0x9B6BFF };
+const lam = (c, extra) => new THREE.MeshLambertMaterial({ color: c, ...(extra || {}) });
+function sphereMesh(r, color, stripes) {
+  const m = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 16), lam(color));
+  if (stripes) { const s = new THREE.Mesh(new THREE.SphereGeometry(r * 1.01, 24, 16, 0, Math.PI / 3), lam(0xffffff)); m.add(s); const s2 = s.clone(); s2.rotation.y = Math.PI * 2 / 3; m.add(s2); const s3 = s.clone(); s3.rotation.y = Math.PI * 4 / 3; m.add(s3); }
+  return m;
+}
+function boxMesh(w, h, d, color) { return new THREE.Mesh(new THREE.BoxGeometry(w, h, d), lam(color)); }
+function pinMesh() {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.17, 0.75, 14), lam(0xffffff)); body.position.y = -0.1; g.add(body);
+  const neck = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 10), lam(0xffffff)); neck.position.y = 0.36; g.add(neck);
+  for (const y of [0.05, 0.17]) { const band = new THREE.Mesh(new THREE.CylinderGeometry(0.155, 0.16, 0.05, 14), lam(0xFF4F8B)); band.position.y = y; g.add(band); }
+  return g;
+}
+const KINDS = {
+  beach:   { r: 0.6,  mass: 0.3,  mat: 'ball',  mesh: () => sphereMesh(0.6, COL.beach, true) },
+  bowling: { r: 0.42, mass: 7,    mat: 'ball',  mesh: () => sphereMesh(0.42, COL.bowling) },
+  tennis:  { r: 0.3,  mass: 0.4,  mat: 'ball',  mesh: () => sphereMesh(0.3, COL.tennis) },
+  crate:   { box: [0.45, 0.45, 0.45], mass: 3, mat: 'thing', mesh: () => boxMesh(0.9, 0.9, 0.9, COL.crate) },
+  balloon: { r: 0.5,  mass: 0.05, mat: 'thing', mesh: () => sphereMesh(0.5, COL.balloon), damping: 0.9, lift: 0.045 },
+  feather: { box: [0.35, 0.03, 0.12], mass: 0.03, mat: 'thing', mesh: () => boxMesh(0.7, 0.06, 0.24, COL.feather), damping: 0.97 },
+  pin:     { cyl: [0.14, 0.17, 0.95], mass: 0.5, mat: 'thing', mesh: pinMesh },
+  domino:  { box: [0.07, 0.4, 0.25], mass: 0.6, mat: 'thing', mesh: () => boxMesh(0.14, 0.8, 0.5, COL.domino) }
+};
+function add(kind, x, y, z) {
+  const k = KINDS[kind];
+  const shape = k.r ? new CANNON.Sphere(k.r) : k.box ? new CANNON.Box(new CANNON.Vec3(...k.box)) : new CANNON.Cylinder(k.cyl[0], k.cyl[1], k.cyl[2], 12);
+  const body = new CANNON.Body({ mass: k.mass, shape, position: new CANNON.Vec3(x, y, z), material: MAT[k.mat], linearDamping: k.damping || 0.01, angularDamping: k.damping || 0.05 });
+  body.kind = kind; world.addBody(body);
+  const mesh = k.mesh(); mesh.castShadow = true; mesh.traverse(o => { o.castShadow = true; }); scene.add(mesh); meshes.set(body, mesh);
+  things.push({ body, mesh, kind }); return body;
+}
+function remove(t) { world.removeBody(t.body); scene.remove(t.mesh); meshes.delete(t.body); }
+function fixture(body, mesh) { world.addBody(body); if (mesh) { mesh.receiveShadow = true; mesh.castShadow = true; scene.add(mesh); meshes.set(body, mesh); } fixtures.push(body); return body; }
+function staticBox(x, y, z, w, h, d, color, opts) {
+  const b = new CANNON.Body({ mass: 0, shape: new CANNON.Box(new CANNON.Vec3(w / 2, h / 2, d / 2)), position: new CANNON.Vec3(x, y, z), material: (opts && opts.mat) || MAT.ground });
+  if (opts && opts.rz) b.quaternion.setFromEuler(0, 0, opts.rz);
+  return fixture(b, boxMesh(w, h, d, color));
+}
+
+// ---------------------------------------------------------------------------
+// The playground
+// ---------------------------------------------------------------------------
+let sling, catapult, seesaw;
+function build() {
+  for (const t of things) remove(t); things.length = 0;
+  for (const b of fixtures) { world.removeBody(b); const m = meshes.get(b); if (m) { scene.remove(m); meshes.delete(b); } } fixtures.length = 0;
+  for (const c of [...world.constraints]) world.removeConstraint(c);
+  // Ground.
+  const ground = new CANNON.Body({ mass: 0, shape: new CANNON.Plane(), material: MAT.ground }); ground.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+  const gm = new THREE.Mesh(new THREE.PlaneGeometry(120, 120), lam(0x5CD38B)); gm.rotation.x = -Math.PI / 2; fixture(ground, gm);
+  // Low fences at the back and front so things do not roll away.
+  staticBox(0, 0.3, -7, 40, 0.6, 0.2, 0xE7B36A); staticBox(0, 0.3, 7, 40, 0.6, 0.2, 0xE7B36A);
+  staticBox(-14, 0.3, 0, 0.2, 0.6, 14, 0xE7B36A); staticBox(14, 0.3, 0, 0.2, 0.6, 14, 0xE7B36A);
+  // Slingshot on the left: a forked post, an elastic, a ball above the fork.
+  staticBox(-10, 1, 3.3, 0.25, 2, 0.25, 0x8B5A2B);
+  const fork = new THREE.Group(); for (const s of [-1, 1]) { const arm = boxMesh(0.2, 1, 0.2, 0x8B5A2B); arm.position.set(s * 0.35, 2.4, 3.3); arm.rotation.z = -s * 0.5; fork.add(arm); } scene.add(fork); sling = { anchor: new CANNON.Vec3(-10, 2.8, 3.3), forkMesh: fork, ball: null, spring: null, pulled: false };
+  sling.anchorBody = new CANNON.Body({ mass: 0, position: sling.anchor.clone() }); world.addBody(sling.anchorBody); fixtures.push(sling.anchorBody);
+  loadSling();
+  // Catapult: post, hinged arm, counterweight on a rope, a latch. Cup end on the left so the ball flies right.
+  catapult = { post: staticBox(-5, 1.6, 0, 0.3, 3.2, 0.3, 0x8E5BD6) };
+  catapult.post.collisionFilterGroup = 2;   // the arm and weight swing through the post
+  const arm = new CANNON.Body({ mass: 2, material: MAT.thing, angularDamping: 0.02, collisionFilterMask: 1 });
+  arm.addShape(new CANNON.Box(new CANNON.Vec3(2.4, 0.07, 0.25)));
+  arm.addShape(new CANNON.Box(new CANNON.Vec3(0.06, 0.25, 0.3)), new CANNON.Vec3(-2.6, 0.25, 0));      // cup lip at the long end
+  arm.addShape(new CANNON.Box(new CANNON.Vec3(0.08, 0.14, 0.32)), new CANNON.Vec3(-1.5, 0.14, 0));     // inner lip so the ball sits in a cup
+  const armMesh = new THREE.Group(); const a1 = boxMesh(4.8, 0.14, 0.5, 0xA87B4A); armMesh.add(a1);
+  const lip = boxMesh(0.12, 0.5, 0.6, 0xA87B4A); lip.position.set(-2.6, 0.25, 0); armMesh.add(lip); const lip2 = boxMesh(0.16, 0.28, 0.64, 0xA87B4A); lip2.position.set(-1.5, 0.14, 0); armMesh.add(lip2);
+  catapult.arm = fixture(arm, armMesh);
+  const weight = new CANNON.Body({ mass: 35, shape: new CANNON.Box(new CANNON.Vec3(0.45, 0.45, 0.45)), material: MAT.thing, collisionFilterMask: 1 });
+  catapult.weight = fixture(weight, boxMesh(0.9, 0.9, 0.9, 0x6E6E80));
+  catapult.hingeAt = new CANNON.Vec3(-5, 3.1, 0); catapult.pose = 0.78;
+  armCatapult();
+  // Trampoline.
+  staticBox(-1, 0.25, 0, 2.4, 0.5, 2.4, 0x2B2140, { mat: MAT.tramp });
+  const tm = meshes.get(fixtures[fixtures.length - 1]); const pad = boxMesh(2.0, 0.08, 2.0, 0xFF4F8B); pad.position.y = 0.27; tm.add(pad);
+  // Seesaw: plank on a hinge.
+  staticBox(2.6, 0.45, 0, 0.6, 0.9, 0.6, 0xFF8C42);
+  const plank = new CANNON.Body({ mass: 1.5, shape: new CANNON.Box(new CANNON.Vec3(2, 0.06, 0.5)), position: new CANNON.Vec3(2.6, 1.0, 0), material: MAT.thing });
+  seesaw = fixture(plank, boxMesh(4, 0.12, 1, 0xE7B36A));
+  world.addConstraint(new CANNON.HingeConstraint(plank, catapult.post, { pivotA: new CANNON.Vec3(0, 0, 0), pivotB: new CANNON.Vec3(7.6, -0.6, 0), axisA: new CANNON.Vec3(0, 0, 1), axisB: new CANNON.Vec3(0, 0, 1) }));
+  // Dominoes in front of the seesaw.
+  for (let i = 0; i < 6; i++) add('domino', 1.4 + i * 0.5, 0.4, 3.2);
+  // Slide on the right, down to the left, and a triangle of pins where it lands.
+  staticBox(11.6, 3.75, 0, 2.2, 0.15, 1.6, 0xE7B36A); staticBox(12.6, 1.9, 0.7, 0.2, 3.8, 0.2, 0x8E5BD6); staticBox(12.6, 1.9, -0.7, 0.2, 3.8, 0.2, 0x8E5BD6);
+  staticBox(8.8, 1.95, 0, 5, 0.14, 1.4, 0x58C7F0, { rz: 0.85, mat: MAT.slide });
+  for (const s of [-1, 1]) staticBox(8.8, 2.15, s * 0.75, 5, 0.3, 0.1, 0x3BA3D1, { rz: 0.85 });
+  rackPins(5.2, 0);
+  // A tree, painted only.
+  const trunk = boxMesh(0.5, 3, 0.5, 0x8B5A2B); trunk.position.set(4.5, 1.5, -5); scene.add(trunk);
+  for (const [x, y, z, r] of [[4.5, 4, -5, 1.6], [3.5, 3.2, -5, 1.1], [5.6, 3.3, -5, 1.1]]) { const c = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), lam(0x4CBB78)); c.position.set(x, y, z); c.castShadow = true; scene.add(c); }
+  world.gravity.set(0, moon ? -1.62 : -9.82, 0);
+}
+function rackPins(x, z) { for (const [dx, dz] of [[0, 0], [0.5, -0.3], [0.5, 0.3], [1.0, -0.6], [1.0, 0], [1.0, 0.6]]) add('pin', x + dx, 0.5, z + dz); }
+function loadSling() {
+  const b = add('tennis', sling.anchor.x, sling.anchor.y, sling.anchor.z);
+  b.linearDamping = 0.02; sling.ball = b;
+  sling.spring = new CANNON.Spring(b, sling.anchorBody, { restLength: 0.05, stiffness: 80, damping: 1.5, localAnchorA: new CANNON.Vec3(0, 0, 0), localAnchorB: new CANNON.Vec3(0, 0, 0) });
+  sling.pulled = false; sling.released = false;
+}
+function fireSling() {
+  if (!sling.spring || sling.released) return;
+  const d = sling.ball.position.vsub(sling.anchor); if (d.length() < 0.4) { sling.pulled = false; return; }
+  sfx('twang'); sling.released = true; sling.releaseSteps = 0; sling.pulled = false;
+}
+function releaseSling() { sling.spring = null; sling.released = false; setTimeout(loadSling, 900); }
+function armCatapult() {
+  for (const c of ['hinge', 'rope', 'latch']) if (catapult[c]) { world.removeConstraint(catapult[c]); catapult[c] = null; }
+  const th = catapult.pose, hp = catapult.hingeAt, arm = catapult.arm, w = catapult.weight;
+  // Arm local: +x toward the counterweight (short) end offset 0.8 from the hinge, -x toward the cup (long) end.
+  arm.quaternion.setFromEuler(0, 0, th); arm.velocity.set(0, 0, 0); arm.angularVelocity.set(0, 0, 0);
+  const rotX = (lx, ly) => new CANNON.Vec3(hp.x + lx * Math.cos(th) - ly * Math.sin(th), hp.y + lx * Math.sin(th) + ly * Math.cos(th), 0);   // hinge is at arm-local (0.8,0)
+  arm.position.copy(rotX(-0.8, 0));
+  catapult.hinge = new CANNON.HingeConstraint(arm, catapult.post, { pivotA: new CANNON.Vec3(0.8, 0, 0), pivotB: new CANNON.Vec3(0, 1.5, 0), axisA: new CANNON.Vec3(0, 0, 1), axisB: new CANNON.Vec3(0, 0, 1) });
+  const shortEnd = rotX(2.2 - 0.8, 0);
+  w.position.set(shortEnd.x, shortEnd.y - 1.0, 0); w.velocity.set(0, 0, 0); w.angularVelocity.set(0, 0, 0); w.quaternion.set(0, 0, 0, 1);
+  catapult.rope = new CANNON.PointToPointConstraint(arm, new CANNON.Vec3(2.2, 0, 0), w, new CANNON.Vec3(0, 1.0, 0), 1e5);
+  catapult.latch = new CANNON.PointToPointConstraint(arm, new CANNON.Vec3(-2.3, 0, 0), catapult.post, catapult.post.pointToLocalFrame(rotX(-2.3 - 0.8, 0)), 1e6);
+  world.addConstraint(catapult.hinge); world.addConstraint(catapult.rope); world.addConstraint(catapult.latch);
+  const seat = rotX(-2.05 - 0.8, 0.6); catapult.ball = add('bowling', seat.x, seat.y, 0); catapult.ball.mass = 2.5; catapult.ball.updateMassProperties();
+  catapult.armed = true;
+}
+function fireCatapult() {
+  if (!catapult.armed) { armCatapult(); return; }
+  world.removeConstraint(catapult.latch); catapult.latch = null; catapult.armed = false; sfx('whoosh');
+  document.getElementById('fire').textContent = 'Set it up again 🔁'; setTimeout(() => { document.getElementById('fire').textContent = 'Fire the catapult! 🚀'; }, 1200);
+}
+
+// ---------------------------------------------------------------------------
+// Finger: raycast to grab, then a point constraint that follows the finger on a camera-facing plane.
+// ---------------------------------------------------------------------------
+const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
+const jointBody = new CANNON.Body({ mass: 0, type: CANNON.Body.STATIC }); world.addBody(jointBody);
+let grab = null;      // { body, constraint, plane }
+function pointerNdc(e) { const r = cv.getBoundingClientRect(); ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); ray.setFromCamera(ndc, camera); }
+cv.addEventListener('pointerdown', e => {
+  audio(); pointerNdc(e);
+  const candidates = [...meshes.entries()].filter(([b]) => b.mass > 0).map(([b, m]) => m);
+  const hits = ray.intersectObjects(candidates, true); if (!hits.length) return;
+  let m = hits[0].object; while (m.parent && !meshes.has(bodyOf(m))) m = m.parent;
+  const body = bodyOf(m); if (!body || body === catapult.arm || body === catapult.weight) return;
+  cv.setPointerCapture(e.pointerId);
+  const p = hits[0].point, pivot = body.pointToLocalFrame(new CANNON.Vec3(p.x, p.y, p.z));
+  jointBody.position.set(p.x, p.y, p.z);
+  const c = new CANNON.PointToPointConstraint(body, pivot, jointBody, new CANNON.Vec3(0, 0, 0), body.mass * 60 + 20);
+  world.addConstraint(c);
+  const normal = new THREE.Vector3(); camera.getWorldDirection(normal);
+  grab = { body, constraint: c, plane: new THREE.Plane().setFromNormalAndCoplanarPoint(normal, p) };
+  if (body === sling.ball) sling.pulled = true;
+});
+cv.addEventListener('pointermove', e => {
+  if (!grab) return; pointerNdc(e); const p = new THREE.Vector3();
+  if (ray.ray.intersectPlane(grab.plane, p)) { jointBody.position.set(p.x, Math.max(0.3, p.y), p.z); }
+});
+function endGrab() { if (!grab) return; world.removeConstraint(grab.constraint); const b = grab.body; grab = null; if (b === sling.ball && sling.pulled) fireSling(); }
+cv.addEventListener('pointerup', endGrab); cv.addEventListener('pointercancel', endGrab);
+function bodyOf(mesh) { for (const [b, m] of meshes) if (m === mesh) return b; return null; }
+
+world.addEventListener('postStep', () => {
+  if (sling.spring) { sling.spring.applyForce(); if (sling.released && (sling.ball.position.x > sling.anchor.x + 0.3 || ++sling.releaseSteps > 240)) releaseSling(); }
+  for (const t of things) {
+    if (t.kind === 'balloon') t.body.applyForce(new CANNON.Vec3(0, -world.gravity.y * t.body.mass * 1.6, 0), t.body.position);
+    if (t.kind === 'feather') t.body.applyForce(new CANNON.Vec3(Math.sin(performance.now() / 400) * 0.02, 0, 0), t.body.position);
+  }
+});
+world.addEventListener('beginContact', e => {
+  const a = e.bodyA, b = e.bodyB, s = a.velocity.vsub(b.velocity).length(); if (s < 1.2) return;
+  const k = (a.kind || '') + '|' + (b.kind || ''), mats = [a.material, b.material];
+  if (mats.includes(MAT.tramp)) sfx('boing');
+  else if (/pin|domino/.test(k)) sfx('pin', s);
+  else if (/crate/.test(k) || a === catapult.weight || b === catapult.weight) sfx('crate', s);
+  else if (/beach|bowling|tennis/.test(k)) sfx('ball', s);
+});
+
+// ---------------------------------------------------------------------------
+// Buttons
+// ---------------------------------------------------------------------------
+function toast(t) { const el = document.getElementById('toast'); el.textContent = t; el.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('on'), 1600); }
+function spawnSpot() { return [Math.random() * 6 - 3, 6 + Math.random() * 2, (Math.random() - 0.5) * 3]; }
+document.querySelectorAll('#tools button').forEach(b => b.addEventListener('pointerdown', e => {
+  e.preventDefault(); audio(); const k = b.dataset.add;
+  if (k === 'broom') { for (const t of things) remove(t); things.length = 0; sling.spring = null; loadSling(); catapult.ball = null; toast('All clear!'); return; }
+  if (k === 'pins') { const [x, y, z] = spawnSpot(); rackPins(x, z); return; }
+  add(k, ...spawnSpot()); if (k === 'balloon') toast('Balloons float up!'); if (k === 'feather') toast('Feathers fall slowly.');
+}));
+document.getElementById('moon').onclick = (e) => { moon = !moon; world.gravity.set(0, moon ? -1.62 : -9.82, 0); e.currentTarget.classList.toggle('on', moon); toast(moon ? 'Moon gravity: everything floats!' : 'Earth gravity'); };
+document.getElementById('slow').onclick = (e) => { slow = !slow; e.currentTarget.classList.toggle('on', slow); toast(slow ? 'Slow motion' : 'Normal speed'); };
+document.getElementById('wind').onclick = () => { toast('Whoosh!'); sfx('whoosh'); for (const t of things) t.body.applyImpulse(new CANNON.Vec3(t.body.mass * (t.kind === 'balloon' || t.kind === 'feather' ? 6 : 1.5), 0, 0), t.body.position); };
+document.getElementById('look').onclick = () => { camIdx = (camIdx + 1) % CAMS.length; setCam(); };
+document.getElementById('sound').onclick = (e) => { muted = !muted; e.currentTarget.textContent = muted ? '🔇' : '🔊'; };
+document.getElementById('reset').onclick = () => { build(); toast('All set up again!'); };
+document.getElementById('fire').addEventListener('pointerdown', e => { e.preventDefault(); audio(); fireCatapult(); });
+
+// ---------------------------------------------------------------------------
+// Frame
+// ---------------------------------------------------------------------------
+function fit() { const w = innerWidth, h = innerHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+addEventListener('resize', fit); fit();
+let last = performance.now();
+const bandGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()]);
+const band = new THREE.Line(bandGeo, new THREE.LineBasicMaterial({ color: 0x2B2140 })); scene.add(band);
+const ropeGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+const rope = new THREE.Line(ropeGeo, new THREE.LineBasicMaterial({ color: 0x2B2140 })); scene.add(rope);
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(0.12, (now - last) / 1000); last = now;   // physics keeps real-time pace even when drawing drops to 8 fps
+  world.step(1 / 120, slow ? dt * 0.25 : dt, 16);
+  for (const [b, m] of meshes) { m.position.copy(b.position); m.quaternion.copy(b.quaternion); }
+  // Elastic band and rope lines.
+  const bp = bandGeo.attributes.position; const bx = sling.spring ? sling.ball.position : sling.anchor;
+  bp.setXYZ(0, sling.anchor.x - 0.5, sling.anchor.y, sling.anchor.z); bp.setXYZ(1, bx.x, bx.y, bx.z); bp.setXYZ(2, sling.anchor.x + 0.5, sling.anchor.y, sling.anchor.z); bp.needsUpdate = true;
+  const rp = ropeGeo.attributes.position, ra = catapult.arm.pointToWorldFrame(new CANNON.Vec3(2.2, 0, 0)), rb = catapult.weight.position;
+  rp.setXYZ(0, ra.x, ra.y, ra.z); rp.setXYZ(1, rb.x, rb.y + 0.45, rb.z); rp.needsUpdate = true;
+  for (const t of things) if (t.body.position.y < -5 || t.body.position.y > 60 || Math.abs(t.body.position.x) > 30) { const [x, y, z] = spawnSpot(); t.body.position.set(x, y, z); t.body.velocity.set(0, 0, 0); }
+  renderer.render(scene, camera);
+}
+build(); requestAnimationFrame(frame);
+window.PG = { step: (t) => { for (let i = 0; i < Math.round(t * 120); i++) world.step(1 / 120); }, world, scene, get sling() { return sling; }, get catapult() { return catapult; }, get things() { return things; }, add, fireCatapult, fireSling, build, CANNON };
+</script>
+</body>
+</html>

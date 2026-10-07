@@ -1,0 +1,4 @@
+voices/cache/
+.env
+config.js
+_to_delete*

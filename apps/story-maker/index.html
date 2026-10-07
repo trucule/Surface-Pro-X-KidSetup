@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Story Maker</title>
+<!--
+  Story Maker. She picks up to three friends from the cast, a place, a kind of story, how much trouble there is and
+  how long it should be. The story is then told scene by scene, each scene ending in a choice she makes, and every
+  line is read by its own voice: a warm narrator and one voice per character.
+
+  Two ways the words get written:
+    - With an API key in config.js (written by the KidTablet module from .env), Claude writes each scene live
+      (storyModel, Haiku by default), as JSON lines with speakers and moods. dailyLimit caps stories per day.
+    - Without one, a built-in branching story is used, so the app always works offline.
+  Two ways the words get spoken:
+    - With TTS settings in config.js (Azure Speech or OpenAI), each line is synthesized in that speaker's voice.
+    - Otherwise the Windows voices are used, a different one (and pitch) per character. Static prompts can also
+      come from a voice pack (voices/make-voices.py), like the other apps.
+-->
+<style>
+  :root { --ink: #2B2140; --paper: #FFF9F0; --pink: #FF4F8B; --sun: #FFC93C; --sky: #58C7F0; --leaf: #5CD38B; --grape: #9B6BFF; }
+  html, body { margin: 0; height: 100%; background: var(--paper); overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); }
+  body { user-select: none; -webkit-user-select: none; }
+  #app { position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
+  header h1 { font-size: 26px; margin: 0 auto 0 0; font-weight: 900; }
+  .round { border: 4px solid var(--ink); background: #fff; border-radius: 50%; width: 64px; height: 64px; font-size: 30px; cursor: pointer; }
+  .round:active { transform: scale(.93); }
+  section { min-height: 0; overflow: auto; padding: 0 14px 14px; }
+  .q { font-size: 26px; font-weight: 900; margin: 6px 0 8px; }
+  .q small { font-weight: 700; font-size: 17px; color: #6A5A86; margin-left: 10px; }
+  .picks { display: grid; grid-template-columns: repeat(auto-fill, 118px); gap: 12px; justify-content: center; margin-bottom: 14px; }
+  .pick { border: 4px solid var(--ink); border-radius: 22px; background: #fff; padding: 8px 4px 6px; display: grid; justify-items: center; gap: 2px; font-weight: 800; font-size: 16px; cursor: pointer; position: relative; }
+  .pick .e { font-size: 54px; line-height: 1.1; } .pick .t { font-size: 12px; font-weight: 700; color: #6A5A86; }
+  .pick.on { background: var(--sun); } .pick.dim { opacity: .35; }
+  .pick .n { position: absolute; top: -10px; right: -10px; width: 30px; height: 30px; border-radius: 50%; background: var(--pink); color: #fff; border: 3px solid var(--ink); display: none; place-items: center; font-weight: 900; }
+  .pick.on .n { display: grid; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-bottom: 14px; }
+  .row .pick { width: 150px; }
+  #go, .big { display: block; margin: 8px auto 20px; border: 4px solid var(--ink); border-radius: 999px; background: var(--leaf); font: 900 26px system-ui, sans-serif; padding: 12px 34px; cursor: pointer; }
+  #go:disabled { opacity: .35; }
+  #story { display: none; } #story.on { display: block; } #setup.off { display: none; }
+  #scene { min-height: 150px; display: flex; align-items: center; justify-content: center; gap: 26px; font-size: 92px; background: #fff; border: 4px solid var(--ink); border-radius: 28px; margin-bottom: 8px; position: relative; }
+  #scene span { transition: transform .3s; } #scene span.now { transform: scale(1.25) rotate(-6deg); }
+  #title { text-align: center; font-size: 28px; font-weight: 900; margin: 6px 0 10px; }
+  #text { font-size: 27px; line-height: 1.5; font-weight: 700; }
+  #text p { margin: 0 0 8px; padding: 8px 14px; border-radius: 18px; transition: background .2s; display: flex; gap: 10px; align-items: flex-start; }
+  #text p.now { background: #FFF2C2; } #text p.say { background: #fff; border: 3px solid #e4dbf0; margin-left: 24px; }
+  #text p.say.now { border-color: var(--ink); background: #FFF2C2; }
+  #text .who { font-size: 34px; line-height: 1; flex: none; }
+  #text .w { cursor: pointer; border-radius: 6px; padding: 0 2px; } #text .w:active { background: var(--sky); }
+  #choices { display: none; gap: 12px; justify-content: center; flex-wrap: wrap; margin: 14px 0; } #choices.on { display: flex; }
+  #choices button { border: 4px solid var(--ink); border-radius: 24px; background: var(--sun); font: 900 22px system-ui, sans-serif; padding: 12px 20px; cursor: pointer; display: grid; justify-items: center; gap: 4px; min-width: 160px; }
+  #choices button .e { font-size: 44px; } #choices button:active { transform: scale(.95); }
+  .bar { display: flex; justify-content: center; gap: 14px; margin: 14px 0; }
+  #thinking { display: none; text-align: center; font-size: 24px; font-weight: 800; color: #6A5A86; padding: 20px; } #thinking.on { display: block; }
+  #thinking .dots::after { content: "…"; animation: dots 1.2s steps(3) infinite; } @keyframes dots { to { content: ""; } }
+  #end { display: none; text-align: center; font-size: 40px; font-weight: 900; margin: 10px 0; } #end.on { display: block; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header><h1>Story Maker</h1><button class="round" id="back" title="Make another" hidden>⬅️</button></header>
+  <section>
+    <div id="setup">
+      <div class="q">Who is in the story? <small>pick one, two or three friends</small></div><div class="picks" id="cast"></div>
+      <div class="q">Where does it happen?</div><div class="picks" id="places"></div>
+      <div class="q">What kind of story?</div><div class="row" id="kinds"></div>
+      <div class="q">How much trouble?</div><div class="row" id="dramas"></div>
+      <div class="q">How long?</div><div class="row" id="lengths"></div>
+      <button id="go" disabled>Tell the story! 📖</button>
+    </div>
+    <div id="story">
+      <div id="title"></div>
+      <div id="scene"></div>
+      <div id="text"></div>
+      <div id="thinking">The story is being written<span class="dots"></span></div>
+      <div id="choices"></div>
+      <div id="end">The End ⭐</div>
+      <div class="bar"><button class="round" id="read" title="Read this part again">🔈</button><button class="round" id="another" title="New story, same friends">🎲</button></div>
+    </div>
+  </section>
+</div>
+<script src="config.js"></script>
+<script id="voicepack">/* voice pack goes here: run voices/make-voices.py */</script>
+<script>
+// ---------------------------------------------------------------------------
+// The cast. Each friend has a personality the writer keeps to, and a voice: Azure and OpenAI voice names for live
+// TTS, and a pitch/rate for the Windows voices so they still sound different from each other.
+// ---------------------------------------------------------------------------
+const CAST = [
+  { id: 'bun', name: 'Bun', emoji: '🐰', kind: 'bunny', trait: 'brave and kind, hops when excited', azure: 'en-US-JaneNeural', openai: 'shimmer', pitch: 1.3, rate: 1.0 },
+  { id: 'spark', name: 'Spark', emoji: '🐉', kind: 'little dragon', trait: 'silly, sneezes tiny sparks, loves jokes', azure: 'en-US-DavisNeural', openai: 'echo', pitch: 0.8, rate: 0.95 },
+  { id: 'beep', name: 'Beep', emoji: '🤖', kind: 'robot', trait: 'curious, counts things, says beep boop', azure: 'en-US-TonyNeural', openai: 'onyx', pitch: 0.7, rate: 1.05 },
+  { id: 'twinkle', name: 'Twinkle', emoji: '🦄', kind: 'unicorn', trait: 'dreamy and gentle, notices sparkly things', azure: 'en-US-AriaNeural', openai: 'nova', pitch: 1.4, rate: 0.9 },
+  { id: 'pip', name: 'Pip', emoji: '🐧', kind: 'penguin', trait: 'shy at first, very loyal, loves sliding', azure: 'en-US-SaraNeural', openai: 'fable', pitch: 1.2, rate: 1.0 },
+  { id: 'scarlett', name: 'Scarlett', emoji: '👧', kind: 'girl', trait: 'clever and bold, has good ideas', azure: 'en-US-AnaNeural', openai: 'shimmer', pitch: 1.5, rate: 1.0 },
+  { id: 'hop', name: 'Hop', emoji: '🐸', kind: 'frog', trait: 'jumpy and loud, says RIBBIT when surprised', azure: 'en-US-JasonNeural', openai: 'echo', pitch: 0.9, rate: 1.15 },
+  { id: 'rusty', name: 'Rusty', emoji: '🦊', kind: 'fox', trait: 'tricky but good-hearted, always has a plan', azure: 'en-US-GuyNeural', openai: 'onyx', pitch: 1.0, rate: 1.05 },
+  { id: 'luna', name: 'Luna', emoji: '🦉', kind: 'owl', trait: 'wise and calm, speaks slowly, knows facts', azure: 'en-US-NancyNeural', openai: 'alloy', pitch: 0.9, rate: 0.8 },
+  { id: 'mo', name: 'Mo', emoji: '🫎', kind: 'moose', trait: 'big, gentle and a little clumsy', azure: 'en-US-ChristopherNeural', openai: 'onyx', pitch: 0.6, rate: 0.85 },
+  { id: 'zip', name: 'Zip', emoji: '🐭', kind: 'mouse', trait: 'tiny and fast, talks quickly, scared of nothing', azure: 'en-US-AmberNeural', openai: 'nova', pitch: 1.6, rate: 1.2 },
+  { id: 'captain', name: 'Captain Clam', emoji: '🦀', kind: 'crab', trait: 'bossy old sailor, says Arr, secretly soft', azure: 'en-US-BrandonNeural', openai: 'echo', pitch: 0.75, rate: 0.9 }
+];
+const NARRATOR = { id: 'narrator', name: 'Narrator', emoji: '📖', azure: 'en-US-JennyNeural', openai: 'nova', pitch: 1.0, rate: 0.92 };
+const PLACES = [['🏰', 'a castle'], ['🌙', 'the moon'], ['🏝️', 'an island'], ['🌲', 'a forest'], ['🏖️', 'the beach'], ['🎡', 'a fair'], ['❄️', 'a snowy mountain'], ['🧁', 'cupcake town'], ['🚂', 'a train'], ['🌊', 'under the sea']];
+const KINDS = [['🧭', 'adventure', 'Adventure'], ['🔍', 'mystery', 'Mystery'], ['💛', 'friendship', 'Friendship'], ['🤪', 'silly', 'Silly'], ['🌙', 'bedtime', 'Bedtime']];
+const DRAMAS = [['☁️', 'cozy', 'Cozy', 'no real problem, just a happy time together'], ['🌦️', 'little', 'A little trouble', 'one small problem that friends solve kindly'], ['⛈️', 'big', 'Big trouble', 'an exciting safe scare, like getting lost or a storm, that ends well']];
+const LENGTHS = [['📄', 3, 'Short'], ['📚', 6, 'Long']];
+const CFG = Object.assign({ storyModel: 'claude-haiku-4-5-20251001', dailyLimit: 10, tts: null }, window.DWM_CONFIG || {});
+let picked = [], place = null, kind = null, drama = null, length = null;
+let story = null;   // { scenes: [...], history: [...], reading }
+const $ = id => document.getElementById(id);
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+
+// ---------------------------------------------------------------------------
+// Voices
+// ---------------------------------------------------------------------------
+const VOICE = (() => {
+  let actx = null, cur = null; const cache = new Map();
+  const key = t => String(t).trim().toLowerCase().replace(/\s+/g, ' ');
+  function ctx() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } if (actx && actx.state === 'suspended') actx.resume(); return actx; }
+  function stop() { if (cur) { try { cur.onended = null; cur.stop(); } catch (e) {} cur = null; } try { speechSynthesis.cancel(); } catch (e) {} }
+  function playBuffer(buf, done) { const a = ctx(); const s = a.createBufferSource(); s.buffer = buf; s.connect(a.destination); s.onended = () => { if (cur === s) { cur = null; if (done) done(); } }; cur = s; s.start(); }
+  async function decode(bytes) { const a = ctx(); return a.decodeAudioData(bytes.slice(0)); }
+  // Live TTS: Azure Speech (SSML, styles per mood) or OpenAI. Returns an AudioBuffer or null.
+  async function synth(text, who, mood) {
+    const t = CFG.tts; if (!t || !t.key || !ctx()) return null;
+    const k = (who.id || 'n') + '|' + (mood || '') + '|' + key(text); if (cache.has(k)) return cache.get(k);
+    let bytes = null;
+    try {
+      if (t.provider === 'openai') {
+        const r = await fetch('https://api.openai.com/v1/audio/speech', { method: 'POST', headers: { 'Authorization': 'Bearer ' + t.key, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: t.model || 'gpt-4o-mini-tts', voice: who.openai || 'nova', input: text, response_format: 'mp3' }) });
+        if (r.ok) bytes = await r.arrayBuffer();
+      } else {
+        const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        const style = mood && mood !== 'neutral' ? mood : null;
+        const inner = style ? `<mstts:express-as style="${style}">${esc(text)}</mstts:express-as>` : esc(text);
+        const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US"><voice name="${who.azure}"><prosody rate="${who.id === 'narrator' ? '-6%' : '0%'}">${inner}</prosody></voice></speak>`;
+        const r = await fetch(`https://${t.region || 'eastus'}.tts.speech.microsoft.com/cognitiveservices/v1`, { method: 'POST', headers: { 'Ocp-Apim-Subscription-Key': t.key, 'Content-Type': 'application/ssml+xml', 'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3' }, body: ssml });
+        if (r.ok) bytes = await r.arrayBuffer();
+      }
+    } catch (e) { bytes = null; }
+    if (!bytes) { cache.set(k, null); return null; }
+    try { const buf = await decode(bytes); cache.set(k, buf); return buf; } catch (e) { cache.set(k, null); return null; }
+  }
+  // Windows voices: a different voice per character where the system has several, plus pitch and rate.
+  let sysVoices = null;
+  function systemVoice(who) {
+    try {
+      if (!sysVoices) { sysVoices = speechSynthesis.getVoices().filter(v => /^en/i.test(v.lang) && v.localService); }
+      if (!sysVoices.length) return null;
+      if (who.id === 'narrator') return sysVoices.find(v => /zira|jenny|aria/i.test(v.name)) || sysVoices[0];
+      const i = CAST.findIndex(c => c.id === who.id); return sysVoices[(i + 1) % sysVoices.length];
+    } catch (e) { return null; }
+  }
+  function systemSay(text, who, done) {
+    try {
+      const u = new SpeechSynthesisUtterance(text); const v = systemVoice(who); if (v) u.voice = v;
+      u.pitch = who.pitch || 1; u.rate = (who.rate || 1) * 0.95; u.onend = () => done && done(); u.onerror = () => done && done();
+      speechSynthesis.speak(u);
+    } catch (e) { if (done) done(); }
+  }
+  // A line: pack clip (static prompts) > live TTS > Windows voice.
+  async function say(text, who, mood, done) {
+    stop(); who = who || NARRATOR; const p = window.VOICE_PACK, k = key(text);
+    if (p && p[k] && who === NARRATOR) { try { const bin = atob(p[k]), bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); playBuffer(await decode(bytes.buffer), done); return; } catch (e) {} }
+    const buf = await synth(text, who, mood); if (buf) { playBuffer(buf, done); return; }
+    systemSay(text, who, done);
+  }
+  function prefetch(text, who, mood) { synth(text, who, mood); }
+  return { say, stop, prefetch, live: () => !!(CFG.tts && CFG.tts.key) };
+})();
+function say(t, done) { VOICE.say(t, NARRATOR, null, done); }
+
+// ---------------------------------------------------------------------------
+// Setup screen
+// ---------------------------------------------------------------------------
+function tile(item, box, onpick, extra) {
+  const b = document.createElement('button'); b.className = 'pick';
+  const e = document.createElement('div'); e.className = 'e'; e.textContent = item.emoji || item[0]; b.appendChild(e);
+  const t = document.createElement('div'); t.textContent = item.name || item[2] || item[1].replace(/^(a|an|the|one) /, ''); b.appendChild(t);
+  if (extra) { const s = document.createElement('div'); s.className = 't'; s.textContent = extra; b.appendChild(s); }
+  const n = document.createElement('div'); n.className = 'n'; b.appendChild(n);
+  b.onclick = () => onpick(item, b); box.appendChild(b); return b;
+}
+for (const c of CAST) tile(c, $('cast'), (c, b) => {
+  const i = picked.indexOf(c);
+  if (i >= 0) { picked.splice(i, 1); b.classList.remove('on'); }
+  else if (picked.length < 3) { picked.push(c); b.classList.add('on'); say(`${c.name} the ${c.kind}!`); }
+  else { say('Three friends is plenty!'); }
+  [...$('cast').children].forEach((x, k) => { x.classList.toggle('dim', picked.length >= 3 && !picked.includes(CAST[k])); x.querySelector('.n').textContent = picked.indexOf(CAST[k]) + 1; });
+  ready();
+}, c.kind);
+const single = (list, box, set, extra) => list.forEach(item => tile(item, box, (it, b) => { [...box.children].forEach(x => x.classList.toggle('on', x === b)); set(it); say(it[2] || it[1]); ready(); }, extra && extra(item)));
+single(PLACES, $('places'), v => place = v); single(KINDS, $('kinds'), v => kind = v); single(DRAMAS, $('dramas'), v => drama = v); single(LENGTHS, $('lengths'), v => length = v, l => l[1] + ' parts');
+function ready() { $('go').disabled = !(picked.length && place && kind && drama && length); }
+
+// ---------------------------------------------------------------------------
+// Writing the story: Claude scene by scene, or the built-in branching story.
+// ---------------------------------------------------------------------------
+function storiesToday() { try { const d = JSON.parse(localStorage.getItem('story-count') || '{}'); return d.day === new Date().toDateString() ? d.n : 0; } catch (e) { return 0; } }
+function countStory() { try { localStorage.setItem('story-count', JSON.stringify({ day: new Date().toDateString(), n: storiesToday() + 1 })); } catch (e) {} }
+function canUseAI() { return !!CFG.apiKey && storiesToday() < CFG.dailyLimit; }
+const SYSTEM = `You write interactive stories for a five-year-old, told aloud. Rules: warm, funny, concrete, short sentences, simple words. Nothing scary beyond the requested drama level, never violence, death, weapons, or real danger; any "monster" turns out friendly. Every character in the cast speaks in every scene, in their own personality. Include one playful sound word per scene (like SPLASH or boing). Reply with JSON only, no prose and no code fences.`;
+async function writeScene() {
+  const s = story, isLast = s.scenes.length + 1 >= length[1];
+  const castDesc = picked.map(c => `${c.id}: ${c.name}, a ${c.kind}, ${c.trait}`).join('; ');
+  const history = s.history.map((h, i) => `Scene ${i + 1} "${h.title}": ${h.summary} She chose: ${h.choice}.`).join('\n') || '(none yet)';
+  const user = `Cast: ${castDesc}.\nPlace: ${place[1]}. Kind: ${kind[1]}. Drama level: ${drama[1]} (${drama[3]}). Total scenes: ${length[1]}.\nSo far:\n${history}\n\nWrite scene ${s.scenes.length + 1}${isLast ? ', the LAST scene: resolve everything happily and end with a warm closing line' : ''}.\nJSON shape: {"title": "short scene title", "emoji": ["one", "two", "three emoji for the scene"], "lines": [{"who": "narrator" or a cast id, "text": "one or two sentences", "mood": one of "neutral","cheerful","excited","sad","whispering","shouting","friendly"}], "summary": "one sentence of what happened", "choices": [{"label": "3-6 words, what happens next", "emoji": "one emoji"}, ...2 or 3 choices]}. 6 to 9 lines. ${isLast ? 'For the last scene: "choices": [] and "end": true.' : ''}`;
+  const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': CFG.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+    body: JSON.stringify({ model: CFG.storyModel, max_tokens: 1200, system: SYSTEM, messages: [{ role: 'user', content: user }] }) });
+  if (!r.ok) throw new Error('api ' + r.status);
+  const data = await r.json(); const text = (data.content || []).map(c => c.text || '').join('');
+  const json = JSON.parse(text.replace(/```json|```/g, '').trim());
+  json.lines = (json.lines || []).filter(l => l && l.text).map(l => ({ who: picked.find(c => c.id === l.who) || NARRATOR, text: String(l.text), mood: l.mood || 'neutral' }));
+  json.choices = isLast ? [] : (json.choices || []).slice(0, 3);
+  json.end = isLast || !!json.end;
+  return json;
+}
+// Built-in story for when there is no key or the writer fails: three scenes, two choices each, all friends speak.
+function builtinScene() {
+  const s = story, n = s.scenes.length, names = picked.map(c => c.name), who = i => picked[i % picked.length];
+  const list = names.length === 1 ? names[0] : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+  const lastChoice = s.history.length ? s.history[s.history.length - 1].choice : '';
+  const L = (who, text, mood) => ({ who, text, mood: mood || 'neutral' });
+  const quip = c => ({ bun: 'Hop hop! Let\'s go!', spark: 'Achoo! Oops, a spark.', beep: 'Beep boop. I count one adventure.', twinkle: 'Ooh, something is sparkling.', pip: 'Um. Can I come too?', scarlett: 'I have an idea!', hop: 'RIBBIT! What was that?', rusty: 'Leave it to me. I have a plan.', luna: 'Hoo. Patience, friends.', mo: 'Whoops, sorry, big antlers.', zip: 'Fast fast fast, come on!', captain: 'Arr! Follow the captain!' }[c.id]);
+  if (n === 0) return { title: 'Off we go', emoji: [who(0).emoji, place[0], '☀️'], lines: [L(NARRATOR, `One sunny morning, ${list} set off for ${place[1]}.`), ...picked.map(c => L(c, quip(c), 'cheerful')), L(NARRATOR, `When they got there, they heard a strange sound. Boing! Boing! Boing!`)], summary: `${list} arrived at ${place[1]} and heard a boing.`, choices: [{ label: 'Follow the sound', emoji: '👂' }, { label: 'Hide and peek', emoji: '🙈' }] };
+  if (n === 1) { const followed = /follow/i.test(lastChoice); return { title: followed ? 'The bouncing thing' : 'Peek-a-boo', emoji: [who(0).emoji, '🎈', place[0]], lines: [L(NARRATOR, followed ? `They followed the boing all the way to a big red balloon, bouncing all by itself.` : `They hid behind a rock and peeked. A big red balloon bounced past, all by itself.`), L(who(0), 'A balloon that bounces? That is new.', 'excited'), ...picked.slice(1).map(c => L(c, c.id === 'luna' ? 'Hoo. Balloons do not bounce. Something is inside.' : 'Let\'s catch it!', 'excited')), L(NARRATOR, `The balloon stopped. A tiny voice inside said, "Help! I am stuck!"`), L(who(0), 'Don\'t worry, little voice. We will get you out.', 'friendly')], summary: `The friends found a bouncing balloon with someone stuck inside.`, choices: [{ label: 'Tickle it open', emoji: '🪶' }, { label: 'Sing to it', emoji: '🎵' }] }; }
+  const tickled = /tickle/i.test(lastChoice);
+  return { title: 'A new friend', emoji: ['🐣', ...picked.slice(0, 2).map(c => c.emoji)], end: true, choices: [], lines: [L(NARRATOR, tickled ? `${who(0).name} tickled the balloon. It giggled, wobbled, and POP! Out tumbled a tiny chick.` : `${who(0).name} sang a soft song. The balloon hummed along, wobbled, and POP! Out tumbled a tiny chick.`), L(who(0), 'Hello! Are you all right?', 'friendly'), L(NARRATOR, `"I was blown all the way from the farm!" peeped the chick.`), ...picked.slice(1).map(c => L(c, 'Then we will take you home!', 'cheerful')), L(NARRATOR, `So they did, all together, and the chick became the ${names.length + 1 === 2 ? 'second' : 'newest'} member of the gang. The end.`)], summary: 'The chick was freed and taken home.' };
+}
+
+// ---------------------------------------------------------------------------
+// Telling it
+// ---------------------------------------------------------------------------
+async function start(sameFriends) {
+  story = { scenes: [], history: [], reading: -1, ai: canUseAI() };
+  if (story.ai) countStory();
+  $('setup').classList.add('off'); $('story').classList.add('on'); $('back').hidden = false; $('end').classList.remove('on');
+  $('title').textContent = ''; $('scene').innerHTML = ''; $('text').innerHTML = '';
+  await nextScene();
+}
+async function nextScene() {
+  $('choices').classList.remove('on'); $('choices').innerHTML = ''; $('thinking').classList.add('on');
+  let scene;
+  try { scene = story.ai ? await writeScene() : builtinScene(); }
+  catch (e) { console.warn('writer failed, using the built-in story', e); story.ai = false; scene = builtinScene(); }
+  $('thinking').classList.remove('on');
+  story.scenes.push(scene); showScene(scene);
+}
+function showScene(scene) {
+  $('title').textContent = scene.title || '';
+  const sc = $('scene'); sc.innerHTML = ''; for (const e of (scene.emoji || []).slice(0, 4)) { const s = document.createElement('span'); s.textContent = e; sc.appendChild(s); }
+  const text = $('text'); text.innerHTML = '';
+  scene.lines.forEach((l, i) => {
+    const p = document.createElement('p'); if (l.who !== NARRATOR) { p.className = 'say'; const w = document.createElement('span'); w.className = 'who'; w.textContent = l.who.emoji; p.appendChild(w); }
+    const body = document.createElement('span');
+    for (const word of l.text.split(' ')) { const sp = document.createElement('span'); sp.className = 'w'; sp.textContent = word + ' '; sp.onclick = (e) => { e.stopPropagation(); VOICE.say(word.replace(/[^\w']/g, ''), NARRATOR); }; body.appendChild(sp); }
+    p.appendChild(body); p.onclick = () => readFrom(i); text.appendChild(p);
+  });
+  // Warm the voice cache for the first few lines so the reading does not stall.
+  scene.lines.slice(0, 4).forEach(l => VOICE.prefetch(l.text, l.who, l.mood));
+  readFrom(0);
+}
+function readFrom(i) {
+  const scene = story && story.scenes[story.scenes.length - 1]; if (!scene) return; story.reading = i;
+  const ps = $('text').children; [...ps].forEach((p, k) => p.classList.toggle('now', k === i));
+  [...$('scene').children].forEach(s => s.classList.remove('now'));
+  if (i >= scene.lines.length) { VOICE.stop(); afterScene(scene); return; }
+  const l = scene.lines[i]; if (l.who !== NARRATOR) { const idx = (scene.emoji || []).indexOf(l.who.emoji); if (idx >= 0) $('scene').children[idx].classList.add('now'); }
+  if (i + 2 < scene.lines.length) VOICE.prefetch(scene.lines[i + 2].text, scene.lines[i + 2].who, scene.lines[i + 2].mood);
+  ps[i].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  VOICE.say(l.text, l.who, l.mood, () => { if (story.reading === i) setTimeout(() => readFrom(i + 1), 300); });
+}
+function afterScene(scene) {
+  if (scene.end || !scene.choices.length) { $('end').classList.add('on'); say('The end! Tap the dice for another story.'); return; }
+  const box = $('choices'); box.innerHTML = '';
+  for (const c of scene.choices) {
+    const b = document.createElement('button'); const e = document.createElement('span'); e.className = 'e'; e.textContent = c.emoji || '✨'; b.appendChild(e); b.appendChild(document.createTextNode(c.label));
+    b.onclick = () => { VOICE.stop(); story.history.push({ title: scene.title, summary: scene.summary || scene.title, choice: c.label }); say(c.label + '!'); nextScene(); };
+    box.appendChild(b);
+  }
+  box.classList.add('on'); say('What should happen next?');
+  $('choices').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+$('go').onclick = () => start();
+$('read').onclick = () => { if (story) readFrom(0); };
+$('another').onclick = () => { VOICE.stop(); start(true); };
+$('back').onclick = () => { VOICE.stop(); story = null; $('setup').classList.remove('off'); $('story').classList.remove('on'); $('back').hidden = true; };
+try { speechSynthesis.onvoiceschanged = () => {}; } catch (e) {}
+addEventListener('pointerdown', () => say('Story Maker! Who is in the story?'), { once: true });
+window.SM = { CAST, get story() { return story; }, start, pick: (ids, p, k, d, l) => { picked = ids.map(id => CAST.find(c => c.id === id)); place = PLACES[p]; kind = KINDS[k]; drama = DRAMAS[d]; length = LENGTHS[l]; }, builtinScene, VOICE };
+</script>
+</body>
+</html>

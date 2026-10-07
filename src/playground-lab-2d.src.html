@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Playground Lab</title>
+<!--
+  Playground Lab. A 2D physics sandbox for a five-year-old, one file, offline, no API.
+  A playground with a slingshot, a catapult, a seesaw, a trampoline, a slide, a stack of bowling pins and a row of
+  dominoes. The toolbox drops in balls of different weight and bounce, blocks, a balloon and a feather. She drags
+  anything with a finger; the slingshot and catapult fire for real. Moon gravity and slow motion are the experiment
+  knobs. Physics by Matter.js (MIT, bundled below). Sounds are synthesized; no audio files.
+-->
+<style>
+  :root { --ink: #2B2140; --paper: #FFF9F0; --pink: #FF4F8B; --sun: #FFC93C; --sky: #58C7F0; --leaf: #5CD38B; --grape: #9B6BFF; }
+  html, body { margin: 0; height: 100%; background: #BFE7F2; overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); }
+  body { touch-action: none; user-select: none; -webkit-user-select: none; }
+  #c { display: block; width: 100vw; height: 100vh; touch-action: none; }
+  #tools { position: fixed; left: max(10px, env(safe-area-inset-left)); top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 8px; padding: 10px 8px; border-radius: 999px; background: rgba(43,33,64,.38); backdrop-filter: blur(8px); }
+  #tools button, #knobs button { width: 58px; height: 58px; border-radius: 50%; border: 3px solid var(--ink); background: rgba(250,246,255,.94); font-size: 30px; cursor: pointer; display: grid; place-items: center; padding: 0; touch-action: none; }
+  #tools button:active, #knobs button:active { transform: scale(.92); }
+  #knobs { position: fixed; right: max(10px, env(safe-area-inset-right)); top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 8px; padding: 10px 8px; border-radius: 999px; background: rgba(43,33,64,.38); backdrop-filter: blur(8px); }
+  #knobs button.on { background: var(--sun); }
+  #fire { position: fixed; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); border: 4px solid var(--ink); border-radius: 999px; background: var(--pink); color: #fff; font: 900 26px system-ui, sans-serif; padding: 12px 30px; cursor: pointer; touch-action: none; }
+  #fire:active { transform: translateX(-50%) scale(.95); }
+  #toast { position: fixed; top: 14px; left: 50%; transform: translateX(-50%); background: #fff; border: 3px solid var(--ink); border-radius: 999px; padding: 6px 20px; font-size: 22px; font-weight: 900; opacity: 0; transition: opacity .3s; pointer-events: none; }
+  #toast.on { opacity: 1; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="tools" aria-label="Toolbox">
+  <button data-add="beach" title="Beach ball">🏐</button>
+  <button data-add="bowling" title="Bowling ball">🎳</button>
+  <button data-add="tennis" title="Bouncy ball">🎾</button>
+  <button data-add="crate" title="Crate">📦</button>
+  <button data-add="pins" title="More pins">🔺</button>
+  <button data-add="balloon" title="Balloon">🎈</button>
+  <button data-add="feather" title="Feather">🪶</button>
+  <button data-add="broom" title="Clear">🧹</button>
+</div>
+<div id="knobs" aria-label="Experiments">
+  <button id="moon" title="Moon gravity">🌙</button>
+  <button id="slow" title="Slow motion">🐢</button>
+  <button id="wind" title="Wind">💨</button>
+  <button id="sound" title="Sound">🔊</button>
+  <button id="reset" title="Set it all up again">🔁</button>
+</div>
+<button id="fire">Fire the catapult! 🚀</button>
+<div id="toast"></div>
+<script>
+/*MATTER_JS*/
+</script>
+<script>
+const { Engine, Runner, Bodies, Body, Composite, Constraint, Mouse, MouseConstraint, Events, Query, Vector } = Matter;
+const W = 1800, H = 900, GROUND = 850;
+const cv = document.getElementById('c'), g = cv.getContext('2d');
+const engine = Engine.create({ gravity: { x: 0, y: 1, scale: 0.001 } });
+const world = engine.world;
+engine.positionIterations = 8; engine.velocityIterations = 6;
+let scale = 1, offX = 0, offY = 0, slow = false, muted = false, moon = false;
+
+// ---------------------------------------------------------------------------
+// Sound (synthesized, like the labs)
+// ---------------------------------------------------------------------------
+let actx = null; const lastSfx = {};
+function audio() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } if (actx && actx.state === 'suspended') actx.resume(); return actx; }
+function tone(f, dur, type, vol, slide) {
+  const a = audio(); if (!a || muted) return;
+  const o = a.createOscillator(), gn = a.createGain(), t = a.currentTime;
+  o.type = type || 'sine'; o.frequency.setValueAtTime(f, t); if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(40, f + slide), t + dur);
+  gn.gain.setValueAtTime(vol || 0.15, t); gn.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(gn).connect(a.destination); o.start(t); o.stop(t + dur + 0.02);
+}
+function sfx(name, strength) {
+  const now = performance.now(); if (lastSfx[name] && now - lastSfx[name] < 60) return; lastSfx[name] = now;
+  const v = Math.min(0.35, 0.05 + (strength || 0) * 0.04);
+  if (name === 'ball') tone(220, 0.12, 'sine', v, -120);
+  else if (name === 'pin') tone(900, 0.08, 'square', v * 0.6, 300);
+  else if (name === 'crate') tone(120, 0.15, 'triangle', v, -60);
+  else if (name === 'boing') tone(180, 0.35, 'sine', 0.25, 400);
+  else if (name === 'twang') tone(300, 0.3, 'sawtooth', 0.2, 200);
+  else if (name === 'whoosh') tone(500, 0.4, 'triangle', 0.2, -400);
+}
+
+// ---------------------------------------------------------------------------
+// Things she can add. Each kind: how to make it and how it looks.
+// ---------------------------------------------------------------------------
+const KINDS = {
+  beach:   { make: (x, y) => Bodies.circle(x, y, 44, { restitution: 0.75, density: 0.0006, frictionAir: 0.004, label: 'beach' }) },
+  bowling: { make: (x, y) => Bodies.circle(x, y, 34, { restitution: 0.1, density: 0.02, label: 'bowling' }) },
+  tennis:  { make: (x, y) => Bodies.circle(x, y, 22, { restitution: 0.9, density: 0.002, label: 'tennis' }) },
+  crate:   { make: (x, y) => Bodies.rectangle(x, y, 70, 70, { restitution: 0.1, density: 0.004, friction: 0.6, label: 'crate', chamfer: { radius: 6 } }) },
+  balloon: { make: (x, y) => Bodies.circle(x, y, 34, { restitution: 0.4, density: 0.0002, frictionAir: 0.08, label: 'balloon' }) },
+  feather: { make: (x, y) => Bodies.rectangle(x, y, 60, 16, { density: 0.0002, frictionAir: 0.2, restitution: 0.2, label: 'feather', chamfer: { radius: 8 } }) },
+  pin:     { make: (x, y) => Bodies.rectangle(x, y, 24, 84, { density: 0.0012, friction: 0.5, restitution: 0.2, label: 'pin', chamfer: { radius: 8 }, collisionFilter: { category: 0x0004, mask: 0xFFFFFFFF } }) },
+  domino:  { make: (x, y) => Bodies.rectangle(x, y, 16, 64, { density: 0.002, friction: 0.4, restitution: 0.1, label: 'domino' }) }
+};
+let fixtures = [], sling = null, catapult = null, dynamic = [];
+function add(kind, x, y) { const b = KINDS[kind].make(x, y); Composite.add(world, b); dynamic.push(b); return b; }
+
+// ---------------------------------------------------------------------------
+// The playground
+// ---------------------------------------------------------------------------
+function build() {
+  Composite.clear(world, false); fixtures = []; dynamic = [];
+  const S = { isStatic: true, friction: 0.7, restitution: 0 };
+  const keep = (b) => { Composite.add(world, b); fixtures.push(b); return b; };
+  keep(Bodies.rectangle(W / 2, GROUND + 40, W + 400, 80, { ...S, label: 'ground' }));
+  keep(Bodies.rectangle(-60, H / 2, 120, H * 3, { ...S, label: 'wall' })); keep(Bodies.rectangle(W + 60, H / 2, 120, H * 3, { ...S, label: 'wall' }));
+  // Slide on the right, sliding down to the left so a ball ends up in the pins.
+  keep(Bodies.rectangle(1680, 560, 150, 16, { ...S, label: 'deck', chamfer: { radius: 6 } }));
+  keep(Bodies.rectangle(1740, 700, 16, 300, { ...S, label: 'post' }));
+  keep(Bodies.rectangle(1512, 692, 330, 14, { ...S, angle: -Math.PI / 4.3, label: 'slide', friction: 0.02 }));
+  // Bowling pins racked on two little shelves at the bottom of the slide.
+  // The shelves only touch pins (category 4), so balls roll straight through the rack and into them.
+  const shelfF = { collisionFilter: { category: 0x0002, mask: 0x0004 } };
+  keep(Bodies.rectangle(1290, 762, 74, 8, { ...S, label: 'shelf', ...shelfF })); keep(Bodies.rectangle(1290, 674, 40, 8, { ...S, label: 'shelf', ...shelfF }));
+  [[1250, GROUND], [1290, GROUND], [1330, GROUND], [1270, 758], [1310, 758], [1290, 670]].forEach(([x, y]) => add('pin', x, y - 42));
+  // Dominoes between the seesaw and the pins.
+  for (let i = 0; i < 4; i++) add('domino', 1120 + i * 32, GROUND - 32);
+  // Trampoline.
+  keep(Bodies.rectangle(640, 820, 180, 22, { ...S, label: 'tramp', restitution: 1.25, chamfer: { radius: 10 } }));
+  // Seesaw: a plank on a pivot.
+  keep(Bodies.polygon(950, 806, 3, 46, { ...S, label: 'pivot' }));
+  const plank = Bodies.rectangle(950, 770, 300, 16, { density: 0.003, friction: 0.6, label: 'plank', chamfer: { radius: 6 } });
+  Composite.add(world, [plank, Constraint.create({ bodyA: plank, pointB: { x: 950, y: 770 }, stiffness: 1, length: 0 })]); fixtures.push(plank);
+  // Slingshot on the left: a forked post and an elastic that holds a ball above the fork.
+  keep(Bodies.rectangle(240, 750, 18, 200, { ...S, label: 'slingpost' }));
+  sling = { anchor: { x: 240, y: 612 }, ball: null, elastic: null, pulled: false };
+  loadSling();
+  // Catapult: a tall post with a hinge, an arm, a heavy counterweight on a rope, and a latch that holds the long end
+  // down at the ground until she fires. Letting go of the latch lets the weight fall and whip the arm round.
+  // The long end is on the left, so the ball flies to the right, over the trampoline and seesaw.
+  catapult = { hingeAt: { x: 520, y: 620 }, pose: Math.PI - 0.83, up: 1 };   // up: +1 because the pose is past 90 degrees (local -y points down)
+  keep(Bodies.rectangle(520, 735, 22, 230, { ...S, label: 'post', collisionFilter: { group: -2 } }));
+  const arm = Bodies.rectangle(0, 0, 320, 14, { density: 0.004, label: 'arm', chamfer: { radius: 4 }, collisionFilter: { group: -2 } });
+  const cup = Bodies.rectangle(170, catapult.up * 14, 12, 36, { density: 0.004, label: 'cup', collisionFilter: { group: -2 } });
+  const cupBottom = Bodies.rectangle(135, 0, 60, 10, { density: 0.004, label: 'cup', collisionFilter: { group: -2 } });
+  catapult.arm = Body.create({ parts: [arm, cup, cupBottom], label: 'armbody', collisionFilter: { group: -2 } });
+  catapult.armOffset = { x: catapult.arm.position.x, y: catapult.arm.position.y };   // COM relative to the arm rectangle's centre (parts were made around 0,0)
+  catapult.weight = Bodies.rectangle(460, 600, 64, 64, { density: 0.03, label: 'weight', chamfer: { radius: 6 }, collisionFilter: { group: -2 } });
+  Composite.add(world, [catapult.arm, catapult.weight]); fixtures.push(catapult.arm, catapult.weight);
+  armCatapult();
+  // A tree and a sun are only painted.
+  engine.gravity.y = moon ? 0.16 : 1;
+  if (typeof mc !== 'undefined') Composite.add(world, mc);   // build() clears the world, so the finger constraint goes back in
+}
+function loadSling() {
+  const b = Bodies.circle(sling.anchor.x, sling.anchor.y, 26, { restitution: 0.6, density: 0.004, label: 'tennis', frictionAir: 0.002 });
+  sling.ball = b; sling.elastic = Constraint.create({ pointA: sling.anchor, bodyB: b, stiffness: 0.06, damping: 0.02, length: 1 });
+  Composite.add(world, [b, sling.elastic]); dynamic.push(b); sling.pulled = false;
+}
+function armCatapult() {
+  // Long end down at the ground, short end up with the weight hanging from it, a ball in the cup, latched.
+  // Matter keeps constraint offsets in world orientation from the moment they are made, so the arm is posed first
+  // and every constraint is (re)made afterwards with offsets rotated to match.
+  for (const c of ['hinge', 'rope', 'latch']) if (catapult[c]) { Composite.remove(world, catapult[c]); catapult[c] = null; }
+  const th = catapult.pose, d = { x: Math.cos(th), y: Math.sin(th) }, hp = catapult.hingeAt, rot = (v) => Vector.rotate(v, th);
+  const com = catapult.arm.position, armCenter = Vector.sub(com, Vector.rotate(catapult.armOffset, catapult.arm.angle));
+  const center = Vector.add(hp, Vector.mult(d, 70));           // where the arm rectangle's own centre should be
+  Body.setAngularVelocity(catapult.arm, 0); Body.setVelocity(catapult.arm, { x: 0, y: 0 });
+  Body.setAngle(catapult.arm, th); Body.setPosition(catapult.arm, Vector.add(center, rot(catapult.armOffset)));
+  const local = (x, y) => rot({ x: x - catapult.armOffset.x, y: y - catapult.armOffset.y });   // arm-local (x,y) -> world offset from the body's centre
+  catapult.hinge = Constraint.create({ bodyA: catapult.arm, pointA: local(-70, 0), pointB: hp, stiffness: 1, length: 0 });
+  const shortEnd = Vector.add(center, rot({ x: -160, y: 0 }));
+  Body.setPosition(catapult.weight, { x: shortEnd.x, y: shortEnd.y + 44 }); Body.setVelocity(catapult.weight, { x: 0, y: 0 }); Body.setAngle(catapult.weight, 0);
+  catapult.rope = Constraint.create({ bodyA: catapult.arm, pointA: local(-160, 0), bodyB: catapult.weight, stiffness: 0.9, length: 44 });
+  const latchAt = Vector.add(center, rot({ x: 150, y: 0 }));
+  catapult.latch = Constraint.create({ bodyA: catapult.arm, pointA: local(150, 0), pointB: latchAt, stiffness: 1, length: 0 });
+  Composite.add(world, [catapult.hinge, catapult.rope, catapult.latch]);
+  const seat = Vector.add(center, rot({ x: 120, y: catapult.up * 42 }));
+  catapult.ball = add('bowling', seat.x, seat.y); Body.setMass(catapult.ball, 1.5); catapult.ball.restitution = 0.5;
+  catapult.armed = true;
+}
+function fireCatapult() {
+  if (!catapult.armed) { armCatapult(); return; }
+  Composite.remove(world, catapult.latch); catapult.armed = false; sfx('whoosh');
+  document.getElementById('fire').textContent = 'Set it up again 🔁';
+  setTimeout(() => { document.getElementById('fire').textContent = 'Fire the catapult! 🚀'; }, 1200);
+}
+
+// ---------------------------------------------------------------------------
+// Finger input through Matter's mouse constraint, scaled to the canvas.
+// ---------------------------------------------------------------------------
+const mouse = Mouse.create(cv);
+const mc = MouseConstraint.create(engine, { mouse, constraint: { stiffness: 0.15, damping: 0.1, render: { visible: false } } });
+Composite.add(world, mc);
+function fit() {
+  const w = innerWidth, h = innerHeight; cv.width = w * devicePixelRatio; cv.height = h * devicePixelRatio;
+  scale = Math.min(w / W, h / H); offX = (w - W * scale) / 2; offY = (h - H * scale) / 2;
+  mouse.pixelRatio = 1 / devicePixelRatio;   // Matter scales by canvas.width / clientWidth; undo that so positions stay in CSS pixels
+  Mouse.setScale(mouse, { x: 1 / scale, y: 1 / scale }); Mouse.setOffset(mouse, { x: -offX / scale, y: -offY / scale });
+}
+addEventListener('resize', fit); fit();
+Events.on(mc, 'startdrag', e => { audio(); if (e.body === sling.ball) sling.pulled = true; });
+Events.on(mc, 'enddrag', e => {
+  if (e.body === sling.ball && sling.pulled) {
+    const d = Vector.magnitude(Vector.sub(sling.ball.position, sling.anchor));
+    if (d > 30) { sfx('twang'); setTimeout(() => { Composite.remove(world, sling.elastic); sling.elastic = null; setTimeout(loadSling, 900); }, 60); }
+    sling.pulled = false;
+  }
+});
+// Static bodies are not draggable; the seesaw plank and catapult arm are, lightly.
+Events.on(mc, 'startdrag', e => { if (fixtures.includes(e.body) && e.body.isStatic) mc.constraint.bodyB = null; });
+Events.on(engine, 'collisionStart', e => {
+  for (const p of e.pairs) {
+    const s = Math.hypot(p.bodyA.velocity.x - p.bodyB.velocity.x, p.bodyA.velocity.y - p.bodyB.velocity.y);
+    if (s < 1.5) continue;
+    const L = p.bodyA.label + '|' + p.bodyB.label;
+    if (/tramp/.test(L)) sfx('boing');
+    else if (/pin|domino/.test(L)) sfx('pin', s);
+    else if (/crate|weight/.test(L)) sfx('crate', s);
+    else if (/beach|bowling|tennis/.test(L)) sfx('ball', s);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Buttons
+// ---------------------------------------------------------------------------
+function toast(t) { const el = document.getElementById('toast'); el.textContent = t; el.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('on'), 1600); }
+function spawnSpot() { return { x: 700 + Math.random() * 300, y: 120 + Math.random() * 80 }; }
+document.querySelectorAll('#tools button').forEach(b => b.addEventListener('pointerdown', e => {
+  e.preventDefault(); audio(); const k = b.dataset.add;
+  if (k === 'broom') { for (const d of dynamic) Composite.remove(world, d); dynamic = []; if (sling.elastic) Composite.remove(world, sling.elastic); loadSling(); catapult.ball = null; toast('All clear!'); return; }
+  if (k === 'pins') { const p = spawnSpot(); [[0, 0], [-16, -1], [16, -1]].forEach(([dx, dy]) => add('pin', p.x + dx * 1.6, p.y + dy * 84)); return; }
+  const p = spawnSpot(); add(k, p.x, p.y); if (k === 'balloon') toast('Balloons float up!'); if (k === 'feather') toast('Feathers fall slowly.');
+}));
+document.getElementById('moon').onclick = (e) => { moon = !moon; engine.gravity.y = moon ? 0.16 : 1; e.currentTarget.classList.toggle('on', moon); toast(moon ? 'Moon gravity: everything floats!' : 'Earth gravity'); };
+document.getElementById('slow').onclick = (e) => { slow = !slow; e.currentTarget.classList.toggle('on', slow); toast(slow ? 'Slow motion' : 'Normal speed'); };
+document.getElementById('wind').onclick = () => { toast('Whoosh!'); for (const b of Composite.allBodies(world)) if (!b.isStatic) Body.applyForce(b, b.position, { x: 0.003 * b.mass * (b.label === 'balloon' || b.label === 'feather' ? 4 : 1), y: 0 }); sfx('whoosh'); };
+document.getElementById('sound').onclick = (e) => { muted = !muted; e.currentTarget.textContent = muted ? '🔇' : '🔊'; };
+document.getElementById('reset').onclick = () => { build(); toast('All set up again!'); };
+document.getElementById('fire').addEventListener('pointerdown', e => { e.preventDefault(); audio(); fireCatapult(); });
+
+// ---------------------------------------------------------------------------
+// Drawing
+// ---------------------------------------------------------------------------
+const COLORS = { shelf: '#8B5A2B', beach: '#FF4F8B', bowling: '#2B2140', tennis: '#C8F542', crate: '#C98B4F', balloon: '#FF6B6B', feather: '#FFFFFF', pin: '#FFFFFF', domino: '#9B6BFF', plank: '#E7B36A', arm: '#A87B4A', cup: '#A87B4A', weight: '#6E6E80', deck: '#E7B36A', post: '#8E5BD6', slide: '#58C7F0', tramp: '#2B2140', pivot: '#FF8C42', slingpost: '#8B5A2B', ground: '#5CD38B', wall: 'transparent' };
+function drawBody(b) {
+  if (b.parts.length > 1) { for (let i = 1; i < b.parts.length; i++) drawBody(b.parts[i]); return; }
+  const col = COLORS[b.label] || '#ccc'; if (col === 'transparent') return;
+  g.save(); g.translate(b.position.x, b.position.y); g.rotate(b.angle);
+  g.fillStyle = col; g.strokeStyle = '#2B2140'; g.lineWidth = 4;
+  if (b.circleRadius) {
+    g.beginPath(); g.arc(0, 0, b.circleRadius, 0, Math.PI * 2); g.fill(); g.stroke();
+    if (b.label === 'beach') { g.fillStyle = '#fff'; for (let i = 0; i < 3; i++) { g.beginPath(); g.moveTo(0, 0); g.arc(0, 0, b.circleRadius - 2, i * 2.09, i * 2.09 + 1.05); g.closePath(); g.fill(); } g.beginPath(); g.arc(0, 0, b.circleRadius, 0, Math.PI * 2); g.stroke(); }
+    if (b.label === 'bowling') { g.fillStyle = '#fff'; [[-9, -8], [5, -12], [8, 2]].forEach(([x, y]) => { g.beginPath(); g.arc(x, y, 4, 0, 7); g.fill(); }); }
+    if (b.label === 'tennis') { g.beginPath(); g.arc(-10, 0, b.circleRadius * 0.8, -0.9, 0.9); g.stroke(); g.beginPath(); g.arc(10, 0, b.circleRadius * 0.8, Math.PI - 0.9, Math.PI + 0.9); g.stroke(); }
+    if (b.label === 'balloon') { g.beginPath(); g.moveTo(0, b.circleRadius); g.lineTo(-4, b.circleRadius + 8); g.lineTo(4, b.circleRadius + 8); g.closePath(); g.fill(); g.stroke(); g.beginPath(); g.moveTo(0, b.circleRadius + 8); g.quadraticCurveTo(10, b.circleRadius + 40, 0, b.circleRadius + 70); g.stroke(); }
+    g.fillStyle = 'rgba(255,255,255,.35)'; g.beginPath(); g.arc(-b.circleRadius * 0.35, -b.circleRadius * 0.35, b.circleRadius * 0.22, 0, 7); g.fill();
+  } else {
+    const v = b.vertices; g.beginPath(); for (let i = 0; i < v.length; i++) { const p = Vector.sub(v[i], b.position), r = Vector.rotate(p, -b.angle); i ? g.lineTo(r.x, r.y) : g.moveTo(r.x, r.y); } g.closePath(); g.fill(); g.stroke();
+    if (b.label === 'pin') { g.fillStyle = '#FF4F8B'; g.fillRect(-12, -22, 24, 6); g.fillRect(-12, -10, 24, 6); }
+    if (b.label === 'crate') { g.beginPath(); g.moveTo(-28, -28); g.lineTo(28, 28); g.moveTo(28, -28); g.lineTo(-28, 28); g.stroke(); }
+    if (b.label === 'tramp') { g.strokeStyle = '#FF4F8B'; g.lineWidth = 3; for (let i = -70; i <= 70; i += 20) { g.beginPath(); g.moveTo(i, 11); g.lineTo(i + 10, 40); g.stroke(); } }
+    if (b.label === 'domino') { g.fillStyle = '#fff'; g.beginPath(); g.arc(0, -14, 4, 0, 7); g.arc(0, 14, 4, 0, 7); g.fill(); }
+  }
+  g.restore();
+}
+function drawScene() {
+  const sky = g.createLinearGradient(0, 0, 0, H); sky.addColorStop(0, '#9BDDFA'); sky.addColorStop(1, '#E8F7FF'); g.fillStyle = sky; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#FFE066'; g.beginPath(); g.arc(1650, 120, 60, 0, 7); g.fill();
+  for (const [x, y, r] of [[200, 180, 50], [260, 170, 60], [320, 185, 48], [1000, 230, 44], [1050, 220, 54], [1100, 236, 42]]) { g.fillStyle = '#fff'; g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); }
+  g.fillStyle = '#8B5A2B'; g.fillRect(800, 560, 28, 290); g.fillStyle = '#4CBB78'; for (const [x, y, r] of [[814, 520, 80], [760, 570, 60], [870, 575, 62]]) { g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); }
+  g.fillStyle = '#5CD38B'; g.fillRect(0, GROUND, W, H - GROUND); g.fillStyle = '#4CBB78'; for (let x = 0; x < W; x += 24) { g.fillRect(x, GROUND, 12, 6); }
+  // Slingshot fork and elastic.
+  g.strokeStyle = '#8B5A2B'; g.lineWidth = 14; g.lineCap = 'round'; const ax = sling.anchor.x, ay = sling.anchor.y + 40; g.beginPath(); g.moveTo(ax, ay); g.lineTo(ax - 30, ay - 40); g.moveTo(ax, ay); g.lineTo(ax + 30, ay - 40); g.stroke();
+  if (sling.elastic && sling.ball) { g.strokeStyle = '#2B2140'; g.lineWidth = 5; g.beginPath(); g.moveTo(ax - 30, ay - 40); g.lineTo(sling.ball.position.x, sling.ball.position.y); g.lineTo(ax + 30, ay - 40); g.stroke(); }
+  // Catapult frame and rope.
+  g.strokeStyle = '#2B2140'; g.lineWidth = 4; g.beginPath(); g.moveTo(catapult.weight.position.x, catapult.weight.position.y); const a = Vector.add(catapult.arm.position, Vector.rotate(catapult.rope.pointA, catapult.arm.angle - catapult.rope.angleA)); g.lineTo(a.x, a.y); g.stroke();
+  for (const b of Composite.allBodies(world)) drawBody(b);
+  if (moon) { g.fillStyle = 'rgba(43,33,64,.08)'; g.fillRect(0, 0, W, H); g.font = '900 34px system-ui'; g.fillStyle = '#2B2140'; g.fillText('🌙 moon gravity', 40, 60); }
+}
+let last = performance.now();
+function frame(now) {
+  requestAnimationFrame(frame);
+  const dt = Math.min(32, now - last); last = now;
+  // Balloons get lift; feathers flutter.
+  for (const b of dynamic) {
+    if (b.label === 'balloon') Body.applyForce(b, b.position, { x: 0, y: -b.mass * engine.gravity.y * 0.0014 });
+    if (b.label === 'feather') Body.applyForce(b, b.position, { x: Math.sin(now / 300) * 0.00002, y: 0 });
+  }
+  Engine.update(engine, slow ? dt * 0.25 : dt);
+  g.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0); g.clearRect(0, 0, cv.width, cv.height);
+  g.fillStyle = '#BFE7F2'; g.fillRect(0, 0, innerWidth, innerHeight);
+  g.setTransform(devicePixelRatio * scale, 0, 0, devicePixelRatio * scale, devicePixelRatio * offX, devicePixelRatio * offY);
+  drawScene();
+  // Lost things come back.
+  for (const b of dynamic) if (b.position.y > H + 300 || b.position.y < -2000) { Body.setPosition(b, spawnSpot()); Body.setVelocity(b, { x: 0, y: 0 }); }
+}
+build(); requestAnimationFrame(frame);
+window.PG = { engine, world, get sling() { return sling; }, get catapult() { return catapult; }, get dynamic() { return dynamic; }, add, fireCatapult, build, Body, Composite, Vector };
+</script>
+</body>
+</html>

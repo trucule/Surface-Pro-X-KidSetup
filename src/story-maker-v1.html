@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Story Maker</title>
+<!--
+  Story Maker. She picks a hero, a place and a thing; it builds a short silly story from templates and reads it
+  aloud one sentence at a time while the scene shows the pieces. Tapping any word on the page says it, so she can
+  follow the text. Every story is built offline from the lists below; no API. Favourite picks are not stored.
+-->
+<style>
+  :root { --ink: #2B2140; --paper: #FFF9F0; --pink: #FF4F8B; --sun: #FFC93C; --sky: #58C7F0; --leaf: #5CD38B; --grape: #9B6BFF; }
+  html, body { margin: 0; height: 100%; background: var(--paper); overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); }
+  body { user-select: none; -webkit-user-select: none; }
+  #app { position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
+  header h1 { font-size: 26px; margin: 0 auto 0 0; font-weight: 900; }
+  .round { border: 4px solid var(--ink); background: #fff; border-radius: 50%; width: 64px; height: 64px; font-size: 30px; cursor: pointer; }
+  section { min-height: 0; overflow: auto; padding: 0 14px 14px; }
+  .q { font-size: 28px; font-weight: 900; margin: 6px 0 8px; }
+  .picks { display: grid; grid-template-columns: repeat(auto-fill, 118px); gap: 12px; justify-content: center; margin-bottom: 14px; }
+  .pick { border: 4px solid var(--ink); border-radius: 22px; background: #fff; padding: 8px 4px 6px; display: grid; justify-items: center; gap: 2px; font-weight: 800; font-size: 16px; cursor: pointer; }
+  .pick .e { font-size: 56px; line-height: 1.1; }
+  .pick.on { background: var(--sun); }
+  #go { display: block; margin: 8px auto 20px; border: 4px solid var(--ink); border-radius: 999px; background: var(--leaf); font: 900 28px system-ui, sans-serif; padding: 12px 34px; cursor: pointer; }
+  #go:disabled { opacity: .35; }
+  #story { display: none; }
+  #story.on { display: block; }
+  #scene { height: 180px; display: flex; align-items: center; justify-content: center; gap: 30px; font-size: 100px; background: #fff; border: 4px solid var(--ink); border-radius: 28px; margin-bottom: 14px; }
+  #scene span { transition: transform .3s; }
+  #scene span.now { transform: scale(1.25) rotate(-6deg); }
+  #text { font-size: 30px; line-height: 1.55; font-weight: 700; }
+  #text p { margin: 0 0 10px; padding: 8px 14px; border-radius: 16px; transition: background .2s; }
+  #text p.now { background: #FFF2C2; }
+  #text .w { cursor: pointer; border-radius: 6px; padding: 0 2px; }
+  #text .w:active { background: var(--sky); }
+  .bar { display: flex; justify-content: center; gap: 14px; margin: 14px 0; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header><h1>Story Maker</h1><button class="round" id="back" title="Make another" hidden>⬅️</button></header>
+  <section>
+    <div id="choose">
+      <div class="q">Who is the story about?</div><div class="picks" id="heroes"></div>
+      <div class="q">Where do they go?</div><div class="picks" id="places"></div>
+      <div class="q">What do they find?</div><div class="picks" id="things"></div>
+      <button id="go" disabled>Tell the story! 📖</button>
+    </div>
+    <div id="story">
+      <div id="scene"></div>
+      <div id="text"></div>
+      <div class="bar"><button class="round" id="read" title="Read it again">🔈</button><button class="round" id="another" title="Tell it differently">🎲</button></div>
+    </div>
+  </section>
+</div>
+<script id="voicepack">/* voice pack goes here: run voices/make-voices.py */</script>
+<script>
+// ---------------------------------------------------------------------------
+// Voice clips. If a voice pack is present (window.VOICE_PACK: phrase -> base64 MP3, made by voices/make-voices.py),
+// a phrase is played from its clip through Web Audio; otherwise the Windows voice reads it. Bytes are decoded in
+// memory (no data: or blob: URLs, which the kiosk blocks).
+// ---------------------------------------------------------------------------
+const VOICE = (() => {
+  let actx = null, cur = null; const decoded = new Map();
+  const key = t => String(t).trim().toLowerCase().replace(/\s+/g, ' ');
+  function ctx() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { actx = null; } } if (actx && actx.state === 'suspended') actx.resume(); return actx; }
+  function stop() { if (cur) { try { cur.onended = null; cur.stop(); } catch (e) {} cur = null; } }
+  function has(t) { const p = window.VOICE_PACK; return !!(p && p[key(t)]); }
+  function play(t, done) {
+    const p = window.VOICE_PACK, k = key(t); if (!p || !p[k]) return false;
+    const a = ctx(); if (!a) return false;
+    const go = (buf) => { stop(); const s = a.createBufferSource(); s.buffer = buf; s.connect(a.destination); s.onended = () => { if (cur === s) { cur = null; if (done) done(); } }; cur = s; s.start(); };
+    try {
+      if (decoded.has(k)) { go(decoded.get(k)); return true; }
+      const bin = atob(p[k]), bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      a.decodeAudioData(bytes.buffer.slice(0)).then(buf => { decoded.set(k, buf); go(buf); }).catch(() => { if (done) done(); });
+      return true;
+    } catch (e) { return false; }
+  }
+  return { play, stop, has, key };
+})();
+
+const HEROES = [['🐰', 'a bunny', 'Bun'], ['🐉', 'a little dragon', 'Spark'], ['🤖', 'a robot', 'Beep'], ['🦄', 'a unicorn', 'Twinkle'], ['🐧', 'a penguin', 'Pip'], ['👧', 'a girl', 'Scarlett'], ['🐸', 'a frog', 'Hop'], ['🦊', 'a fox', 'Rusty']];
+const PLACES = [['🏰', 'a castle', 'in the castle'], ['🌙', 'the moon', 'on the moon'], ['🏝️', 'an island', 'on the island'], ['🌲', 'a forest', 'in the forest'], ['🏖️', 'the beach', 'at the beach'], ['🎡', 'a fair', 'at the fair'], ['❄️', 'a snowy mountain', 'on the mountain'], ['🧁', 'a cupcake town', 'in cupcake town']];
+const THINGS = [['🗝️', 'a golden key'], ['🎈', 'a red balloon'], ['🐢', 'a sleepy turtle'], ['🍰', 'a giant cake'], ['🎁', 'a mystery box'], ['🚀', 'a tiny rocket'], ['🪄', 'a magic wand'], ['🧦', 'one lost sock']];
+const STORIES = [
+  ['Once upon a time there was {hero} called {name}.', '{Name} went to {place}.', '{Place2}, {name} found {thing}!', '"Wow!" said {name}. "I will keep you safe."', 'So {name} took {thing} home, and they became best friends.', 'The end.'],
+  ['{Name} the {kind} woke up very early.', '"Today I will visit {place}!" said {name}.', 'When {name} got there, something was hiding behind a rock.', 'It was {thing}!', '{Name} laughed and laughed, and they played {place2} all day long.', 'The end.'],
+  ['One rainy day, {name} was bored.', 'Then a letter came. It said: "Come to {place}. Bring a smile."', '{Name} ran all the way there.', '{Place2} everyone was waiting with a surprise: {thing}!', '"Happy day, {name}!" they all shouted.', 'The end.'],
+  ['{Name} lost {thing}.', '"Where can it be?" said {name}.', '{Name} looked under the bed. Not there. {Name} looked in the fridge. Not there.', 'At last {name} looked {place2}, and there it was, sleeping in the sun.', '{Name} hugged it tight and never lost it again.', 'The end.']
+];
+let hero = null, place = null, thing = null, reading = 0, sentences = [];
+const $ = id => document.getElementById(id);
+function picks(id, list, set) {
+  const box = $(id);
+  for (const item of list) {
+    const b = document.createElement('button'); b.className = 'pick';
+    const e = document.createElement('div'); e.className = 'e'; e.textContent = item[0]; b.appendChild(e);
+    const t = document.createElement('div'); t.textContent = item[1].replace(/^(a|an|the|one) /, ''); b.appendChild(t);
+    b.onclick = () => { [...box.children].forEach(x => x.classList.toggle('on', x === b)); set(item); say(item[1]); $('go').disabled = !(hero && place && thing); };
+    box.appendChild(b);
+  }
+}
+picks('heroes', HEROES, v => hero = v); picks('places', PLACES, v => place = v); picks('things', THINGS, v => thing = v);
+function say(t, done) { try { speechSynthesis.cancel(); } catch (e) {} VOICE.stop(); if (VOICE.play(t, done)) return; try { const u = new SpeechSynthesisUtterance(t); u.rate = 0.88; u.pitch = 1.1; if (done) u.onend = done; speechSynthesis.speak(u); } catch (e) { if (done) done(); } }
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+function build(tpl) {
+  const f = { hero: hero[1], name: hero[2], Name: hero[2], kind: hero[1].replace(/^(a|an) (little )?/, ''), place: place[1], place2: place[2], Place2: cap(place[2]), thing: thing[1] };
+  return tpl.map(s => s.replace(/\{(\w+)\}/g, (_, k) => f[k]));
+}
+function tell(tpl) {
+  sentences = build(tpl || STORIES[Math.floor(Math.random() * STORIES.length)]);
+  $('choose').hidden = true; $('story').classList.add('on'); $('back').hidden = false;
+  const scene = $('scene'); scene.innerHTML = '';
+  for (const e of [hero[0], place[0], thing[0]]) { const s = document.createElement('span'); s.textContent = e; scene.appendChild(s); }
+  const text = $('text'); text.innerHTML = '';
+  sentences.forEach((s, i) => {
+    const p = document.createElement('p');
+    for (const w of s.split(' ')) { const sp = document.createElement('span'); sp.className = 'w'; sp.textContent = w + ' '; sp.onclick = (e) => { e.stopPropagation(); say(w.replace(/[^\w']/g, '')); }; p.appendChild(sp); }
+    p.onclick = () => readFrom(i); text.appendChild(p);
+  });
+  readFrom(0);
+}
+function readFrom(i) {
+  reading = i;
+  const ps = $('text').children, spans = $('scene').children;
+  [...ps].forEach((p, k) => p.classList.toggle('now', k === i));
+  const s = sentences[i] || '';
+  [...spans].forEach((sp, k) => sp.classList.toggle('now', (k === 0 && /\b(hero|name)/.test('x')) || s.includes(k === 0 ? hero[2] : k === 1 ? place[2].split(' ').pop() : thing[1].split(' ').pop())));
+  if (i >= sentences.length) { [...ps].forEach(p => p.classList.remove('now')); return; }
+  ps[i].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  say(s, () => { if (reading === i) setTimeout(() => readFrom(i + 1), 350); });
+}
+$('go').onclick = () => tell();
+$('read').onclick = () => readFrom(0);
+$('another').onclick = () => tell();
+$('back').onclick = () => { reading = -1; try { speechSynthesis.cancel(); } catch (e) {} $('choose').hidden = false; $('story').classList.remove('on'); $('back').hidden = true; };
+addEventListener('pointerdown', () => say('Story Maker! Who is the story about?'), { once: true });
+</script>
+</body>
+</html>

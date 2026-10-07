@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Count With Me</title>
+<!--
+  Count With Me. Two counting games for a five-year-old, one file, offline, no API.
+  "How many?": things appear, she taps them to count out loud (each tap says the next number), then taps the answer.
+  "Give me": it asks for a number and she drags that many things into the basket.
+  Numbers grow with her: starts at 1-5, moves up to 10 after a streak, then up to 20. Progress is kept in
+  localStorage (key count-level) so it picks up where she left off.
+-->
+<style>
+  :root { --ink: #2B2140; --paper: #FFF9F0; --pink: #FF4F8B; --sun: #FFC93C; --sky: #58C7F0; --leaf: #5CD38B; --grape: #9B6BFF; }
+  html, body { margin: 0; height: 100%; background: var(--paper); overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); }
+  body { touch-action: none; user-select: none; -webkit-user-select: none; }
+  #app { position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr auto; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
+  header h1 { font-size: 26px; margin: 0 auto 0 0; font-weight: 900; }
+  .pill { border: 3px solid var(--ink); background: #fff; border-radius: 999px; padding: 8px 16px; font-size: 20px; font-weight: 800; cursor: pointer; }
+  .pill.on { background: var(--sun); }
+  #stars { font-size: 22px; font-weight: 900; }
+  main { position: relative; min-height: 0; }
+  #ask { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); font-size: 30px; font-weight: 900; background: #fff; border: 3px solid var(--ink); border-radius: 999px; padding: 6px 22px; white-space: nowrap; z-index: 2; }
+  #field { position: absolute; inset: 70px 20px 20px; border: 4px dashed #d9cfe8; border-radius: 28px; }
+  .thing { position: absolute; width: 96px; height: 96px; display: grid; place-items: center; font-size: 68px; cursor: pointer; transition: transform .15s; touch-action: none; }
+  .thing.counted { transform: scale(1.18); filter: drop-shadow(0 0 10px var(--sun)); }
+  .thing .n { position: absolute; top: -4px; right: -4px; width: 34px; height: 34px; border-radius: 50%; background: var(--sun); border: 3px solid var(--ink); font-size: 18px; font-weight: 900; display: grid; place-items: center; }
+  #basket { position: absolute; right: 24px; bottom: 24px; width: 300px; height: 190px; border: 4px solid var(--ink); border-radius: 24px 24px 40px 40px; background: #FFE4B5; display: none; z-index: 1; }
+  #basket::before { content: "🧺"; position: absolute; left: 10px; top: -30px; font-size: 44px; }
+  #basket.on { display: block; }
+  #basket .count { position: absolute; right: 12px; top: -22px; background: #fff; border: 3px solid var(--ink); border-radius: 999px; padding: 2px 14px; font-size: 24px; font-weight: 900; }
+  #answers { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); display: flex; gap: 14px; z-index: 2; }
+  #answers button, #check { border: 4px solid var(--ink); background: #fff; border-radius: 22px; width: 96px; height: 96px; font-size: 44px; font-weight: 900; cursor: pointer; }
+  #answers button:active, #check:active { transform: scale(.94); }
+  #answers button.no { background: #ffd6d6; animation: shake .4s; }
+  #check { display: none; position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--leaf); width: 150px; z-index: 2; }
+  #check.on { display: block; }
+  @keyframes shake { 25% { transform: translateX(-8px); } 75% { transform: translateX(8px); } }
+  #win { position: absolute; inset: 0; display: none; place-items: center; pointer-events: none; z-index: 5; }
+  #win.on { display: grid; }
+  #win .card { background: #fff; border: 4px solid var(--ink); border-radius: 28px; padding: 22px 36px; font-size: 44px; font-weight: 900; text-align: center; box-shadow: 0 12px 0 var(--pink); animation: pop .4s cubic-bezier(.2,1.6,.4,1); }
+  @keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  footer { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 10px 14px 16px; }
+  footer button { border: 4px solid var(--ink); background: #fff; border-radius: 50%; width: 76px; height: 76px; font-size: 34px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Count With Me</h1>
+    <span id="stars">⭐ 0</span>
+    <button class="pill on" data-mode="howmany">How many?</button>
+    <button class="pill" data-mode="giveme">Give me</button>
+  </header>
+  <main>
+    <div id="ask"></div>
+    <div id="field"></div>
+    <div id="basket"><span class="count">0</span></div>
+    <div id="answers"></div>
+    <button id="check">✔</button>
+    <div id="win"><div class="card"><span id="winText"></span></div></div>
+  </main>
+  <footer>
+    <button id="hear" title="Hear it">🔈</button>
+    <button id="again" title="New one">🔁</button>
+  </footer>
+</div>
+<script id="voicepack">/* voice pack goes here: run voices/make-voices.py */</script>
+<script>
+// ---------------------------------------------------------------------------
+// Voice clips. If a voice pack is present (window.VOICE_PACK: phrase -> base64 MP3, made by voices/make-voices.py),
+// a phrase is played from its clip through Web Audio; otherwise the Windows voice reads it. Bytes are decoded in
+// memory (no data: or blob: URLs, which the kiosk blocks).
+// ---------------------------------------------------------------------------
+const VOICE = (() => {
+  let actx = null, cur = null; const decoded = new Map();
+  const key = t => String(t).trim().toLowerCase().replace(/\s+/g, ' ');
+  function ctx() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { actx = null; } } if (actx && actx.state === 'suspended') actx.resume(); return actx; }
+  function stop() { if (cur) { try { cur.onended = null; cur.stop(); } catch (e) {} cur = null; } }
+  function has(t) { const p = window.VOICE_PACK; return !!(p && p[key(t)]); }
+  function play(t, done) {
+    const p = window.VOICE_PACK, k = key(t); if (!p || !p[k]) return false;
+    const a = ctx(); if (!a) return false;
+    const go = (buf) => { stop(); const s = a.createBufferSource(); s.buffer = buf; s.connect(a.destination); s.onended = () => { if (cur === s) { cur = null; if (done) done(); } }; cur = s; s.start(); };
+    try {
+      if (decoded.has(k)) { go(decoded.get(k)); return true; }
+      const bin = atob(p[k]), bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      a.decodeAudioData(bytes.buffer.slice(0)).then(buf => { decoded.set(k, buf); go(buf); }).catch(() => { if (done) done(); });
+      return true;
+    } catch (e) { return false; }
+  }
+  return { play, stop, has, key };
+})();
+
+const THINGS = ['🍎', '🐥', '⭐', '🐸', '🎈', '🐟', '🍓', '🦋', '🐢', '🌼', '🚗', '🍪'];
+const NAMES = { '🍎': 'apples', '🐥': 'chicks', '⭐': 'stars', '🐸': 'frogs', '🎈': 'balloons', '🐟': 'fish', '🍓': 'strawberries', '🦋': 'butterflies', '🐢': 'turtles', '🌼': 'flowers', '🚗': 'cars', '🍪': 'cookies' };
+const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'];
+const LEVELS = [[1, 5], [1, 10], [5, 20]];
+let mode = 'howmany', level = 0, streak = 0, stars = 0, target = 0, emoji = '🍎', counted = 0, inBasket = 0, busy = false, pending = null;
+try { const p = JSON.parse(localStorage.getItem('count-level') || '{}'); level = p.level || 0; stars = p.stars || 0; } catch (e) {}
+function persist() { try { localStorage.setItem('count-level', JSON.stringify({ level, stars })); } catch (e) {} }
+function say(t) { try { speechSynthesis.cancel(); } catch (e) {} VOICE.stop(); if (VOICE.play(t)) return; try { const u = new SpeechSynthesisUtterance(t); u.rate = 0.9; u.pitch = 1.1; speechSynthesis.speak(u); } catch (e) {} }
+const $ = id => document.getElementById(id);
+const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+
+function newRound(speak = true) {
+  clearTimeout(pending); pending = null;
+  busy = false; counted = 0; inBasket = 0;
+  const [lo, hi] = LEVELS[level]; emoji = THINGS[rnd(0, THINGS.length - 1)];
+  const field = $('field'); field.innerHTML = ''; $('answers').innerHTML = ''; $('win').classList.remove('on');
+  $('basket').classList.toggle('on', mode === 'giveme'); $('check').classList.toggle('on', mode === 'giveme');
+  $('basket').querySelector('.count').textContent = '0';
+  if (mode === 'howmany') {
+    target = rnd(lo, hi); scatter(target);
+    $('ask').textContent = 'How many ' + NAMES[emoji] + '?';
+    const opts = new Set([target]); while (opts.size < 3) opts.add(Math.max(lo === 1 ? 1 : 1, Math.min(hi, target + rnd(-3, 3))));
+    for (const n of [...opts].sort((a, b) => a - b)) { const b = document.createElement('button'); b.textContent = n; b.onclick = () => answer(n, b); $('answers').appendChild(b); }
+    if (speak) say('How many ' + NAMES[emoji] + '? Tap each one to count.');
+  } else {
+    target = rnd(lo, Math.min(hi, 12)); scatter(Math.min(hi, 12) < target + 3 ? target + rnd(1, 2) : target + rnd(2, 4), true);
+    $('ask').textContent = 'Put ' + target + ' ' + NAMES[emoji] + ' in the basket';
+    if (speak) say('Put ' + WORDS[target] + ' ' + NAMES[emoji] + ' in the basket. Then tap the check.');
+  }
+}
+// Place things so they do not overlap much, away from the basket and the answer buttons.
+function scatter(n, draggable) {
+  const field = $('field'), W = field.clientWidth, H = field.clientHeight, pts = [];
+  const avoid = (x, y) => (draggable && x > W - 340 && y > H - 240) || (!draggable && y > H - 130 && x > W / 2 - 220 && x < W / 2 + 220);
+  for (let i = 0; i < n; i++) {
+    let x, y, tries = 0;
+    do { x = rnd(10, Math.max(20, W - 110)); y = rnd(10, Math.max(20, H - 110)); tries++; }
+    while (tries < 200 && (avoid(x, y) || pts.some(p => Math.hypot(p[0] - x, p[1] - y) < 100)));
+    pts.push([x, y]);
+    const t = document.createElement('div'); t.className = 'thing'; t.textContent = emoji; t.style.left = x + 'px'; t.style.top = y + 'px';
+    if (draggable) makeDraggable(t); else t.addEventListener('pointerdown', () => countTap(t));
+    field.appendChild(t);
+  }
+}
+function countTap(t) {
+  if (busy || t.classList.contains('counted')) return;
+  counted++; t.classList.add('counted');
+  const n = document.createElement('span'); n.className = 'n'; n.textContent = counted; t.appendChild(n);
+  say(WORDS[counted]);
+}
+function answer(n, btn) {
+  if (busy) return;
+  if (n === target) { busy = true; streak++; stars++; persist(); $('stars').textContent = '⭐ ' + stars; cheer(WORDS[target].charAt(0).toUpperCase() + WORDS[target].slice(1) + ' ' + NAMES[emoji] + '!'); levelUp(); pending = setTimeout(newRound, 2600); }
+  else { streak = 0; btn.classList.add('no'); setTimeout(() => btn.classList.remove('no'), 500); say('Not ' + WORDS[n] + '. Count them again!'); }
+}
+function makeDraggable(t) {
+  let dx = 0, dy = 0, drag = false;
+  t.addEventListener('pointerdown', e => { if (busy) return; drag = true; t.setPointerCapture(e.pointerId); dx = e.clientX - t.offsetLeft; dy = e.clientY - t.offsetTop; t.style.zIndex = 3; });
+  t.addEventListener('pointermove', e => { if (!drag) return; t.style.left = (e.clientX - dx) + 'px'; t.style.top = (e.clientY - dy) + 'px'; });
+  t.addEventListener('pointerup', () => { if (!drag) return; drag = false; t.style.zIndex = ''; settle(t); });
+}
+function settle(t) {
+  const b = $('basket').getBoundingClientRect(), r = t.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  const inside = cx > b.left && cx < b.right && cy > b.top - 30 && cy < b.bottom;
+  if (inside !== t.classList.contains('in')) { t.classList.toggle('in', inside); inBasket += inside ? 1 : -1; $('basket').querySelector('.count').textContent = inBasket; say(inside ? WORDS[inBasket] : 'Oops, ' + WORDS[inBasket]); }
+}
+$('check').onclick = () => {
+  if (busy) return;
+  if (inBasket === target) { busy = true; streak++; stars++; persist(); $('stars').textContent = '⭐ ' + stars; cheer(WORDS[target].charAt(0).toUpperCase() + WORDS[target].slice(1) + ' ' + NAMES[emoji] + '. Perfect!'); levelUp(); pending = setTimeout(newRound, 2600); }
+  else { streak = 0; say(inBasket < target ? 'Only ' + WORDS[inBasket] + '. We need ' + WORDS[target] + '. Add some more!' : 'That is ' + WORDS[inBasket] + '. Too many! Take some out.'); }
+};
+function levelUp() { if (streak >= 5 && level < LEVELS.length - 1) { level++; streak = 0; persist(); setTimeout(() => say('Wow! Bigger numbers now!'), 2000); } }
+function cheer(text) {
+  $('winText').textContent = text; $('win').classList.add('on'); say('Yes! ' + text);
+  for (let i = 0; i < 12; i++) { const s = document.createElement('div'); s.className = 'thing'; s.style.pointerEvents = 'none'; s.textContent = ['⭐', '✨', '🌟'][i % 3]; s.style.left = rnd(0, 90) + '%'; s.style.top = rnd(0, 90) + '%'; s.style.transition = 'opacity 1.2s'; $('field').appendChild(s); setTimeout(() => s.style.opacity = 0, 50); setTimeout(() => s.remove(), 1300); }
+}
+document.querySelectorAll('.pill[data-mode]').forEach(b => b.onclick = () => { document.querySelectorAll('.pill[data-mode]').forEach(x => x.classList.toggle('on', x === b)); mode = b.dataset.mode; newRound(); });
+$('again').onclick = () => newRound();
+$('hear').onclick = () => say($('ask').textContent);
+$('stars').textContent = '⭐ ' + stars;
+addEventListener('resize', () => newRound(false));
+newRound(false);
+addEventListener('pointerdown', () => say('Count With Me! ' + $('ask').textContent), { once: true });
+</script>
+</body>
+</html>

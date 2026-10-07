@@ -1,0 +1,1548 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Draw With Me</title>
+<style>
+  :root { --ink: #2B2140; --bg: #FFF8EC; --pink: #FF4F8B; --green: #3BB273; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: system-ui, "Segoe UI", sans-serif; overflow: hidden; user-select: none; }
+  section { position: fixed; inset: 0; display: flex; flex-direction: column; padding: max(14px, env(safe-area-inset-top)) 18px max(14px, env(safe-area-inset-bottom)); }
+  section[hidden] { display: none; }
+  button { font: inherit; color: inherit; cursor: pointer; touch-action: manipulation; }
+  .round { width: 72px; height: 72px; border-radius: 50%; border: 4px solid var(--ink); background: #FFFFFF; font-size: 34px; display: grid; place-items: center; flex: none; padding: 0; }
+  .round:active, .pick:active, .filt:active, .sw:active { transform: scale(0.94); }
+  .bar { display: flex; align-items: center; gap: 14px; }
+  .bar h1, .bar h2 { flex: 1; margin: 0; text-align: center; font-weight: 900; }
+  h1 { font-size: 44px; } h2 { font-size: 32px; }
+  /* home */
+  #home .bar h1 span { color: var(--pink); }
+  #ask { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 6px 0 4px; }
+  #mic { width: 150px; height: 150px; border-radius: 50%; border: 6px solid var(--ink); background: var(--pink); font-size: 70px; display: grid; place-items: center; box-shadow: 0 8px 0 rgba(43,33,64,0.18); }
+  #mic[data-state="listening"] { animation: pulse 1s infinite; background: #FF7FA8; }
+  #mic[data-state="off"] { display: none; }
+  @keyframes pulse { 50% { transform: scale(1.08); box-shadow: 0 0 0 18px rgba(255,79,139,0.2); } }
+  #asklabel { font-size: 26px; font-weight: 800; }
+  #heard { min-height: 32px; font-size: 24px; font-weight: 700; color: #6A5A86; text-align: center; }
+  #picks { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 12px; padding: 6px 4px 12px; align-content: start; touch-action: pan-y; }
+  .pick { border: 4px solid var(--ink); border-radius: 22px; background: #FFFFFF; padding: 8px 4px 6px; display: grid; justify-items: center; gap: 2px; font-weight: 800; font-size: 17px; }
+  #galbar { flex: none; display: flex; align-items: center; gap: 10px; margin: 6px 4px 0; padding: 6px 14px; border: 3px solid var(--ink); border-radius: 999px; background: #FFFFFF; font: 800 18px system-ui, sans-serif; color: var(--ink); cursor: pointer; }
+  #galbar:active { transform: scale(0.98); }
+  #galpeek { display: flex; gap: 6px; margin-left: auto; }
+  #galpeek canvas { width: 36px; height: 36px; border: 2px solid var(--ink); border-radius: 8px; background: #FFFFFF; }
+  #galsheet { position: fixed; inset: 0; background: rgba(43,33,64,.85); z-index: 30; overflow: auto; padding: 18px; }
+  #galsheet .sheet { background: var(--paper, #FFF9F0); border-radius: 28px; padding: 14px 18px 22px; max-width: 1100px; margin: 0 auto; }
+  #galsheet .bar { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+  #galleryhead { font-size: 26px; font-weight: 900; margin: 0; }
+  #gallery { display: grid; grid-template-columns: repeat(auto-fill, 150px); gap: 14px; justify-content: center; }
+  .gal { width: 150px; height: 150px; border: 4px solid var(--ink); border-radius: 18px; padding: 0; overflow: hidden; background: #FFFFFF; }
+  .gal canvas { width: 100%; height: 100%; display: block; }
+  /* drawing */
+  #steptext { font-size: 34px; font-weight: 900; text-align: center; min-height: 46px; margin: 6px 0 2px; }
+  #stepdots { display: flex; justify-content: center; gap: 10px; margin-bottom: 6px; }
+  #stepdots i { width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--ink); background: #FFFFFF; }
+  #stepdots i.done { background: var(--green); } #stepdots i.now { background: var(--pink); transform: scale(1.25); }
+  .work { flex: 1; display: flex; gap: 14px; min-height: 0; align-items: stretch; }
+  .rail { display: flex; flex-direction: column; justify-content: center; gap: 14px; }
+  .rail .round { width: 80px; height: 80px; }
+  .rail small { display: block; font-size: 13px; font-weight: 800; text-align: center; margin-top: -8px; }
+  .stagebox { flex: 1; display: grid; place-items: center; min-width: 0; min-height: 0; }
+  #stage { position: relative; background: #FFFFFF; border: 4px solid var(--ink); border-radius: 18px; overflow: hidden; box-shadow: 0 6px 0 rgba(43,33,64,0.12); }
+  #stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #stage canvas { pointer-events: none; } #touch { touch-action: none; pointer-events: auto !important; }
+  #shade { mix-blend-mode: multiply; }
+  #next { width: 120px; height: 120px; font-size: 60px; background: var(--green); color: #FFFFFF; }
+  /* coloring */
+  #tools { display: grid; grid-template-columns: 1fr; gap: 10px; align-content: center; }
+  #tools button.on, #sizes button.on { background: #FFC93C; }
+  #sizes { display: flex; flex-direction: column; gap: 8px; align-items: center; }
+  #sizes button { width: 56px; height: 56px; border-radius: 50%; border: 4px solid var(--ink); background: #FFFFFF; display: grid; place-items: center; padding: 0; }
+  #sizes i { display: block; border-radius: 50%; background: var(--ink); }
+  #palette { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; padding-top: 10px; }
+  .sw { width: 58px; height: 58px; border-radius: 50%; border: 4px solid var(--ink); padding: 0; }
+  .sw.on { box-shadow: 0 0 0 5px #FFC93C; transform: scale(1.1); }
+  #done { width: auto; padding: 0 22px; border-radius: 40px; font-size: 28px; font-weight: 900; background: var(--green); color: #FFFFFF; }
+  /* finish */
+  #finish .work { align-items: center; }
+  #result { border: 4px solid var(--ink); border-radius: 18px; background: #FFFFFF; height: 100%; max-height: calc(100vh - 140px); aspect-ratio: 1; }
+  #filters { display: grid; grid-template-columns: repeat(2, 140px); gap: 12px; align-content: center; }
+  .filt { border: 4px solid var(--ink); border-radius: 18px; background: #FFFFFF; padding: 6px; display: grid; justify-items: center; gap: 4px; font-weight: 800; font-size: 16px; }
+  .filt.on { background: #FFC93C; }
+  .fprev { width: 112px; height: 112px; border-radius: 10px; }
+  #save { width: auto; padding: 0 26px; border-radius: 40px; font-size: 30px; font-weight: 900; background: #FFC93C; }
+  /* view */
+  #viewcanvas { max-width: 100%; max-height: calc(100vh - 130px); border: 4px solid var(--ink); border-radius: 18px; background: #FFFFFF; margin: auto; }
+  #thinking { position: fixed; inset: 0; z-index: 9; background: rgba(255,248,236,0.92); display: grid; place-items: center; align-content: center; gap: 18px; }
+  #thinking[hidden] { display: none; }
+  #thinking .pencil { font-size: 110px; animation: doodle 1.2s ease-in-out infinite; }
+  @keyframes doodle { 0%, 100% { transform: rotate(-12deg) translate(-20px, 0); } 50% { transform: rotate(12deg) translate(20px, -10px); } }
+  #thinkingtext { font-size: 34px; font-weight: 900; text-align: center; padding: 0 30px; }
+  #pen { display: flex; justify-content: center; align-items: center; gap: 10px; padding-top: 10px; flex-wrap: wrap; }
+  #pen .pc { width: 50px; height: 50px; border-radius: 50%; border: 4px solid var(--ink); padding: 0; }
+  #pen .pc.on { box-shadow: 0 0 0 5px #FFC93C; transform: scale(1.1); }
+  #pen .gap { width: 18px; }
+  #pen .dt { width: 54px; height: 54px; border-radius: 14px; border: 4px solid var(--ink); background: #FFFFFF; font-size: 26px; padding: 0; }
+  #pen .dt.on { background: #FFC93C; }
+  #style { display: flex; gap: 8px; }
+  #style button { border: 4px solid var(--ink); border-radius: 30px; background: #FFFFFF; font-size: 20px; font-weight: 800; padding: 6px 16px; }
+  #style button.on { background: #FFC93C; }
+  #hidesketch { font-size: 22px; }
+  #pen .ps { width: 54px; height: 54px; border-radius: 50%; border: 4px solid var(--ink); background: #FFFFFF; display: grid; place-items: center; padding: 0; }
+  #pen .ps.on { background: #FFE9A8; }
+  #pen .ps i { display: block; border-radius: 50%; }
+  #retry[hidden] + #retrygap { display: inline-block; } #retry:not([hidden]) + #retrygap { display: none; }
+  #cats { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 6px; touch-action: pan-x; flex: none; }
+  #cats button { flex: none; border: 3px solid var(--ink); border-radius: 22px; background: #FFFFFF; font-size: 17px; font-weight: 800; padding: 6px 14px; }
+  #cats button.on { background: #FFC93C; }
+  #builder { position: fixed; inset: 0; z-index: 21; background: #FFFFFF; padding: 16px; overflow: auto; font: 15px system-ui, sans-serif; user-select: text; }
+  #builder[hidden] { display: none; }
+  #bgrid { display: grid; grid-template-columns: repeat(auto-fill, 128px); gap: 8px; margin-top: 12px; }
+  .bcard { border: 3px solid #CCC; border-radius: 10px; padding: 3px; font-size: 11px; text-align: center; cursor: pointer; }
+  .bcard canvas { width: 116px; height: 116px; display: block; margin: 0 auto 2px; }
+  .bcard.ok { border-color: #3BB273; } .bcard.rejected { border-color: #E5484D; opacity: 0.45; } .bcard.failed { border-color: #F5A623; } .bcard.todo { opacity: 0.4; }
+  #lab { position: fixed; inset: 0; z-index: 20; background: #FFFFFF; padding: 16px; overflow: auto; font: 15px system-ui, sans-serif; user-select: text; }
+  #lab[hidden] { display: none; }
+  .labrow { display: flex; gap: 10px; margin-top: 10px; align-items: flex-start; }
+  .labrow input { flex: 1; font-size: 17px; padding: 8px; } .labrow button, .labrow select { font-size: 17px; padding: 8px 14px; }
+  #labcanvas { border: 1px solid #999; width: 600px; height: 600px; flex: none; } #labout { white-space: pre-wrap; font-size: 12px; margin: 0; max-height: 600px; overflow: auto; }
+  .pick.today { background: #FFF2C2; border-color: #D89B00; }
+  .pick.surprise { background: #E9DDFF; border-color: #7A4FD6; }
+  .pick.surprise .dice { font-size: 64px; line-height: 84px; height: 84px; }
+  .pick { position: relative; }
+  .pick .drew { position: absolute; top: -8px; right: -8px; font-size: 24px; filter: drop-shadow(0 1px 0 #2B2140); }
+  .pickhead { grid-column: 1 / -1; font-size: 22px; font-weight: 900; margin: 6px 2px -2px; color: #6A5A86; }
+  #confetti { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 10; }
+  #confetti i { position: absolute; top: -20px; width: 14px; height: 20px; border-radius: 4px; animation: fall linear forwards; }
+  @keyframes fall { to { transform: translateY(110vh) rotate(720deg); } }
+  @media (max-width: 900px) { #filters { grid-template-columns: 140px; } h1 { font-size: 32px; } #steptext { font-size: 24px; } }
+</style>
+</head>
+<body>
+<section id="home">
+  <div class="bar"><h1>Draw <span>With Me</span></h1><button class="round" id="sound" aria-label="Sound on or off">🔊</button></div>
+  <div id="ask">
+    <button id="mic" aria-label="Say what you want to draw">🎤</button>
+    <div id="asklabel">What do you want to draw?</div>
+    <div id="style" hidden><button data-s="simple">⭐ Simple</button><button data-s="detailed">⭐⭐⭐ Detailed</button></div>
+    <div id="heard" aria-live="polite"></div>
+  </div>
+  <div id="cats" hidden></div>
+  <div id="picks"></div>
+  <button id="galbar" hidden aria-label="My pictures"><span id="galcount">📷 My pictures</span><span id="galpeek"></span></button>
+</section>
+<div id="galsheet" hidden>
+  <div class="sheet">
+    <div class="bar"><button class="round" id="galclose" aria-label="Back">⬅️</button><h2 id="galleryhead">My pictures</h2></div>
+    <div id="gallery"></div>
+  </div>
+</div>
+<section id="draw" hidden>
+  <div class="bar"><button class="round home" aria-label="Home">🏠</button><h2 id="drawtitle"></h2><button class="round" id="retry" aria-label="Draw it a different way" hidden>🔄</button><span style="width:72px" id="retrygap"></span></div>
+  <div id="steptext" aria-live="polite"></div>
+  <div id="stepdots"></div>
+  <div class="work">
+    <div class="rail">
+      <div><button class="round" id="again" aria-label="Show me again">👀</button><small>Show me</small></div>
+      <div><button class="round" id="helpme" aria-label="Help me draw it">✨</button><small>Help me</small></div>
+      <div><button class="round" id="undo" aria-label="Undo">↩️</button><small>Undo</small></div>
+    </div>
+    <div class="stagebox" id="drawstage">
+      <div id="stage"><canvas id="paint"></canvas><canvas id="shade"></canvas><canvas id="sketch"></canvas><canvas id="ink"></canvas><canvas id="guide"></canvas><canvas id="touch"></canvas></div>
+    </div>
+    <div class="rail"><button class="round" id="next" aria-label="Next step">➜</button></div>
+  </div>
+  <div id="pen" aria-label="Marker"></div>
+</section>
+<section id="color" hidden>
+  <div class="bar"><button class="round home" aria-label="Home">🏠</button><h2>Color it in!</h2><button class="round" id="done" aria-label="Done coloring">Done ✓</button></div>
+  <div class="work">
+    <div class="rail">
+      <div id="tools">
+        <button class="round" data-tool="bucket" aria-label="Paint bucket">🪣</button>
+        <button class="round" data-tool="brush" aria-label="Paint brush">🖌️</button>
+        <button class="round" data-tool="crayon" aria-label="Crayon">🖍️</button>
+        <button class="round" data-tool="glitter" aria-label="Glitter">✨</button>
+        <button class="round" data-tool="rainbow" aria-label="Rainbow brush">🌈</button>
+        <button class="round" data-tool="eraser" aria-label="Eraser">🧽</button>
+        <button class="round" data-tool="shade" aria-label="Shading pencil">🌫️</button>
+        <button class="round" data-tool="smudge" aria-label="Smudge">👆</button>
+      </div>
+    </div>
+    <div class="stagebox" id="colorstage"></div>
+    <div class="rail">
+      <div id="sizes">
+        <button data-size="0" aria-label="Thin"><i style="width:10px;height:10px"></i></button>
+        <button data-size="1" aria-label="Medium"><i style="width:20px;height:20px"></i></button>
+        <button data-size="2" aria-label="Thick"><i style="width:32px;height:32px"></i></button>
+      </div>
+      <button class="round" id="undo2" aria-label="Undo">↩️</button>
+      <button class="round" id="hidesketch" aria-label="Erase the sketch lines" hidden>✏️✖</button>
+    </div>
+  </div>
+  <div id="palette"></div>
+</section>
+<section id="finish" hidden>
+  <div class="bar"><button class="round home" aria-label="Home">🏠</button><h2>Magic filters</h2><button class="round" id="backcolor" aria-label="Back to coloring">🎨</button></div>
+  <div class="work">
+    <div class="stagebox"><canvas id="result"></canvas></div>
+    <div class="rail"><div id="filters"></div><button class="round" id="save" aria-label="Save my picture">⭐ Save</button></div>
+  </div>
+</section>
+<section id="view" hidden>
+  <div class="bar"><button class="round" id="viewclose" aria-label="Back">⬅️</button><h2>My picture</h2><button class="round" id="viewdel" aria-label="Delete this picture">🗑️</button></div>
+  <canvas id="viewcanvas"></canvas>
+</section>
+<div id="builder" hidden>
+  <b>Draw With Me library builder</b> (makes library.js; tap a thumbnail to reject or restore it)
+  <div class="labrow"><input id="bkey" type="password" placeholder="API key"><select id="bmodel"><option value="claude-sonnet-5-5">Sonnet 5.5</option><option value="claude-haiku-4-5-20251001">Haiku 4.5</option><option value="claude-opus-5-5">Opus 5.5</option></select>
+    <label><input type="checkbox" id="bsimple" checked> Simple</label><label><input type="checkbox" id="bdetailed" checked> Detailed</label>
+    <label>at a time <select id="bconc"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>6</option></select></label></div>
+  <div class="labrow"><label>$ per million tokens: in <input id="bpin" value="3" size="4"> out <input id="bpout" value="15" size="4"></label> (edit to match current pricing)</div>
+  <div class="labrow"><button id="bstart">Start / resume</button><button id="bpause">Pause</button><button id="bredo">Redo failed and rejected</button><button id="bexport">Export library.js</button><span id="bstats"></span></div>
+  <div id="bgrid"></div>
+</div>
+<div id="lab" hidden>
+  <b>Draw With Me lab</b> (try requests; nothing is saved)
+  <div class="labrow"><input id="labask" placeholder="a monkey holding a banana"><select id="labstyle"><option value="detailed">Detailed</option><option value="simple">Simple</option></select><select id="labmodel"><option value="claude-sonnet-5-5">Sonnet 5.5</option><option value="claude-haiku-4-5-20251001">Haiku 4.5</option><option value="claude-opus-5-5">Opus 5.5</option></select><button id="labgo">Draw it</button><button id="labuse" hidden>Try drawing it</button></div>
+  <div class="labrow"><input id="labkey" type="password" placeholder="API key (from config.js, or paste one here)"></div>
+  <div class="labrow"><canvas id="labcanvas" width="600" height="600"></canvas><pre id="labout"></pre></div>
+</div>
+<div id="thinking" hidden><div class="pencil">✏️</div><div id="thinkingtext"></div></div>
+<div id="confetti" hidden></div>
+<script src="config.js"></script>
+<script src="library.js"></script>
+<script>// ---------------------------------------------------------------------------
+// The library catalog: what to pre-create (simple and detailed). "name|other ways to say it".
+// ---------------------------------------------------------------------------
+const CATALOG_SRC = {
+  pets: ['cat|kitty|kitten', 'puppy|dog|doggy', 'bunny|rabbit', 'hamster', 'guinea pig', 'goldfish|fish bowl', 'parrot', 'turtle|tortoise', 'kitten playing with yarn|cat with yarn', 'puppy with a bone|dog with a bone', 'mouse|mice', 'pony', 'lizard|gecko', 'ferret', 'hedgehog'],
+  farm: ['cow', 'pig|piggy', 'horse', 'sheep|lamb', 'goat', 'chicken|hen', 'rooster', 'baby chick|chick', 'duck|duckling', 'donkey', 'llama', 'barn|red barn', 'tractor', 'farmer', 'scarecrow', 'goose', 'turkey'],
+  wild: ['lion', 'tiger', 'elephant', 'giraffe', 'zebra', 'monkey', 'gorilla', 'panda|panda bear', 'koala', 'kangaroo', 'bear|brown bear', 'polar bear', 'fox', 'wolf', 'deer|reindeer', 'moose', 'raccoon', 'squirrel', 'hippo|hippopotamus', 'rhino|rhinoceros', 'cheetah', 'sloth', 'red panda', 'otter', 'beaver', 'skunk', 'camel', 'chipmunk', 'bat', 'frog', 'snake', 'crocodile|alligator', 'chameleon', 'monkey with a banana|monkey holding a banana'],
+  ocean: ['whale', 'dolphin', 'shark', 'octopus', 'jellyfish', 'starfish|sea star', 'crab', 'seahorse', 'sea turtle', 'clownfish', 'penguin', 'seal', 'walrus', 'lobster', 'pufferfish|puffer fish', 'stingray', 'narwhal', 'shell|seashell', 'submarine', 'anchor'],
+  bugs: ['butterfly', 'ladybug', 'bee|bumblebee', 'ant', 'giant ant', 'caterpillar', 'snail', 'spider', 'dragonfly', 'grasshopper', 'firefly', 'worm', 'beetle', 'beehive', 'spider web'],
+  birds: ['owl', 'eagle', 'flamingo', 'peacock', 'toucan', 'hummingbird', 'swan', 'parrot on a branch', 'pigeon', 'robin|red bird', 'bird in a nest|nest', 'woodpecker', 'pelican', 'ostrich', 'puffin'],
+  dinosaurs: ['t rex|trex|t-rex|tyrannosaurus', 'stegosaurus', 'triceratops', 'brontosaurus|long neck dinosaur', 'pterodactyl', 'baby dinosaur hatching|dinosaur egg', 'velociraptor', 'ankylosaurus', 'spinosaurus', 'dinosaur footprint'],
+  fantasy: ['unicorn', 'dragon|friendly dragon', 'mermaid', 'fairy', 'castle', 'princess', 'prince', 'knight', 'wizard', 'witch hat|wizard hat', 'magic wand', 'pegasus|flying horse', 'phoenix', 'gnome', 'troll bridge|troll', 'treasure chest', 'pirate', 'pirate ship', 'genie lamp|magic lamp', 'crystal ball', 'rainbow unicorn', 'baby dragon', 'fairy house|mushroom house', 'crown', 'superhero', 'robot', 'alien', 'monster|friendly monster', 'ghost|friendly ghost', 'yeti'],
+  vehicles: ['car', 'race car', 'fire truck', 'police car', 'ambulance', 'school bus|bus', 'train', 'airplane|plane', 'helicopter', 'hot air balloon', 'sailboat', 'tugboat', 'bicycle|bike', 'motorcycle', 'scooter', 'dump truck', 'excavator|digger', 'cement mixer', 'tractor trailer|big truck', 'monster truck', 'garbage truck', 'ice cream truck', 'skateboard', 'canoe', 'blimp'],
+  space: ['rocket', 'astronaut', 'planet|saturn', 'earth', 'moon', 'sun', 'star', 'shooting star', 'ufo|flying saucer', 'satellite', 'telescope', 'space station', 'comet', 'moon rover', 'constellation'],
+  food: ['apple', 'banana', 'strawberry', 'watermelon', 'pineapple', 'cherries', 'grapes', 'orange', 'pear', 'carrot', 'broccoli', 'corn', 'mushroom', 'pumpkin', 'pizza', 'hamburger|burger', 'hot dog', 'taco', 'sandwich', 'french fries|fries', 'donut|doughnut', 'cupcake', 'birthday cake|cake', 'ice cream|ice cream cone', 'popsicle', 'cookie', 'lollipop', 'candy', 'pancakes', 'pretzel', 'sushi', 'avocado', 'lemon', 'egg|fried egg', 'cheese', 'milkshake', 'teapot', 'coffee cup|mug'],
+  nature: ['tree', 'palm tree', 'pine tree', 'flower', 'sunflower', 'rose', 'tulip', 'cactus', 'leaf', 'mushroom in the forest', 'mountain', 'volcano', 'rainbow', 'cloud', 'rain cloud|rain', 'lightning', 'snowflake', 'waterfall', 'island', 'beach', 'campfire', 'tent|camping', 'rock|pebble', 'acorn', 'four leaf clover|clover'],
+  people: ['girl', 'boy', 'baby', 'family', 'grandma', 'grandpa', 'firefighter', 'police officer', 'doctor', 'nurse', 'teacher', 'chef', 'astronaut girl', 'ballerina', 'cowboy', 'cowgirl', 'clown', 'ninja', 'mermaid princess', 'snowman', 'gingerbread man', 'stick figure|person', 'self portrait|me', 'mom|mommy', 'dad|daddy'],
+  toys: ['teddy bear', 'doll', 'ball', 'kite', 'yo-yo|yoyo', 'balloon', 'balloons', 'jack in the box', 'rubber duck', 'toy train', 'spinning top', 'blocks|building blocks', 'rocking horse', 'dollhouse', 'puzzle piece', 'robot toy', 'jump rope', 'bubble wand|bubbles', 'crayon', 'paintbrush'],
+  holidays: ['christmas tree', 'santa|santa claus', 'present|gift', 'candy cane', 'reindeer with a red nose|rudolph', 'snowman with a scarf', 'jack o lantern|halloween pumpkin', 'halloween ghost|ghost with a pumpkin', 'witch', 'bat for halloween', 'easter egg', 'easter bunny', 'valentine heart|heart', 'shamrock', 'firework|fireworks', 'birthday hat|party hat', 'menorah', 'turkey for thanksgiving', 'gingerbread house', 'stocking'],
+  places: ['house', 'castle tower', 'treehouse', 'lighthouse', 'igloo', 'windmill', 'skyscraper|city', 'school', 'church', 'bridge', 'playground', 'swing|swing set', 'slide', 'carousel|merry go round', 'ferris wheel', 'roller coaster', 'tent in the woods', 'cabin|log cabin', 'barn with animals', 'pyramid'],
+  music: ['guitar', 'piano', 'drum', 'violin', 'trumpet', 'microphone', 'music notes|music note', 'xylophone', 'maraca', 'tambourine'],
+  sports: ['soccer ball', 'basketball', 'football', 'baseball bat and ball|baseball', 'tennis racket', 'trophy', 'medal', 'swimmer|swimming', 'skier|skiing', 'ice skates|skating', 'surfboard|surfer', 'bowling', 'golf', 'gymnast', 'karate']
+};
+const CATEGORY_NAMES = { pets: 'Pets', farm: 'Farm', wild: 'Wild animals', ocean: 'Ocean', bugs: 'Bugs', birds: 'Birds', dinosaurs: 'Dinosaurs',
+  fantasy: 'Magic', vehicles: 'Things that go', space: 'Space', food: 'Food', nature: 'Nature', people: 'People', toys: 'Toys',
+  holidays: 'Holidays', places: 'Places', music: 'Music', sports: 'Sports' };
+const CATALOG = Object.entries(CATALOG_SRC).flatMap(([cat, list]) => list.map(entry => {
+  const [name, ...more] = entry.split('|');
+  return { id: 'lib-' + name.replace(/[^a-z0-9]+/g, '-'), name: name.charAt(0).toUpperCase() + name.slice(1), words: [name, ...more], cat };
+}));
+if (typeof module !== 'undefined') module.exports = { CATALOG, CATEGORY_NAMES };
+</script>
+<script>// ---------------------------------------------------------------------------
+// The drawing library. Each subject is a few simple steps a 5-year-old can do:
+// shapes on a 1000 x 1000 page. "say" is read aloud; "path" is the guide she traces.
+// ---------------------------------------------------------------------------
+const circle = (cx, cy, r) => `M${cx - r},${cy} a${r},${r} 0 1,0 ${2 * r},0 a${r},${r} 0 1,0 ${-2 * r},0`;
+const oval = (cx, cy, rx, ry) => `M${cx - rx},${cy} a${rx},${ry} 0 1,0 ${2 * rx},0 a${rx},${ry} 0 1,0 ${-2 * rx},0`;
+const shape = (pts, close = true) => 'M' + pts.map(p => p.join(',')).join(' L') + (close ? ' Z' : '');
+const line = (x1, y1, x2, y2) => `M${x1},${y1} L${x2},${y2}`;
+const arc = (cx, cy, r, a0, a1) => {   // angles in degrees, 0 = right, 90 = down
+  const p = a => [cx + r * Math.cos(a * Math.PI / 180), cy + r * Math.sin(a * Math.PI / 180)].map(v => Math.round(v));
+  const [x0, y0] = p(a0), [x1, y1] = p(a1);
+  return `M${x0},${y0} A${r},${r} 0 ${Math.abs(a1 - a0) > 180 ? 1 : 0},1 ${x1},${y1}`;
+};
+const star = (cx, cy, R, r) => shape(Array.from({ length: 10 }, (_, i) => { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r : R; return [Math.round(cx + rr * Math.cos(a)), Math.round(cy + rr * Math.sin(a))]; }));
+const mirror = (pts) => pts.map(([x, y]) => [1000 - x, y]);
+const both = (pts, close = true) => shape(pts, close) + ' ' + shape(mirror(pts), close);
+
+const SUBJECTS = [
+  { id: 'cat', name: 'Cat', words: ['cat', 'kitty', 'kitten', 'kitty cat'], steps: [
+    { say: 'Draw a big circle for the head.', path: circle(500, 420, 170) },
+    { say: 'Add two pointy ears on top.', path: shape([[355, 330], [370, 175], [465, 270]], false) + ' ' + shape([[535, 270], [630, 175], [645, 330]], false) },
+    { say: 'Draw two eyes.', path: circle(440, 400, 24) + ' ' + circle(560, 400, 24) },
+    { say: 'Add a little nose and a smile.', path: shape([[478, 462], [522, 462], [500, 486]]) + ' M500,486 Q472,525 445,500 M500,486 Q528,525 555,500' },
+    { say: 'Give her whiskers!', path: line(285, 455, 415, 470) + ' ' + line(290, 505, 415, 495) + ' ' + line(585, 470, 715, 455) + ' ' + line(585, 495, 710, 505) },
+    { say: 'Draw a round body under the head.', path: 'M380,560 Q330,880 500,880 Q670,880 620,560' },
+    { say: 'Last, a curly tail.', path: 'M630,820 Q790,820 780,690 Q770,610 700,620' }] },
+  { id: 'dog', name: 'Puppy', words: ['dog', 'puppy', 'doggy', 'doggie', 'pup'], steps: [
+    { say: 'Draw a big circle for the head.', path: circle(500, 420, 160) },
+    { say: 'Add two floppy ears.', path: oval(335, 430, 55, 115) + ' ' + oval(665, 430, 55, 115) },
+    { say: 'Draw two eyes.', path: circle(445, 390, 22) + ' ' + circle(555, 390, 22) },
+    { say: 'Draw a nose and a happy mouth.', path: oval(500, 460, 36, 26) + ' M500,486 Q500,520 462,526 M500,486 Q500,520 538,526' },
+    { say: 'Add a little tongue.', path: 'M484,526 Q500,580 516,526' },
+    { say: 'Draw the body.', path: 'M385,560 Q320,880 500,880 Q680,880 615,560' },
+    { say: 'Add a waggy tail.', path: 'M640,760 Q770,720 760,610' }] },
+  { id: 'house', name: 'House', words: ['house', 'home', 'cabin'], steps: [
+    { say: 'Draw a big square.', path: shape([[300, 500], [700, 500], [700, 860], [300, 860]]) },
+    { say: 'Put a triangle roof on top.', path: shape([[255, 500], [500, 270], [745, 500]]) },
+    { say: 'Draw a door.', path: shape([[450, 860], [450, 690], [550, 690], [550, 860]], false) },
+    { say: 'Add two windows.', path: shape([[335, 560], [425, 560], [425, 640], [335, 640]]) + ' ' + shape([[575, 560], [665, 560], [665, 640], [575, 640]]) },
+    { say: 'Add a chimney.', path: shape([[600, 370], [600, 285], [660, 285], [660, 425]], false) },
+    { say: 'Draw a doorknob.', path: circle(530, 780, 10) }] },
+  { id: 'sun', name: 'Sun', words: ['sun', 'sunshine', 'sunny'], steps: [
+    { say: 'Draw a big circle.', path: circle(500, 500, 170) },
+    { say: 'Add sunbeams all around.', path: Array.from({ length: 8 }, (_, i) => { const a = i * Math.PI / 4; return line(Math.round(500 + 215 * Math.cos(a)), Math.round(500 + 215 * Math.sin(a)), Math.round(500 + 320 * Math.cos(a)), Math.round(500 + 320 * Math.sin(a))); }).join(' ') },
+    { say: 'Give it two eyes.', path: circle(440, 460, 20) + ' ' + circle(560, 460, 20) },
+    { say: 'And a big smile!', path: 'M410,545 Q500,630 590,545' }] },
+  { id: 'flower', name: 'Flower', words: ['flower', 'flowers', 'daisy', 'rose', 'tulip'], steps: [
+    { say: 'Draw a small circle in the middle.', path: circle(500, 360, 65) },
+    { say: 'Draw petals all around it.', path: Array.from({ length: 6 }, (_, i) => { const a = i * Math.PI / 3 - Math.PI / 2; return circle(Math.round(500 + 125 * Math.cos(a)), Math.round(360 + 125 * Math.sin(a)), 62); }).join(' ') },
+    { say: 'Draw a long stem.', path: 'M500,550 Q470,710 500,890' },
+    { say: 'Add two leaves.', path: 'M488,720 Q390,650 370,720 Q430,770 488,720 M495,800 Q590,730 615,800 Q550,850 495,800' }] },
+  { id: 'tree', name: 'Tree', words: ['tree', 'trees', 'apple tree'], steps: [
+    { say: 'Draw the tree trunk.', path: 'M455,880 L470,600 M545,880 L530,600 M420,880 L580,880' },
+    { say: 'Draw a big fluffy cloud of leaves.', path: 'M380,620 Q260,600 290,490 Q240,370 360,340 Q380,210 500,230 Q620,210 640,340 Q760,370 710,490 Q740,600 620,620 Q560,660 500,620 Q440,660 380,620 Z' },
+    { say: 'Add some apples.', path: circle(400, 470, 28) + ' ' + circle(560, 380, 28) + ' ' + circle(610, 530, 28) }] },
+  { id: 'fish', name: 'Fish', words: ['fish', 'fishy', 'goldfish', 'shark'], steps: [
+    { say: 'Draw a long oval for the body.', path: oval(460, 500, 230, 135) },
+    { say: 'Add a triangle tail.', path: shape([[680, 500], [830, 380], [830, 620]]) },
+    { say: 'Draw an eye.', path: circle(340, 470, 24) },
+    { say: 'Add a fin on top and a smile.', path: 'M430,370 Q490,290 570,375 M255,525 Q280,550 310,530' },
+    { say: 'Draw some bubbles.', path: circle(190, 370, 22) + ' ' + circle(160, 290, 14) + ' ' + circle(200, 220, 9) }] },
+  { id: 'butterfly', name: 'Butterfly', words: ['butterfly', 'butterflies', 'moth'], steps: [
+    { say: 'Draw a long skinny body.', path: oval(500, 520, 32, 180) },
+    { say: 'Draw two big wings on top.', path: 'M480,450 Q300,200 230,330 Q190,470 470,500 M520,450 Q700,200 770,330 Q810,470 530,500' },
+    { say: 'Draw two small wings on the bottom.', path: 'M475,540 Q300,560 320,680 Q360,760 480,600 M525,540 Q700,560 680,680 Q640,760 520,600' },
+    { say: 'Add two antennas.', path: 'M488,345 Q450,250 415,240 M512,345 Q550,250 585,240' },
+    { say: 'Decorate the wings with dots.', path: circle(330, 370, 35) + ' ' + circle(670, 370, 35) + ' ' + circle(380, 640, 22) + ' ' + circle(620, 640, 22) }] },
+  { id: 'rocket', name: 'Rocket', words: ['rocket', 'rocket ship', 'spaceship', 'space ship'], steps: [
+    { say: 'Draw a tall rocket body with a pointy top.', path: 'M420,750 L420,400 Q500,170 580,400 L580,750 Z' },
+    { say: 'Add a round window.', path: circle(500, 450, 45) },
+    { say: 'Draw two fins.', path: shape([[420, 610], [320, 770], [420, 745]], false) + ' ' + shape([[580, 610], [680, 770], [580, 745]], false) },
+    { say: 'Add fire at the bottom!', path: 'M440,750 Q460,880 500,800 Q540,880 560,750' }] },
+  { id: 'car', name: 'Car', words: ['car', 'truck', 'race car', 'racecar', 'bus'], steps: [
+    { say: 'Draw the car body.', path: 'M200,650 L200,565 Q205,525 260,520 L340,520 L405,420 L630,420 L715,520 L790,530 Q820,540 820,600 L820,650 Z' },
+    { say: 'Draw two big wheels.', path: circle(330, 660, 65) + ' ' + circle(690, 660, 65) },
+    { say: 'Add the windows.', path: shape([[420, 440], [505, 440], [505, 512], [365, 512]]) + ' ' + shape([[525, 440], [620, 440], [690, 512], [525, 512]]) },
+    { say: 'Add a headlight.', path: circle(795, 575, 18) }] },
+  { id: 'star', name: 'Star', words: ['star', 'stars', 'twinkle'], steps: [
+    { say: 'Draw a big star with five points.', path: star(500, 520, 320, 135) },
+    { say: 'Give it two eyes.', path: circle(450, 500, 18) + ' ' + circle(550, 500, 18) },
+    { say: 'And a smile!', path: 'M445,560 Q500,610 555,560' }] },
+  { id: 'heart', name: 'Heart', words: ['heart', 'hearts', 'love'], steps: [
+    { say: 'Draw one side of the heart.', path: 'M500,800 C150,560 260,260 500,420' },
+    { say: 'Now the other side.', path: 'M500,420 C740,260 850,560 500,800' },
+    { say: 'Add a happy face.', path: circle(430, 520, 16) + ' ' + circle(570, 520, 16) + ' M440,580 Q500,630 560,580' }] },
+  { id: 'rainbow', name: 'Rainbow', words: ['rainbow', 'rainbows'], steps: [
+    { say: 'Draw a big curve like a bridge.', path: arc(500, 700, 340, 180, 360) },
+    { say: 'Draw another curve inside it.', path: arc(500, 700, 280, 180, 360) },
+    { say: 'And another one.', path: arc(500, 700, 220, 180, 360) },
+    { say: 'And a small one in the middle.', path: arc(500, 700, 160, 180, 360) },
+    { say: 'Add fluffy clouds at the bottom.', path: 'M120,720 Q110,640 180,650 Q210,590 270,640 Q340,640 320,720 Z M680,720 Q660,640 730,650 Q760,590 820,640 Q890,640 880,720 Z' }] },
+  { id: 'bird', name: 'Bird', words: ['bird', 'birdie', 'birds', 'chick', 'chicken', 'duck'], steps: [
+    { say: 'Draw an oval for the body.', path: oval(470, 540, 180, 130) },
+    { say: 'Add a round head.', path: circle(620, 400, 85) },
+    { say: 'Draw a pointy beak.', path: shape([[700, 385], [785, 405], [700, 430]], false) },
+    { say: 'Add an eye.', path: circle(640, 385, 16) },
+    { say: 'Draw a wing.', path: 'M370,520 Q460,440 560,530 Q460,580 370,520' },
+    { say: 'Add a tail and two legs.', path: shape([[295, 520], [195, 460], [205, 570]], false) + ' ' + line(440, 665, 425, 770) + ' ' + line(510, 665, 525, 770) }] },
+  { id: 'owl', name: 'Owl', words: ['owl', 'owls', 'hoot'], steps: [
+    { say: 'Draw a big tall oval body.', path: oval(500, 560, 200, 260) },
+    { say: 'Add two big round eyes.', path: circle(420, 440, 72) + ' ' + circle(580, 440, 72) },
+    { say: 'Draw dots in the middle of the eyes.', path: circle(420, 440, 26) + ' ' + circle(580, 440, 26) },
+    { say: 'Add a little triangle beak.', path: shape([[472, 520], [528, 520], [500, 570]]) },
+    { say: 'Add pointy ear tufts.', path: shape([[340, 380], [345, 270], [420, 330]], false) + ' ' + shape([[660, 380], [655, 270], [580, 330]], false) },
+    { say: 'Draw the wings on the sides.', path: 'M318,520 Q255,650 340,760 M682,520 Q745,650 660,760' }] },
+  { id: 'turtle', name: 'Turtle', words: ['turtle', 'turtles', 'tortoise'], steps: [
+    { say: 'Draw a big hill for the shell.', path: 'M250,640 Q250,360 500,360 Q750,360 750,640 Z' },
+    { say: 'Add a round head.', path: circle(815, 570, 68) },
+    { say: 'Draw four little legs.', path: oval(320, 680, 45, 32) + ' ' + oval(440, 690, 45, 32) + ' ' + oval(570, 690, 45, 32) + ' ' + oval(690, 680, 45, 32) },
+    { say: 'Draw a pattern on the shell.', path: shape([[430, 460], [570, 460], [610, 560], [500, 620], [390, 560]]) },
+    { say: 'Add an eye and a smile.', path: circle(835, 550, 12) + ' M800,600 Q825,620 850,600' }] },
+  { id: 'snail', name: 'Snail', words: ['snail', 'snails', 'slug'], steps: [
+    { say: 'Draw a big circle for the shell.', path: circle(470, 520, 170) },
+    { say: 'Draw a swirl inside the shell.', path: 'M470,520 Q470,470 515,480 Q565,500 545,560 Q520,620 450,605 Q370,585 375,500 Q385,400 480,390 Q590,385 615,480' },
+    { say: 'Draw the long body underneath.', path: 'M220,700 L780,700 Q840,700 840,630 L840,520' },
+    { say: 'Add two antennas with dots.', path: line(815, 520, 790, 410) + ' ' + line(845, 520, 880, 410) + ' ' + circle(788, 398, 14) + ' ' + circle(883, 398, 14) },
+    { say: 'Add an eye and a smile.', path: circle(820, 570, 12) + ' M800,620 Q825,640 845,615' }] },
+  { id: 'robot', name: 'Robot', words: ['robot', 'robots', 'bot'], steps: [
+    { say: 'Draw a square head.', path: shape([[380, 220], [620, 220], [620, 400], [380, 400]]) },
+    { say: 'Add an antenna on top.', path: line(500, 220, 500, 150) + ' ' + circle(500, 135, 16) },
+    { say: 'Draw two eyes and a mouth.', path: circle(445, 290, 25) + ' ' + circle(555, 290, 25) + ' ' + shape([[440, 345], [560, 345], [560, 370], [440, 370]]) },
+    { say: 'Draw a big square body.', path: shape([[340, 430], [660, 430], [660, 720], [340, 720]]) },
+    { say: 'Add arms and legs.', path: shape([[340, 470], [260, 470], [260, 640]], false) + ' ' + shape([[660, 470], [740, 470], [740, 640]], false) + ' ' + shape([[400, 720], [400, 850], [460, 850], [460, 720]], false) + ' ' + shape([[540, 720], [540, 850], [600, 850], [600, 720]], false) },
+    { say: 'Add buttons!', path: circle(450, 520, 20) + ' ' + circle(500, 520, 20) + ' ' + circle(550, 520, 20) }] },
+  { id: 'unicorn', name: 'Unicorn', words: ['unicorn', 'unicorns', 'pony', 'horse'], steps: [
+    { say: 'Draw a big circle for the head.', path: circle(500, 480, 165) },
+    { say: 'Draw a long pointy horn on top.', path: shape([[462, 320], [500, 130], [538, 320]], false) },
+    { say: 'Add stripes on the horn.', path: line(470, 280, 528, 262) + ' ' + line(480, 225, 520, 212) },
+    { say: 'Add two ears.', path: shape([[380, 360], [365, 255], [440, 320]], false) + ' ' + shape([[620, 360], [635, 255], [560, 320]], false) },
+    { say: 'Draw sleepy eyes with eyelashes.', path: 'M400,460 Q430,490 460,460 M540,460 Q570,490 600,460 M405,470 L392,485 M455,470 L468,485 M545,470 L532,485 M595,470 L608,485' },
+    { say: 'Draw an oval for the nose.', path: oval(500, 580, 90, 55) + ' ' + circle(470, 580, 9) + ' ' + circle(530, 580, 9) },
+    { say: 'Add a curly mane on the side.', path: 'M345,400 Q280,430 330,475 Q265,510 330,555 Q270,600 340,640' }] },
+  { id: 'cupcake', name: 'Cupcake', words: ['cupcake', 'cupcakes', 'cake', 'muffin'], steps: [
+    { say: 'Draw the cupcake wrapper.', path: shape([[350, 600], [650, 600], [610, 820], [390, 820]]) },
+    { say: 'Add lines on the wrapper.', path: line(420, 600, 440, 820) + ' ' + line(500, 600, 500, 820) + ' ' + line(580, 600, 560, 820) },
+    { say: 'Draw fluffy frosting on top.', path: 'M330,600 Q300,505 385,485 Q385,380 500,380 Q615,380 615,485 Q700,505 670,600 Z' },
+    { say: 'Put a cherry on top!', path: circle(500, 350, 35) + ' M500,315 Q510,270 545,255' }] },
+  { id: 'icecream', name: 'Ice cream', words: ['ice cream', 'icecream', 'ice-cream', 'cone', 'popsicle'], steps: [
+    { say: 'Draw a triangle cone.', path: shape([[380, 520], [620, 520], [500, 880]]) },
+    { say: 'Draw a round scoop on top.', path: 'M370,525 Q330,300 500,295 Q670,300 630,525' },
+    { say: 'Add a drip.', path: 'M560,525 Q565,590 580,590 Q595,590 595,525' },
+    { say: 'Draw crisscross lines on the cone.', path: line(420, 580, 560, 700) + ' ' + line(580, 580, 440, 700) + ' ' + line(455, 520, 590, 640) + ' ' + line(545, 520, 410, 640) },
+    { say: 'Put a cherry on top.', path: circle(500, 270, 30) + ' M500,240 Q510,200 540,190' }] },
+  { id: 'dinosaur', name: 'Dinosaur', words: ['dinosaur', 'dino', 'dinosaurs', 't rex', 'trex', 't-rex', 'dragon'], steps: [
+    { say: 'Draw a big oval body.', path: oval(470, 620, 220, 130) },
+    { say: 'Draw a long neck and a head.', path: 'M620,540 Q670,300 740,285 Q830,270 825,335 Q815,370 745,365 Q730,470 690,600' },
+    { say: 'Add a long tail.', path: 'M260,640 Q150,660 110,560' },
+    { say: 'Draw four legs.', path: shape([[330, 720], [330, 840], [390, 840], [390, 735]], false) + ' ' + shape([[540, 735], [540, 840], [600, 840], [600, 720]], false) },
+    { say: 'Add an eye and spots on its back.', path: circle(775, 315, 12) + ' ' + circle(420, 570, 30) + ' ' + circle(520, 545, 24) + ' ' + circle(350, 620, 20) }] },
+  { id: 'bunny', name: 'Bunny', words: ['bunny', 'rabbit', 'bunnies', 'easter bunny'], steps: [
+    { say: 'Draw a circle for the head.', path: circle(500, 470, 140) },
+    { say: 'Draw two long ears.', path: oval(440, 230, 45, 125) + ' ' + oval(560, 230, 45, 125) },
+    { say: 'Draw two eyes.', path: circle(450, 445, 20) + ' ' + circle(550, 445, 20) },
+    { say: 'Add a little nose and whiskers.', path: shape([[482, 500], [518, 500], [500, 520]]) + ' ' + line(360, 505, 460, 515) + ' ' + line(540, 515, 640, 505) },
+    { say: 'Draw a round body.', path: 'M400,590 Q330,880 500,880 Q670,880 600,590' },
+    { say: 'Add two big feet.', path: oval(420, 885, 70, 30) + ' ' + oval(580, 885, 70, 30) }] },
+  { id: 'bear', name: 'Teddy bear', words: ['bear', 'teddy', 'teddy bear', 'bears'], steps: [
+    { say: 'Draw a circle for the head.', path: circle(500, 430, 160) },
+    { say: 'Add two round ears.', path: circle(370, 300, 55) + ' ' + circle(630, 300, 55) },
+    { say: 'Draw an oval for the snout.', path: oval(500, 500, 72, 55) },
+    { say: 'Add eyes, a nose and a smile.', path: circle(440, 400, 20) + ' ' + circle(560, 400, 20) + ' ' + oval(500, 480, 24, 16) + ' M470,520 Q500,550 530,520' },
+    { say: 'Draw the round body.', path: 'M385,570 Q320,880 500,880 Q680,880 615,570' },
+    { say: 'Add a tummy patch.', path: oval(500, 745, 75, 90) }] },
+  { id: 'boat', name: 'Sailboat', words: ['boat', 'sailboat', 'ship', 'sail boat', 'pirate ship'], steps: [
+    { say: 'Draw the boat bottom.', path: shape([[220, 640], [780, 640], [700, 760], [300, 760]]) },
+    { say: 'Draw a tall pole.', path: line(500, 640, 500, 230) },
+    { say: 'Draw a big triangle sail.', path: shape([[515, 245], [515, 610], [745, 610]]) },
+    { say: 'Draw a smaller sail.', path: shape([[485, 300], [485, 610], [300, 610]]) },
+    { say: 'Add wavy water.', path: 'M140,810 Q190,770 240,810 Q290,850 340,810 Q390,770 440,810 Q490,850 540,810 Q590,770 640,810 Q690,850 740,810 Q790,770 840,810' }] },
+  { id: 'apple', name: 'Apple', words: ['apple', 'apples'], steps: [
+    { say: 'Draw a big round apple.', path: 'M500,330 C380,250 220,330 250,520 C270,690 400,800 500,740 C600,800 730,690 750,520 C780,330 620,250 500,330 Z' },
+    { say: 'Add a stem.', path: 'M500,330 Q495,260 520,220' },
+    { say: 'Add a leaf.', path: 'M515,265 Q600,200 650,250 Q580,300 515,265' }] },
+  { id: 'snowman', name: 'Snowman', words: ['snowman', 'snow man', 'frosty', 'snowmen'], steps: [
+    { say: 'Draw a big circle at the bottom.', path: circle(500, 720, 160) },
+    { say: 'Draw a middle circle.', path: circle(500, 470, 115) },
+    { say: 'Draw a small circle for the head.', path: circle(500, 280, 85) },
+    { say: 'Add eyes and a carrot nose.', path: circle(470, 260, 12) + ' ' + circle(530, 260, 12) + ' ' + shape([[500, 285], [580, 300], [500, 305]], false) },
+    { say: 'Add stick arms.', path: line(395, 450, 270, 380) + ' ' + line(605, 450, 730, 380) },
+    { say: 'Add buttons and a hat.', path: circle(500, 440, 13) + ' ' + circle(500, 500, 13) + ' ' + shape([[420, 205], [580, 205]], false) + ' ' + shape([[445, 205], [445, 120], [555, 120], [555, 205]], false) }] },
+  { id: 'ladybug', name: 'Ladybug', words: ['ladybug', 'lady bug', 'ladybird', 'bug', 'beetle'], steps: [
+    { say: 'Draw a big circle for the body.', path: circle(500, 560, 200) },
+    { say: 'Add a head on top.', path: arc(500, 365, 90, 180, 360) },
+    { say: 'Draw a line down the middle.', path: line(500, 365, 500, 760) },
+    { say: 'Add spots!', path: circle(410, 500, 35) + ' ' + circle(590, 500, 35) + ' ' + circle(420, 640, 30) + ' ' + circle(580, 640, 30) },
+    { say: 'Add two antennas.', path: 'M470,285 Q440,210 410,205 M530,285 Q560,210 590,205' }] },
+  { id: 'crown', name: 'Crown', words: ['crown', 'princess', 'queen', 'king', 'tiara'], steps: [
+    { say: 'Draw a zigzag crown.', path: shape([[250, 700], [250, 400], [375, 540], [500, 340], [625, 540], [750, 400], [750, 700]]) },
+    { say: 'Draw a line across the bottom.', path: line(250, 630, 750, 630) },
+    { say: 'Add round jewels.', path: circle(250, 380, 25) + ' ' + circle(500, 315, 28) + ' ' + circle(750, 380, 25) + ' ' + circle(375, 665, 18) + ' ' + circle(500, 665, 18) + ' ' + circle(625, 665, 18) }] },
+  { id: 'mermaid', name: 'Mermaid tail', words: ['mermaid', 'mermaids', 'mermaid tail'], steps: [
+    { say: 'Draw a long curvy tail.', path: 'M420,200 L580,200 M420,200 Q380,500 470,650 Q520,730 500,760 M580,200 Q620,500 540,650' },
+    { say: 'Draw a big fin at the bottom.', path: 'M500,760 Q380,720 330,830 Q450,820 500,770 Q550,820 670,830 Q620,720 500,760' },
+    { say: 'Draw scales like little smiles.', path: 'M440,300 Q470,330 500,300 Q530,330 560,300 M450,400 Q480,430 510,400 Q540,430 570,400 M460,500 Q490,530 520,500 Q545,525 560,505' }] }
+];
+
+const BUILTIN_CATS = { cat: 'pets', dog: 'pets', bunny: 'pets', bear: 'toys', owl: 'birds', bird: 'birds', fish: 'ocean', turtle: 'ocean', snail: 'bugs',
+  butterfly: 'bugs', ladybug: 'bugs', dinosaur: 'dinosaurs', unicorn: 'fantasy', mermaid: 'fantasy', crown: 'fantasy', robot: 'fantasy', house: 'places',
+  tree: 'nature', flower: 'nature', sun: 'space', star: 'space', heart: 'holidays', rainbow: 'nature', rocket: 'space', car: 'vehicles', boat: 'vehicles',
+  cupcake: 'food', icecream: 'food', apple: 'food', snowman: 'holidays' };
+for (const s of SUBJECTS) { s.cat = BUILTIN_CATS[s.id] || 'nature'; s.style = 'simple'; }
+
+// ---------------------------------------------------------------------------
+// What did she ask for? Match the words she said to a subject.
+// ---------------------------------------------------------------------------
+function editDistance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++)
+  {
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);   // swapped letters count once
+  }
+  return d[a.length][b.length];
+}
+function matchSubject(said, list) {
+  list = list || SUBJECTS;
+  const text = ' ' + said.toLowerCase().replace(/[^a-z\s-]/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
+  // Whole phrases first ("ice cream", "teddy bear"), longest first.
+  const phrases = list.flatMap(s => s.words.map(w => ({ s, w }))).sort((a, b) => b.w.length - a.w.length);
+  for (const { s, w } of phrases) if (text.includes(' ' + w + ' ')) return s;
+  // Then close-enough longer words ("unicorm", "butterfy"): a letter or two off.
+  // (Short words are left alone: "scar" isn't "star" and "dish" isn't "fish".)
+  const words = text.trim().split(' ').filter(w => w.length >= 5);
+  for (const { s, w } of phrases) if (!w.includes(' ') && w.length >= 5 && words.some(x => editDistance(x, w) <= (w.length >= 8 ? 2 : 1))) return s;
+  return null;
+}
+// What she asked for, for "I don't know how to draw ___ yet".
+function askedFor(said) {
+  const t = said.toLowerCase().replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim()
+    .replace(/^(can you |can we |i want to |i wanna |let's |lets |please |help me )?(draw |make |paint )?(a |an |the |some )?/, '');
+  return t.split(' ').slice(0, 4).join(' ');
+}
+if (typeof module !== 'undefined') module.exports = { SUBJECTS, matchSubject, askedFor };
+
+// ---------------------------------------------------------------------------
+// Shapes -> path. Learned drawings arrive as plain shapes (easier for a model to place
+// correctly than raw SVG paths); this turns them into the same path format as the library.
+//   {"circle":[cx,cy,r]}  {"oval":[cx,cy,rx,ry,tiltDeg]}  {"line":[x1,y1,x2,y2]}
+//   {"curve":[x1,y1,cx,cy,x2,y2]}  {"lines":[[x,y],...]}  {"shape":[[x,y],...]}  {"arc":[cx,cy,r,fromDeg,toDeg]}
+// ---------------------------------------------------------------------------
+var shapeToPath = function (s) {
+  const n = (v) => Math.round(+v * 10) / 10;
+  const ok = (a, k) => Array.isArray(a) && a.length >= k && a.slice(0, k).every(v => Number.isFinite(+v));
+  if (ok(s.circle, 3)) return circle(n(s.circle[0]), n(s.circle[1]), Math.abs(n(s.circle[2])));
+  if (ok(s.oval, 4)) {
+    const [cx, cy, rx, ry, tilt = 0] = s.oval.map(Number), t = tilt * Math.PI / 180, pts = [];
+    for (let i = 0; i <= 48; i++) { const a = i / 48 * 2 * Math.PI, x = Math.abs(rx) * Math.cos(a), y = Math.abs(ry) * Math.sin(a); pts.push([n(cx + x * Math.cos(t) - y * Math.sin(t)), n(cy + x * Math.sin(t) + y * Math.cos(t))]); }
+    return shape(pts);
+  }
+  if (ok(s.line, 4)) return line(...s.line.slice(0, 4).map(n));
+  if (ok(s.curve, 6)) { const [a, b, c, d, e, f] = s.curve.map(n); return `M${a},${b} Q${c},${d} ${e},${f}`; }
+  if (ok(s.arc, 5)) return arc(n(s.arc[0]), n(s.arc[1]), Math.abs(n(s.arc[2])), +s.arc[3], +s.arc[4]);
+  const pts = s.lines || s.shape;
+  if (Array.isArray(pts) && pts.length >= 2 && pts.every(p => ok(p, 2))) return shape(pts.map(p => [n(p[0]), n(p[1])]), !!s.shape);
+  return null;
+}
+// Every number a shape uses, for the "stays on the page" check.
+var shapePoints = function (s) {
+  const out = [];
+  if (s.circle) out.push([s.circle[0] - s.circle[2], s.circle[1] - s.circle[2]], [+s.circle[0] + +s.circle[2], +s.circle[1] + +s.circle[2]]);
+  else if (s.oval) {
+    // exact extent of a (possibly tilted) oval
+    const [cx, cy, rx, ry, tilt = 0] = s.oval.map(Number), t = tilt * Math.PI / 180;
+    const hw = Math.hypot(rx * Math.cos(t), ry * Math.sin(t)), hh = Math.hypot(rx * Math.sin(t), ry * Math.cos(t));
+    out.push([cx - hw, cy - hh], [cx + hw, cy + hh]);
+  }
+  else if (s.line) out.push([s.line[0], s.line[1]], [s.line[2], s.line[3]]);
+  else if (s.curve) out.push([s.curve[0], s.curve[1]], [s.curve[4], s.curve[5]]);
+  else if (s.arc) out.push([s.arc[0] - s.arc[2], s.arc[1] - s.arc[2]], [+s.arc[0] + +s.arc[2], +s.arc[1] + +s.arc[2]]);
+  else for (const p of (s.lines || s.shape || [])) out.push(p);
+  return out.map(p => p.map(Number));
+}
+
+// A hand-checked example in the shape format, showing one thing holding another.
+const SHAPE_EXAMPLE = { name: 'Bear holding a balloon',
+  plan: 'Recognizable: round head with round ears on top, oval snout, big round body; balloon is a tall oval with a knot and a string. Bear sits left of center (head 420,330 r120; body below it). Balloon is up and right (720,200) so the string can run down to the raised paw at (635,415).',
+  steps: [
+    { say: 'Draw a big circle for the head.', shapes: [{ circle: [420, 330, 120] }] },
+    { say: 'Add two round ears on top.', shapes: [{ circle: [330, 228, 42] }, { circle: [510, 228, 42] }] },
+    { say: 'Draw a snout with a nose and a smile.', shapes: [{ oval: [420, 375, 58, 42] }, { oval: [420, 358, 18, 12] }, { curve: [395, 392, 420, 412, 445, 392] }] },
+    { say: 'Add two eyes.', shapes: [{ circle: [380, 305, 12] }, { circle: [460, 305, 12] }] },
+    { say: 'Draw a big round body.', shapes: [{ oval: [420, 610, 150, 170] }] },
+    { say: 'Add an arm reaching up.', shapes: [{ oval: [585, 480, 78, 32, -50] }, { circle: [635, 420, 30] }] },
+    { say: 'Draw a balloon on a string.', shapes: [{ oval: [720, 200, 95, 115] }, { shape: [[705, 330], [735, 330], [720, 312]] }, { curve: [720, 330, 690, 375, 645, 405] }] }] };
+if (typeof module !== 'undefined') Object.assign(module.exports, { shapeToPath, shapePoints, SHAPE_EXAMPLE });
+
+// ---------------------------------------------------------------------------
+// Smooth outlines: a curve through points (Catmull-Rom as cubic Bezier), open or closed.
+//   {"smooth":[[x,y],...]}  {"smoothshape":[[x,y],...]}
+// ---------------------------------------------------------------------------
+function smoothPath(pts, closed) {
+  const P = pts.map(p => [Math.round(+p[0] * 10) / 10, Math.round(+p[1] * 10) / 10]), n = P.length;
+  if (n < 3) return shape(P, closed);
+  const at = (i) => closed ? P[(i + n) % n] : P[Math.max(0, Math.min(n - 1, i))];
+  let d = `M${P[0][0]},${P[0][1]}`;
+  const segs = closed ? n : n - 1;
+  for (let i = 0; i < segs; i++) {
+    const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2), r = (v) => Math.round(v * 10) / 10;
+    d += ` C${r(p1[0] + (p2[0] - p0[0]) / 6)},${r(p1[1] + (p2[1] - p0[1]) / 6)} ${r(p2[0] - (p3[0] - p1[0]) / 6)},${r(p2[1] - (p3[1] - p1[1]) / 6)} ${p2[0]},${p2[1]}`;
+  }
+  return d + (closed ? ' Z' : '');
+}
+const _shapeToPath = shapeToPath;
+shapeToPath = function (s) {
+  const pts = s && (s.smooth || s.smoothshape);
+  if (Array.isArray(pts) && pts.length >= 2 && pts.length <= 60 && pts.every(p => Array.isArray(p) && p.length >= 2 && Number.isFinite(+p[0]) && Number.isFinite(+p[1])))
+    return smoothPath(pts, !!s.smoothshape);
+  return _shapeToPath(s);
+};
+const _shapePoints = shapePoints;
+shapePoints = function (s) { const pts = s && (s.smooth || s.smoothshape); return pts ? pts.map(p => p.map(Number)) : _shapePoints(s); };
+
+// Points around an oval with gentle bumps (fur, fluff), for building smooth outlines.
+function blob(cx, cy, rx, ry, n, bump, phase) {
+  return Array.from({ length: n }, (_, i) => { const a = i / n * 2 * Math.PI, k = 1 + (bump || 0) * Math.sin(a * 7 + (phase || 0));
+    return [Math.round(cx + rx * k * Math.cos(a)), Math.round(cy + ry * k * Math.sin(a))]; });
+}
+
+// A hand-made DETAILED example: sketch, smooth outlines, details, shading.
+const DETAILED_EXAMPLE = { name: 'Bear holding a balloon', style: 'detailed',
+  plan: 'Recognizable: round fluffy head with round ears, a muzzle, a soft round body; balloon is a tall oval with a knot and a string. Light comes from the top left, so the right sides of the head and body are shaded, with a shadow on the ground. Sketch circles for head (420,330) and body (420,610) first, then smooth fluffy outlines over them.',
+  steps: [
+    { say: 'Lightly sketch a circle for the head and an oval for the body.', tool: 'sketch', shapes: [{ circle: [420, 330, 120] }, { oval: [420, 610, 150, 170] }, { line: [420, 210, 420, 450] }] },
+    { say: 'Draw a fluffy outline around the head.', tool: 'pen', shapes: [{ smoothshape: blob(420, 330, 122, 118, 28, 0.035, 0.5) }] },
+    { say: 'Add two round ears with inner ears.', tool: 'pen', shapes: [{ smooth: [[318, 262], [300, 225], [318, 192], [356, 190], [376, 220]] }, { smooth: [[464, 220], [484, 190], [522, 192], [540, 225], [522, 262]] }, { smooth: [[330, 240], [326, 216], [348, 206], [358, 224]] }, { smooth: [[482, 224], [492, 206], [514, 216], [510, 240]] }] },
+    { say: 'Draw the muzzle, nose and smile.', tool: 'pen', shapes: [{ smoothshape: [[368, 372], [392, 340], [448, 340], [472, 372], [452, 412], [388, 412]] }, { smoothshape: [[404, 352], [420, 346], [436, 352], [430, 366], [410, 366]] }, { curve: [420, 368, 420, 380, 420, 386] }, { curve: [398, 392, 410, 404, 420, 386] }, { curve: [420, 386, 430, 404, 442, 392] }] },
+    { say: 'Add eyes with little white sparkles.', tool: 'pen', shapes: [{ circle: [378, 302, 15] }, { circle: [462, 302, 15] }, { circle: [383, 296, 4] }, { circle: [467, 296, 4] }] },
+    { say: 'Draw a soft fluffy body around the oval.', tool: 'pen', shapes: [{ smooth: [[330, 470], [282, 540], [272, 640], [300, 730], [370, 780], [470, 780], [540, 730], [566, 640], [560, 560], [520, 470]] }, { oval: [420, 640, 80, 95] }] },
+    { say: 'Add an arm reaching up to the balloon.', tool: 'pen', shapes: [{ smooth: [[540, 520], [580, 480], [618, 440], [646, 432], [656, 452], [632, 486], [588, 540], [556, 566]] }] },
+    { say: 'Draw the balloon, its knot and the string.', tool: 'pen', shapes: [{ smoothshape: [[720, 85], [790, 120], [815, 200], [790, 280], [720, 318], [650, 280], [625, 200], [650, 120]] }, { shape: [[707, 330], [733, 330], [720, 316]] }, { smooth: [[720, 330], [700, 360], [680, 380], [660, 400], [648, 430]] }] },
+    { say: 'Add little fur strokes on the head and tummy.', tool: 'pen', shapes: [{ line: [330, 400, 318, 412] }, { line: [510, 400, 522, 412] }, { line: [400, 600, 396, 614] }, { line: [440, 600, 444, 614] }, { line: [420, 670, 420, 684] }] },
+    { say: 'Shade the right side of the head and body.', tool: 'shade', shade: { area: { smoothshape: [[480, 240], [536, 300], [540, 380], [500, 440], [470, 420], [500, 340]] }, tone: 'medium', angle: 45 } },
+    { say: 'Shade the side of the body and the balloon.', tool: 'shade', shade: { area: { smoothshape: [[520, 520], [560, 620], [540, 730], [480, 775], [500, 690], [510, 600]] }, tone: 'medium', angle: 45 } },
+    { say: 'Add a dark shadow on the ground.', tool: 'shade', shade: { area: { oval: [430, 800, 170, 26] }, tone: 'dark', angle: 0 } }] };
+if (typeof module !== 'undefined') Object.assign(module.exports, { smoothPath, DETAILED_EXAMPLE, blob, shapeToPath: (s) => shapeToPath(s), shapePoints: (s) => shapePoints(s) });
+</script>
+<script src="voices.js"></script>
+<script>
+// ---------------------------------------------------------------------------
+// Voice clips. If a voice pack is present (window.VOICE_PACK: phrase -> base64 MP3, made by voices/make-voices.py),
+// a phrase is played from its clip through Web Audio; otherwise the Windows voice reads it. Bytes are decoded in
+// memory (no data: or blob: URLs, which the kiosk blocks).
+// ---------------------------------------------------------------------------
+const VOICE = (() => {
+  let actx = null, cur = null; const decoded = new Map();
+  const key = t => String(t).trim().toLowerCase().replace(/\s+/g, ' ');
+  function ctx() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { actx = null; } } if (actx && actx.state === 'suspended') actx.resume(); return actx; }
+  function stop() { if (cur) { try { cur.onended = null; cur.stop(); } catch (e) {} cur = null; } }
+  function has(t) { const p = window.VOICE_PACK; return !!(p && p[key(t)]); }
+  function play(t, done) {
+    const p = window.VOICE_PACK, k = key(t); if (!p || !p[k]) return false;
+    const a = ctx(); if (!a) return false;
+    const go = (buf) => { stop(); const s = a.createBufferSource(); s.buffer = buf; s.connect(a.destination); s.onended = () => { if (cur === s) { cur = null; if (done) done(); } }; cur = s; s.start(); };
+    try {
+      if (decoded.has(k)) { go(decoded.get(k)); return true; }
+      const bin = atob(p[k]), bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      a.decodeAudioData(bytes.buffer.slice(0)).then(buf => { decoded.set(k, buf); go(buf); }).catch(() => { if (done) done(); });
+      return true;
+    } catch (e) { return false; }
+  }
+  return { play, stop, has, key };
+})();
+// ===========================================================================
+// Draw With Me: say what you want to draw, follow the steps, color it in.
+// ===========================================================================
+const RES = 1400;                       // drawing resolution (square)
+const PEN_SIZES = [9, 14, 24];          // her marker: thin, medium, thick
+const PEN_COLORS = ['#26232E', '#FF5A4E', '#FF8A3D', '#FFC93C', '#2EB872', '#2F6FD0', '#8E5BD6', '#FF6FB5', '#8B5A2B'];
+let penColor = PEN_COLORS[0], penSize = 1, drawTool = 'pen';
+// Drawing tools: where each draws, and how its strokes look.
+const DRAW_TOOLS = [
+  { id: 'sketch', icon: '✏️', name: 'Sketch pencil' }, { id: 'pen', icon: '🖊️', name: 'Marker' },
+  { id: 'charcoal', icon: '🖤', name: 'Charcoal' }, { id: 'shade', icon: '🌫️', name: 'Shading pencil' },
+  { id: 'smudge', icon: '👆', name: 'Smudge' }, { id: 'erase', icon: '🧽', name: 'Eraser' }];
+const TONES = { light: 0.18, medium: 0.32, dark: 0.5 };
+const PEN = () => PEN_SIZES[penSize];
+const $ = (id) => document.getElementById(id);
+const screens = ['home', 'draw', 'color', 'finish', 'view'];
+function show(name) { for (const s of screens) $(s).hidden = s !== name; }
+
+// ---------------------------------------------------------------------------
+// Talking: read each step aloud (Windows' offline voices).
+// ---------------------------------------------------------------------------
+let soundOn = true, voice = null;
+function pickVoice() {
+  const ss = window.speechSynthesis; if (!ss || !ss.getVoices) return null;
+  const vs = ss.getVoices().filter(v => /^en/i.test(v.lang) && v.localService !== false);
+  return vs.find(v => /aria|jenny|zira|eva|female/i.test(v.name)) || vs[0] || null;
+}
+function say(text) {
+  if (!soundOn) return;
+  try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch (e) {}
+  VOICE.stop(); if (VOICE.play(text)) return;
+  try {
+    const ss = window.speechSynthesis; if (!ss || typeof SpeechSynthesisUtterance === 'undefined') return;
+    const u = new SpeechSynthesisUtterance(text); u.rate = 0.95; u.pitch = 1.15;
+    voice = voice || pickVoice(); if (voice) u.voice = voice;
+    ss.speak(u);
+  } catch (e) {}
+}
+
+// ---------------------------------------------------------------------------
+// Listening: "What do you want to draw?"
+// ---------------------------------------------------------------------------
+const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let listening = false, rec = null;
+function setMicState(state, text) {
+  const mic = $('mic'); mic.dataset.state = state;
+  $('heard').textContent = text || '';
+}
+function listen() {
+  if (!Recognition) { setMicState('off', 'Pick a picture below!'); return; }
+  if (listening) { try { rec.stop(); } catch (e) {} return; }
+  rec = new Recognition();
+  rec.lang = 'en-US'; rec.interimResults = true; rec.maxAlternatives = 5; rec.continuous = false;
+  let finalText = '', matched = null;
+  rec.onstart = () => { listening = true; setMicState('listening', 'Listening…'); };
+  rec.onresult = (e) => {
+    let text = '';
+    for (let i = 0; i < e.results.length; i++) {
+      const r = e.results[i];
+      // Try every alternative the recognizer offers ("kitty" might be its second guess).
+      for (let a = 0; a < r.length && !matched; a++) { const m = matchSubject(r[a].transcript, ofStyle(drawStyle)) || matchSubject(r[a].transcript, ofStyle('simple')); if (m && r.isFinal) matched = m; }
+      text += r[0].transcript;
+    }
+    finalText = text;
+    setMicState('listening', '“' + text + '”');
+  };
+  rec.onerror = (e) => {
+    listening = false;
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') setMicState('off', 'The microphone is turned off. Pick a picture below!');
+    else if (e.error === 'network') setMicState('ready', 'I can’t hear without the internet. Pick a picture below!');
+    else setMicState('ready', '');
+  };
+  rec.onend = () => {
+    listening = false;
+    if (!matched && finalText) matched = matchSubject(finalText);
+    // Look in the chosen style first (library, then anything learned); learn it live if needed.
+    if (finalText) {
+      const inStyle = matchSubject(finalText, ofStyle(drawStyle));
+      if (inStyle) { setMicState('ready', ''); startDrawing(inStyle); return; }
+      if (drawStyle === 'detailed' && canLearn()) { setMicState('ready', ''); tryToLearn(finalText); return; }
+      matched = matchSubject(finalText, ofStyle('simple'));
+    }
+    if (matched) { setMicState('ready', ''); startDrawing(matched); }
+    else if (finalText && canLearn()) { setMicState('ready', ''); tryToLearn(finalText); }
+    else if (finalText) {
+      const what = askedFor(finalText);
+      setMicState('ready', 'I don’t know how to draw ' + (what ? '“' + what + '”' : 'that') + ' yet. Pick one of these!');
+      say('I don’t know how to draw ' + (what || 'that') + ' yet. Can you pick one of these?');
+    } else if ($('mic').dataset.state === 'listening') setMicState('ready', '');
+  };
+  try { rec.start(); } catch (e) { setMicState('ready', ''); }
+}
+
+
+// ---------------------------------------------------------------------------
+// The pre-made library (library.js beside the app, made with the builder: ?lab&build).
+// Simple library drawings join the built-in ones (the hand-made built-ins win a tie);
+// detailed ones are used in Detailed mode before anything is learned live.
+// ---------------------------------------------------------------------------
+(function loadLibrary() {
+  const lib = Array.isArray(window.DWM_LIBRARY) ? window.DWM_LIBRARY : [];
+  for (const L of lib) {
+    if (!L || !Array.isArray(L.steps) || !L.steps.length || !Array.isArray(L.words)) continue;
+    const entry = { id: L.id, name: L.name, words: L.words.map(w => String(w).toLowerCase()), cat: L.cat || 'nature', style: L.style === 'detailed' ? 'detailed' : 'simple', steps: L.steps, library: true };
+    const main = entry.words[0], primary = (x) => [x.name.toLowerCase(), x.words[0]];
+    const same = SUBJECTS.filter(x => (x.style || 'simple') === entry.style);
+    // The same drawing already here (by its main name): the hand-made one wins.
+    if (entry.style === 'simple' && same.some(x => !x.library && primary(x).some(w => primary(entry).includes(w)))) continue;
+    // A dedicated drawing wins its own name from anything that only lists it as another word
+    // (the built-in dinosaur says "dragon"; a dragon drawing should get "dragon").
+    // Every name the dedicated drawing answers to moves over, except another drawing's own main name.
+    for (const x of same) x.words = x.words.filter((w, i) => i === 0 || !entry.words.includes(w));
+    SUBJECTS.push(entry);
+  }
+})();
+const hasDetailed = () => SUBJECTS.some(s => s.style === 'detailed');
+const ofStyle = (style) => SUBJECTS.filter(s => (s.style || 'simple') === style);
+
+// ---------------------------------------------------------------------------
+// Learning new drawings. Anything not in the library is designed by Claude (Haiku:
+// the smallest current model, plenty for a few sentences and simple shapes), checked
+// carefully, saved on the tablet, and added to her picture buttons. Configured by
+// config.js, which the KidTablet module writes from its .env file.
+// ---------------------------------------------------------------------------
+const CFG = Object.assign({ model: 'claude-sonnet-5-5', dailyLimit: 25 }, window.DWM_CONFIG || {});
+const LKEY = 'drawwithme-learned', DKEY = 'drawwithme-daily';
+const LESSON_VERSION = 2;   // drawings learned with an older prompt are dropped and learned again on request
+const canLearn = () => !!CFG.apiKey;
+function loadLearned() { try { return JSON.parse(localStorage.getItem(LKEY) || '[]').filter(s => s.v === LESSON_VERSION); } catch (e) { return []; } }
+function saveLearned(list) { for (let n = list.length; n > 0; n--) { try { localStorage.setItem(LKEY, JSON.stringify(list.slice(0, n))); return; } catch (e) {} } }
+function learnedToday() {
+  const today = new Date().toDateString();
+  try { const d = JSON.parse(localStorage.getItem(DKEY) || '{}'); return d.day === today ? d.count : 0; } catch (e) { return 0; }
+}
+function countLearned() { try { localStorage.setItem(DKEY, JSON.stringify({ day: new Date().toDateString(), count: learnedToday() + 1 })); } catch (e) {} }
+
+const LESSON_RULES = `You make step-by-step drawing lessons for a five-year-old drawing with a finger on a tablet,
+like a page from a children's "how to draw" book: simple shapes, instantly recognizable.
+
+Reply with JSON only:
+{"name": "...", "plan": "...", "steps": [{"say": "...", "shapes": [ ... ]}, ...]}
+If the request is not suitable for a young child: {"refuse": "<one short kind sentence>", "suggest": "<a similar friendly thing>"}
+
+Write "plan" first (2-4 sentences): name the 3-5 features that make each thing recognizable at a glance
+(a monkey: round ears sticking out on the sides, a peanut-shaped face patch, a long curly tail; a banana: a curved crescent with a stem),
+then where each part goes on the page and what it attaches to. Then write the steps to match the plan exactly.
+
+The page is 1000 x 1000, x to the right, y DOWN. Keep everything between 80 and 920 and fill most of the page.
+Shapes (numbers only):
+  {"circle":[cx,cy,r]}   {"oval":[cx,cy,rx,ry,tilt]} (tilt in degrees, optional)   {"line":[x1,y1,x2,y2]}
+  {"curve":[x1,y1,bendX,bendY,x2,y2]} (a smooth curve pulled toward the bend point)
+  {"lines":[[x,y],[x,y],...]} (connected lines)   {"shape":[[x,y],...]} (closed outline)   {"arc":[cx,cy,r,fromDeg,toDeg]} (0 = right, 90 = down)
+Rules:
+- 3 to 7 steps, at most 6 shapes per step. Step 1 is the biggest main shape (usually the body or head).
+- Parts must connect: start a leg, arm or tail ON the edge of the body (compute the edge point), not floating near it.
+- Things that are held go next to the hand that holds them, and the hand touches them.
+- Get proportions right: heads are big and cute; eyes sit inside the face; nothing important is tiny.
+- "say" is at most 12 easy words and starts with Draw or Add.
+- Honor the describing words: size ("giant" fills the page), counts ("three eyes"), things worn or held.
+  Colors are for coloring in later, so they change nothing in the shapes.
+- Friendly and cute. Nothing scary or gross. No text or letters in the drawing.`;
+const LESSON_EXAMPLE = JSON.stringify(SHAPE_EXAMPLE);
+const DETAILED_RULES = `You make DETAILED step-by-step drawing lessons, like a page from a "how to draw" book for older kids:
+construction sketch, then smooth outlines, then details, then shading. Drawn with a finger on a tablet.
+
+Reply with JSON only:
+{"name": "...", "style": "detailed", "plan": "...", "steps": [{"say": "...", "tool": "...", ...}, ...]}
+If the request is not suitable for a young child: {"refuse": "<one short kind sentence>", "suggest": "<a similar friendly thing>"}
+
+Write "plan" first (3-5 sentences): the 3-5 features that make each thing recognizable at a glance, the layout
+(where each part goes, what it attaches to, proportions), and where the light comes from (top left).
+
+The page is 1000 x 1000, x right, y DOWN. Keep everything between 60 and 940 and fill most of the page.
+Shapes (numbers only):
+  {"circle":[cx,cy,r]}  {"oval":[cx,cy,rx,ry,tilt]}  {"line":[x1,y1,x2,y2]}  {"curve":[x1,y1,bendX,bendY,x2,y2]}
+  {"smooth":[[x,y],...]} a smooth curve through 3-30 points   {"smoothshape":[[x,y],...]} a smooth closed outline through 4-40 points
+  {"lines":[[x,y],...]}  {"shape":[[x,y],...]}  {"arc":[cx,cy,r,fromDeg,toDeg]}
+Steps (6 to 12):
+ 1. 1-2 steps with "tool":"sketch": light construction shapes for proportions (circles/ovals for head and body, a center line).
+ 2. Outline steps with "tool":"pen": real contours using smooth/smoothshape with enough points to look natural
+    (cheeks, fluffy edges, paws, the bend of a tail), NOT plain circles. Draw over the sketch shapes.
+ 3. Detail steps with "tool":"pen": eyes with a white highlight dot, fur/feather/scale strokes, texture lines, small features.
+ 4. 1-3 shading steps: {"say":"...","tool":"shade","shade":{"area":<a closed shape: smoothshape, shape, circle or oval>,"tone":"light|medium|dark","angle":45}}
+    Shade the side away from the light (bottom right of round forms), under overlapping parts, and a dark shadow on the ground.
+- At most 12 shapes per step. Parts must connect: limbs start ON the body edge. Held things touch the hand.
+- "say": at most 16 easy words, starting with Sketch, Draw, Add or Shade.
+- Honor the describing words (size, counts, things worn or held). Colors are for coloring later.
+- Friendly and cute, nothing scary or gross, no text or letters in the drawing.`;
+const DETAILED_EXAMPLE_JSON = JSON.stringify(DETAILED_EXAMPLE);
+let drawStyle = (() => { try { return localStorage.getItem('drawwithme-style') || 'simple'; } catch (e) { return 'simple'; } })();
+
+// Everything Claude sends back is checked before she sees it.
+function checkLesson(raw, asked) {
+  let j;
+  try { j = JSON.parse(String(raw).replace(/^[^{]*/, '').replace(/[^}]*$/, '')); } catch (e) { return { error: 'not json' }; }
+  if (j.refuse) return { refuse: String(j.refuse).slice(0, 160), suggest: j.suggest ? String(j.suggest).slice(0, 40) : null };
+  if (!Array.isArray(j.steps) || j.steps.length < 2) return { error: 'step count' };
+  const steps = [];
+  if (j.steps.length > 13) return { error: 'step count' };
+  for (const st of j.steps) {
+    const say = String(st.say || '').trim();
+    if (!say || say.length > 140) return { error: 'step size' };
+    const tool = ['sketch', 'pen', 'charcoal', 'shade'].includes(st.tool) ? st.tool : 'pen';
+    if (st.shade && typeof st.shade === 'object') {
+      const area = shapeToPath(st.shade.area || {});
+      if (!area || shapePoints(st.shade.area).some(([x, y]) => !(x >= -20 && x <= 1020 && y >= -20 && y <= 1020))) return { error: 'bad shade area' };
+      const tone = ['light', 'medium', 'dark'].includes(st.shade.tone) ? st.shade.tone : 'medium';
+      const angle = Number.isFinite(+st.shade.angle) ? +st.shade.angle : 45;
+      steps.push({ say, tool: 'shade', path: '', shade: { area, tone, angle } });
+      continue;
+    }
+    if (!Array.isArray(st.shapes) || !st.shapes.length || st.shapes.length > 14) return { error: 'step size' };
+    const parts = [];
+    for (const sh of st.shapes) {
+      const d = shapeToPath(sh || {});
+      if (!d) return { error: 'bad shape' };
+      if (shapePoints(sh).some(([x, y]) => !(x >= -20 && x <= 1020 && y >= -20 && y <= 1020))) return { error: 'off the page' };
+      parts.push(d);
+    }
+    const path = parts.join(' ');
+    try { new Path2D(path); } catch (e) { return { error: 'bad path' }; }
+    const L = pathLen(path);
+    if (!(L > 5) || L > 30000) return { error: 'path length' };
+    steps.push({ say, path, tool });
+  }
+  const name = String(j.name || asked).trim().slice(0, 40) || asked;
+  const style = j.style === 'detailed' || steps.some(s => s.tool === 'shade' || s.tool === 'sketch') ? 'detailed' : 'simple';
+  return { subject: { id: 'learned-' + Date.now(), v: LESSON_VERSION, style, cat: 'new', name: name.charAt(0).toUpperCase() + name.slice(1), words: [asked.toLowerCase()], steps, learned: true, asked } };
+}
+
+async function learnDrawing(asked, opts = {}) {
+  const key = opts.key || CFG.apiKey, model = opts.model || CFG.model, style = opts.style || drawStyle;
+  if (!key || !asked) return { error: 'off' };
+  if (!navigator.onLine) return { error: 'offline' };
+  if (!opts.lab && learnedToday() >= CFG.dailyLimit) return { error: 'limit' };
+  const t0 = performance.now();
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 30000);
+  try {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', signal: ctl.signal,
+      headers: { 'content-type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ model, max_tokens: style === 'detailed' ? 6000 : 3000,
+        system: style === 'detailed' ? DETAILED_RULES + '\nAn example:\n' + DETAILED_EXAMPLE_JSON : LESSON_RULES + '\nAn example:\n' + LESSON_EXAMPLE,
+        messages: [{ role: 'user', content: 'Make a drawing lesson for: ' + asked }] })
+    });
+    if (!r.ok) return { error: 'http ' + r.status };
+    const data = await r.json();
+    if (!opts.lab) countLearned();
+    const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+    return Object.assign(checkLesson(text, asked), { raw: text, usage: data.usage, ms: Math.round(performance.now() - t0) });
+  } catch (e) { return { error: e.name === 'AbortError' ? 'timeout' : 'network' }; }
+  finally { clearTimeout(timer); }
+}
+
+// Learned drawings join the library (so saying it again is instant and offline).
+function addLearned(s) {
+  if (!SUBJECTS.some(x => x.id === s.id)) SUBJECTS.unshift(s);
+}
+async function tryToLearn(heardText, replaceId) {
+  const asked = replaceId ? heardText : askedFor(heardText);
+  const thinking = $('thinking');
+  $('thinkingtext').textContent = 'Let me think how to draw ' + (asked ? 'a ' + asked : 'that') + '…';
+  thinking.hidden = false; say('Ooh! Let me think how to draw ' + (asked ? 'a ' + asked : 'that') + '.');
+  const res = await learnDrawing(asked);
+  thinking.hidden = true;
+  if (res.subject) {
+    const list = loadLearned().filter(x => x.id !== replaceId); list.unshift(res.subject); saveLearned(list.slice(0, 60));
+    if (replaceId) { const i = SUBJECTS.findIndex(x => x.id === replaceId); if (i >= 0) SUBJECTS.splice(i, 1); }
+    addLearned(res.subject); rebuildPicks();
+    startDrawing(res.subject);
+    return;
+  }
+  let msg;
+  if (res.refuse) msg = res.refuse + (res.suggest ? ' How about a ' + res.suggest + '?' : '');
+  else if (res.error === 'limit') msg = 'That’s lots of new drawings today! Pick one of these.';
+  else if (res.error === 'offline' || res.error === 'network' || res.error === 'timeout') msg = 'I can’t learn new drawings right now. Pick one of these!';
+  else msg = 'Hmm, I couldn’t figure out ' + (asked ? 'a ' + asked : 'that') + '. Pick one of these!';
+  setMicState('ready', msg); say(msg);
+}
+
+// ---------------------------------------------------------------------------
+// Canvases: paint (bottom), her lines (middle), the guide (top, not saved).
+// ---------------------------------------------------------------------------
+function makeLayer(id) { const c = $(id); c.width = c.height = RES; return c; }
+const paint = makeLayer('paint'), shadeL = makeLayer('shade'), sketch = makeLayer('sketch'), ink = makeLayer('ink'), guide = makeLayer('guide');
+const pctx = paint.getContext('2d'), sctx = shadeL.getContext('2d'), kctx = sketch.getContext('2d'), ictx = ink.getContext('2d'), gctx = guide.getContext('2d');
+const touch = $('touch');   // a clear layer on top that takes her finger, whatever the tool
+function layoutStage() {
+  const st = $('stage'), box = st.parentElement.getBoundingClientRect();
+  const size = Math.max(200, Math.min(box.width, box.height) - 8);
+  st.style.width = st.style.height = size + 'px';
+}
+addEventListener('resize', layoutStage);
+const toPage = (e) => { const r = touch.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width * RES, y: (e.clientY - r.top) / r.height * RES }; };
+const K = RES / 1000;                    // library coordinates -> canvas
+
+// Undo: snapshots of whichever layer is being worked on.
+const undoStack = [];
+function snapshot(...ctxs) { undoStack.push(ctxs.map(ctx => ({ ctx, data: ctx.getImageData(0, 0, RES, RES) }))); if (undoStack.length > 12) undoStack.shift(); }
+function undo() { const s = undoStack.pop(); if (s) for (const x of s) x.ctx.putImageData(x.data, 0, 0); }
+
+// ---------------------------------------------------------------------------
+// Guided drawing
+// ---------------------------------------------------------------------------
+let subject = null, stepIdx = 0, anim = null;
+const pathLen = (() => { const svg = document.createElementNS('http://www.w3.org/2000/svg', 'path'); return (d) => { svg.setAttribute('d', d); try { return svg.getTotalLength(); } catch (e) { return 2000; } }; })();
+function drawGuide(progress) {
+  gctx.clearRect(0, 0, RES, RES);
+  gctx.save(); gctx.scale(K, K); gctx.lineCap = 'round'; gctx.lineJoin = 'round';
+  // earlier steps: faint, so she can see how the picture is coming along
+  for (let i = 0; i < stepIdx; i++) { gctx.strokeStyle = 'rgba(120,130,160,0.18)'; gctx.lineWidth = 6; gctx.stroke(new Path2D(subject.steps[i].path)); }
+  // this step: a bright dotted guide that draws itself on
+  const cur = subject.steps[stepIdx];
+  if (cur.shade) { drawShadeGuide(cur.shade, progress); gctx.restore(); return; }
+  const d = cur.path, p = new Path2D(d), L = pathLen(d) + 10;
+  if (cur.tool === 'sketch') { gctx.strokeStyle = 'rgba(90,95,110,0.35)'; gctx.lineWidth = 8; gctx.setLineDash([14, 14]); gctx.stroke(p); gctx.setLineDash([]); }
+  gctx.strokeStyle = 'rgba(255,90,140,0.25)'; gctx.lineWidth = 22; gctx.setLineDash([L, L]); gctx.lineDashOffset = L * (1 - progress); gctx.stroke(p);
+  gctx.strokeStyle = '#FF4F8B'; gctx.lineWidth = 7; gctx.setLineDash([2, 16]); gctx.lineDashOffset = 0;
+  if (progress >= 1) gctx.stroke(p);
+  else { gctx.save(); gctx.setLineDash([L, L]); gctx.lineDashOffset = L * (1 - progress); gctx.lineWidth = 7; gctx.stroke(p); gctx.restore(); }
+  gctx.restore();
+}
+function hatch(g, area, tone, angle, col) {
+  g.save(); g.clip(new Path2D(area));
+  const gap = { light: 34, medium: 22, dark: 13 }[tone] || 22, a = (angle || 45) * Math.PI / 180;
+  g.strokeStyle = col; g.lineWidth = 3;
+  g.translate(500, 500); g.rotate(a);
+  for (let x = -800; x <= 800; x += gap) { g.beginPath(); g.moveTo(x, -800); g.lineTo(x, 800); g.stroke(); }
+  g.restore();
+}
+function drawShadeGuide(sh, progress) {
+  gctx.globalAlpha = Math.min(1, progress * 1.5);
+  gctx.fillStyle = 'rgba(255,79,139,0.10)'; gctx.fill(new Path2D(sh.area));
+  hatch(gctx, sh.area, sh.tone, sh.angle, 'rgba(255,79,139,0.55)');
+  gctx.strokeStyle = '#FF4F8B'; gctx.lineWidth = 4; gctx.setLineDash([3, 12]); gctx.stroke(new Path2D(sh.area)); gctx.setLineDash([]);
+  gctx.globalAlpha = 1;
+}
+function playStep() {
+  cancelAnimationFrame(anim);
+  const t0 = performance.now(), dur = 1600;
+  const tick = (now) => { const k = Math.min(1, (now - t0) / dur); drawGuide(1 - Math.pow(1 - k, 2)); if (k < 1) anim = requestAnimationFrame(tick); };
+  anim = requestAnimationFrame(tick);
+  const st = subject.steps[stepIdx];
+  drawTool = st.shade ? 'shade' : (st.tool === 'sketch' ? 'sketch' : st.tool === 'charcoal' ? 'charcoal' : 'pen'); markPen();
+  $('steptext').textContent = st.say;
+  $('stepdots').innerHTML = subject.steps.map((_, i) => `<i class="${i < stepIdx ? 'done' : i === stepIdx ? 'now' : ''}"></i>`).join('');
+  $('next').textContent = stepIdx === subject.steps.length - 1 ? '🎨' : '➜';
+  $('next').setAttribute('aria-label', stepIdx === subject.steps.length - 1 ? 'Time to color' : 'Next step');
+  say(st.say);
+}
+function startDrawing(s) {
+  subject = s; stepIdx = 0; undoStack.length = 0;
+  for (const c of [pctx, sctx, kctx, ictx]) c.clearRect(0, 0, RES, RES);
+  sketch.style.visibility = 'visible';
+  $('drawtitle').textContent = 'Let’s draw a ' + s.name.toLowerCase() + '!';
+  $('retry').hidden = !(s.learned && canLearn());
+  show('draw'); layoutStage(); mode = 'draw';
+  setTimeout(() => { say('Let’s draw a ' + s.name.toLowerCase() + '!'); setTimeout(playStep, 1400); }, 50);
+  drawGuide(0); $('steptext').textContent = '';
+}
+function nextStep() {
+  if (stepIdx < subject.steps.length - 1) { stepIdx++; playStep(); }
+  else startColoring();
+}
+// "Help me": do this step for her, with the step's tool.
+function helpStep() {
+  if (!subject) return;
+  const st = subject.steps[stepIdx];
+  if (st.shade) {
+    snapshot(sctx);
+    sctx.save(); sctx.scale(K, K); sctx.clip(new Path2D(st.shade.area));
+    sctx.fillStyle = `rgba(60,58,72,${TONES[st.shade.tone] || 0.3})`; sctx.fillRect(0, 0, 1000, 1000);
+    sctx.restore();
+    return;
+  }
+  const c = st.tool === 'sketch' ? kctx : ictx;
+  snapshot(c);
+  c.save(); c.scale(K, K); c.lineCap = c.lineJoin = 'round';
+  if (st.tool === 'sketch') { c.strokeStyle = 'rgba(90,95,110,0.55)'; c.lineWidth = 5 / K; }
+  else { c.strokeStyle = penColor; c.lineWidth = PEN() / K; }
+  c.stroke(new Path2D(st.path)); c.restore();
+}
+
+// ---------------------------------------------------------------------------
+// Drawing and painting with her finger
+// ---------------------------------------------------------------------------
+let mode = 'draw', tool = 'bucket', color = '#FF5A4E', size = 2, stroke = null;
+const SIZES = [10, 24, 48];
+function hueColor(h) { return `hsl(${h % 360},90%,58%)`; }
+function startStroke(e) {
+  e.preventDefault();
+  const p = toPage(e);
+  try { touch.setPointerCapture(e.pointerId); } catch (x) {}
+  if (mode === 'draw' || ['shade', 'smudge', 'sketcherase'].includes(tool)) { startDrawStroke(p, e.pointerId); return; }
+  if (tool === 'bucket') { snapshot(pctx); bucketFill(Math.round(p.x), Math.round(p.y), color); return; }
+  snapshot(pctx); stroke = { pts: [p], id: e.pointerId, hue: Math.random() * 360 };
+  paintAt(p, p);
+}
+function moveStroke(e) {
+  if (!stroke || e.pointerId !== stroke.id) return;
+  const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+  for (const ev of evs.length ? evs : [e]) {
+    const p = toPage(ev), last = stroke.pts[stroke.pts.length - 1];
+    if (Math.hypot(p.x - last.x, p.y - last.y) < 1.5) continue;
+    stroke.pts.push(p);
+    if (stroke.draw) drawStrokeTo(last, p);
+    else paintAt(last, p);
+  }
+}
+function endStroke(e) { if (stroke && e.pointerId === stroke.id) stroke = null; }
+// The drawing tools (on the drawing screen; shading and smudge also while coloring).
+function activeDrawTool() { return mode === 'draw' ? drawTool : tool === 'sketcherase' ? 'erase' : tool; }
+function startDrawStroke(p, id) {
+  const t = activeDrawTool();
+  if (t === 'sketch') snapshot(kctx); else if (t === 'shade' || t === 'smudge') snapshot(sctx); else if (t === 'erase') snapshot(ictx, kctx, sctx); else snapshot(ictx);
+  stroke = { pts: [p], id, draw: true, t };
+  drawStrokeTo(p, p);
+}
+function grain(ctx, a, b, w, col, alpha, density) {
+  // a textured line: many tiny specks, like graphite or charcoal on paper
+  const steps = Math.max(1, Math.hypot(b.x - a.x, b.y - a.y) / 1.5);
+  ctx.fillStyle = col;
+  for (let i = 0; i <= steps; i++) {
+    const x = a.x + (b.x - a.x) * i / steps, y = a.y + (b.y - a.y) * i / steps;
+    for (let k = 0; k < density; k++) { const r = Math.random() * w / 2, t = Math.random() * 6.283; ctx.globalAlpha = alpha * (0.4 + Math.random() * 0.6); ctx.fillRect(x + r * Math.cos(t), y + r * Math.sin(t), 1.6, 1.6); }
+  }
+  ctx.globalAlpha = 1;
+}
+function drawStrokeTo(a, b) {
+  const t = stroke.t, w = PEN();
+  if (t === 'pen') { if (a === b) dot(ictx, b, w, penColor); else smoothLine(ictx, stroke.pts, w, penColor); }
+  else if (t === 'sketch') grain(kctx, a, b, Math.max(3, w * 0.45), '#5A5F6E', 0.55, 3);
+  else if (t === 'charcoal') grain(ictx, a, b, w * 1.4, '#1E1B24', 0.85, 6);
+  else if (t === 'shade') grain(sctx, a, b, w * 3.2, '#3C3A48', 0.08, 10);
+  else if (t === 'smudge') {
+    // blend: carry a little of the shading from where the finger was to where it is
+    const r = Math.round(w * 1.6), x0 = Math.round(a.x - r), y0 = Math.round(a.y - r);
+    if (r > 2) { sctx.globalAlpha = 0.5; sctx.drawImage(shadeL, x0, y0, r * 2, r * 2, Math.round(b.x - r), Math.round(b.y - r), r * 2, r * 2); sctx.globalAlpha = 1; }
+  } else if (t === 'erase') {
+    for (const c of [ictx, kctx, sctx]) { c.globalCompositeOperation = 'destination-out'; smoothLine(c, stroke.pts.length > 1 ? stroke.pts : [a, b], w * 2.2, '#000'); c.globalCompositeOperation = 'source-over'; }
+  }
+}
+function dot(ctx, p, w, col) { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(p.x, p.y, w / 2, 0, Math.PI * 2); ctx.fill(); }
+// A smooth line through the last few points (midpoint curves), so fingers draw nicely.
+function smoothLine(ctx, pts, w, col) {
+  const n = pts.length; if (n < 2) return;
+  const a = pts[Math.max(0, n - 3)], b = pts[n - 2], c = pts[n - 1];
+  const m1 = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, m2 = { x: (b.x + c.x) / 2, y: (b.y + c.y) / 2 };
+  ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineCap = ctx.lineJoin = 'round';
+  ctx.beginPath(); ctx.moveTo(n < 3 ? b.x : m1.x, n < 3 ? b.y : m1.y); ctx.quadraticCurveTo(b.x, b.y, m2.x, m2.y); ctx.stroke();
+}
+function paintAt(a, b) {
+  const w = SIZES[size];
+  if (tool === 'brush') { pctx.globalCompositeOperation = 'source-over'; smoothLine(pctx, stroke.pts, w, color); }
+  else if (tool === 'eraser') { pctx.globalCompositeOperation = 'destination-out'; smoothLine(pctx, stroke.pts, w * 1.4, '#000'); pctx.globalCompositeOperation = 'source-over'; }
+  else if (tool === 'rainbow') { stroke.hue += Math.hypot(b.x - a.x, b.y - a.y) * 0.35; smoothLine(pctx, stroke.pts, w, hueColor(stroke.hue)); }
+  else if (tool === 'crayon') {
+    // waxy texture: lots of small specks along the path
+    const steps = Math.max(1, Math.hypot(b.x - a.x, b.y - a.y) / 2);
+    pctx.fillStyle = color;
+    for (let i = 0; i <= steps; i++) {
+      const x = a.x + (b.x - a.x) * i / steps, y = a.y + (b.y - a.y) * i / steps;
+      for (let k = 0; k < w / 3; k++) { const r = Math.random() * w / 2, t = Math.random() * 6.283; pctx.globalAlpha = 0.25 + Math.random() * 0.5; pctx.fillRect(x + r * Math.cos(t), y + r * Math.sin(t), 2.2, 2.2); }
+    }
+    pctx.globalAlpha = 1;
+  } else if (tool === 'glitter') {
+    smoothLine(pctx, stroke.pts, w, color);
+    const n = Math.max(1, Math.hypot(b.x - a.x, b.y - a.y) / 6);
+    for (let i = 0; i < n; i++) {
+      const x = b.x + (Math.random() - 0.5) * w * 1.1, y = b.y + (Math.random() - 0.5) * w * 1.1;
+      sparkle(pctx, x, y, 2 + Math.random() * 5, Math.random() < 0.5 ? '#FFFFFF' : '#FFE27A');
+    }
+  }
+}
+function sparkle(ctx, x, y, r, col) {
+  ctx.save(); ctx.fillStyle = col; ctx.globalAlpha = 0.9; ctx.beginPath();
+  for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4, rr = i % 2 ? r * 0.35 : r; ctx.lineTo(x + rr * Math.cos(a), y + rr * Math.sin(a)); }
+  ctx.closePath(); ctx.fill(); ctx.restore();
+}
+
+// ---------------------------------------------------------------------------
+// Paint bucket: fills the shape she tapped, bounded by her lines.
+// Little hands leave gaps in lines. The bucket first tries closing small gaps; if
+// paint would still escape to the edge of the page, it closes bigger gaps and tries
+// again. Tapping the background (which always reaches the edge) fills the background.
+// A tap that lands right on a line fills the nearest open area.
+// ---------------------------------------------------------------------------
+const GAPS = [5, 10, 17];
+function dilate(mask, r) {
+  const W = RES, H = RES, tmp = new Uint8Array(W * H), out = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) { let run = -1e9; for (let x = 0; x < W; x++) { if (mask[y * W + x]) run = x; if (x - run <= r) tmp[y * W + x] = 1; }
+    run = 1e9; for (let x = W - 1; x >= 0; x--) { if (mask[y * W + x]) run = x; if (run - x <= r) tmp[y * W + x] = 1; } }
+  for (let x = 0; x < W; x++) { let run = -1e9; for (let y = 0; y < H; y++) { if (tmp[y * W + x]) run = y; if (y - run <= r) out[y * W + x] = 1; }
+    run = 1e9; for (let y = H - 1; y >= 0; y--) { if (tmp[y * W + x]) run = y; if (run - y <= r) out[y * W + x] = 1; } }
+  return out;
+}
+// Nearest open (non-wall) pixel to where she tapped, within reach of a fingertip.
+function nearestOpen(wall, sx, sy, reach) {
+  if (!wall[sy * RES + sx]) return [sx, sy];
+  for (let r = 1; r <= reach; r++) for (let dy = -r; dy <= r; dy++) for (const dx of (Math.abs(dy) === r ? Array.from({ length: 2 * r + 1 }, (_, i) => i - r) : [-r, r])) {
+    const x = sx + dx, y = sy + dy;
+    if (x >= 0 && y >= 0 && x < RES && y < RES && !wall[y * RES + x]) return [x, y];
+  }
+  return null;
+}
+function regionFrom(wall, sx, sy) {
+  const W = RES, region = new Uint8Array(W * W), stack = [sx, sy];
+  let edge = false;
+  while (stack.length) {
+    let y = stack.pop(), x = stack.pop();
+    while (x > 0 && !wall[y * W + x - 1] && !region[y * W + x - 1]) x--;
+    let up = false, down = false;
+    for (; x < W && !wall[y * W + x] && !region[y * W + x]; x++) {
+      region[y * W + x] = 1;
+      if (x === 0 || x === W - 1 || y === 0 || y === W - 1) edge = true;
+      if (y > 0) { const f = !wall[(y - 1) * W + x] && !region[(y - 1) * W + x]; if (f && !up) { stack.push(x, y - 1); up = true; } else if (!f) up = false; }
+      if (y < W - 1) { const f = !wall[(y + 1) * W + x] && !region[(y + 1) * W + x]; if (f && !down) { stack.push(x, y + 1); down = true; } else if (!f) down = false; }
+    }
+  }
+  return { region, edge };
+}
+function bucketFill(sx, sy, col) {
+  if (sx < 0 || sy < 0 || sx >= RES || sy >= RES) return false;
+  const W = RES, inkData = ictx.getImageData(0, 0, W, W).data;
+  const lines = new Uint8Array(W * W);
+  for (let i = 0; i < W * W; i++) lines[i] = inkData[i * 4 + 3] > 60 ? 1 : 0;
+  let pick = null;
+  for (const gap of GAPS) {
+    const wall = dilate(lines, gap);
+    const start = nearestOpen(wall, sx, sy, gap + 22);
+    if (!start) continue;
+    const r = regionFrom(wall, start[0], start[1]);
+    if (!pick) pick = { ...r, wall, gap };           // the smallest-gap fill, used for the background
+    if (!r.edge) { pick = { ...r, wall, gap }; break; } // enclosed: this is the shape she meant
+  }
+  if (!pick) return false;
+  // Grow the region back under the thickened lines, so color reaches right up to her line.
+  const grown = dilate(pick.region, pick.gap + 3);
+  const img = pctx.getImageData(0, 0, W, W), d = img.data;
+  const [r, g, b] = hexRgb(col);
+  for (let i = 0; i < W * W; i++) if (grown[i] && (pick.region[i] || pick.wall[i])) { d[i * 4] = r; d[i * 4 + 1] = g; d[i * 4 + 2] = b; d[i * 4 + 3] = 255; }
+  pctx.putImageData(img, 0, 0);
+  return true;
+}
+function hexRgb(h) { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+
+// ---------------------------------------------------------------------------
+// Coloring
+// ---------------------------------------------------------------------------
+const PALETTE = ['#FF5A4E', '#FF8A3D', '#FFC93C', '#7ED957', '#2EB872', '#4FC3F7', '#2F6FD0', '#8E5BD6', '#FF6FB5', '#FFB3D1', '#8B5A2B', '#F2D2A9', '#9AA0A6', '#26232E', '#FFFFFF'];
+function startColoring() {
+  gctx.clearRect(0, 0, RES, RES); cancelAnimationFrame(anim);
+  mode = 'color'; undoStack.length = 0;
+  $('colorstage').appendChild($('stage')); show('color'); layoutStage();
+  $('hidesketch').hidden = !hasPixels(kctx);
+  say('Time to color! Tap a shape with the paint bucket, or paint with a brush.');
+}
+function buildPen() {
+  const row = $('pen');
+  row.innerHTML = DRAW_TOOLS.map(t => `<button class="dt" data-t="${t.id}" aria-label="${t.name}">${t.icon}</button>`).join('') + '<span class="gap"></span>' + PEN_COLORS.map(c => `<button class="pc" style="background:${c}" data-c="${c}" aria-label="marker color ${c}"></button>`).join('') +
+    '<span class="gap"></span>' + PEN_SIZES.map((w, i) => `<button class="ps" data-s="${i}" aria-label="${['thin', 'medium', 'thick'][i]} marker"><i style="width:${w + 4}px;height:${w + 4}px"></i></button>`).join('');
+  row.querySelectorAll('.dt').forEach(b => b.addEventListener('click', () => { drawTool = b.dataset.t; markPen(); }));
+  row.querySelectorAll('.pc').forEach(b => b.addEventListener('click', () => { penColor = b.dataset.c; if (!['pen'].includes(drawTool)) drawTool = 'pen'; markPen(); }));
+  row.querySelectorAll('.ps').forEach(b => b.addEventListener('click', () => { penSize = +b.dataset.s; markPen(); }));
+  markPen();
+}
+function markPen() {
+  $('pen').querySelectorAll('.dt').forEach(b => b.classList.toggle('on', b.dataset.t === drawTool));
+  $('pen').querySelectorAll('.pc').forEach(b => b.classList.toggle('on', b.dataset.c === penColor));
+  $('pen').querySelectorAll('.ps').forEach(b => { b.classList.toggle('on', +b.dataset.s === penSize); b.querySelector('i').style.background = penColor; });
+}
+function hasPixels(ctx) { const d = ctx.getImageData(0, 0, RES, RES).data; for (let i = 3; i < d.length; i += 64) if (d[i]) return true; return false; }
+function buildPalette() {
+  $('hidesketch').addEventListener('click', () => { snapshot(kctx); kctx.clearRect(0, 0, RES, RES); $('hidesketch').hidden = true; say('Sketch lines erased. Nice and clean!'); });
+  $('palette').innerHTML = PALETTE.map(c => `<button class="sw" style="background:${c}" data-c="${c}" aria-label="color ${c}"></button>`).join('');
+  $('palette').querySelectorAll('.sw').forEach(b => b.addEventListener('click', () => { color = b.dataset.c; markTools(); }));
+  document.querySelectorAll('#tools [data-tool]').forEach(b => b.addEventListener('click', () => { tool = b.dataset.tool; markTools(); }));
+  document.querySelectorAll('#sizes [data-size]').forEach(b => b.addEventListener('click', () => { size = +b.dataset.size; markTools(); }));
+  markTools();
+}
+function markTools() {
+  document.querySelectorAll('#tools [data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === tool));
+  document.querySelectorAll('#sizes [data-size]').forEach(b => b.classList.toggle('on', +b.dataset.size === size));
+  $('palette').querySelectorAll('.sw').forEach(b => b.classList.toggle('on', b.dataset.c === color));
+  $('sizes').style.visibility = tool === 'bucket' ? 'hidden' : 'visible';
+}
+
+// ---------------------------------------------------------------------------
+// Filters: each takes the finished picture and returns a new canvas.
+// ---------------------------------------------------------------------------
+function composite(scale) {
+  const n = Math.round(RES * scale), c = document.createElement('canvas'); c.width = c.height = n;
+  const g = c.getContext('2d'); g.fillStyle = '#FFFFFF'; g.fillRect(0, 0, n, n);
+  g.drawImage(paintWithShade(n), 0, 0); g.drawImage(sketch, 0, 0, n, n); g.drawImage(ink, 0, 0, n, n);
+  return c;
+}
+// Color with the shading laid over it the way graphite darkens crayon: multiply darkens
+// the color where there is color, and shows the plain gray tone where the page is blank.
+function paintWithShade(n) {
+  const c = document.createElement('canvas'); c.width = c.height = n; const g = c.getContext('2d');
+  g.drawImage(paint, 0, 0, n, n);
+  g.globalCompositeOperation = 'multiply'; g.drawImage(shadeL, 0, 0, n, n); g.globalCompositeOperation = 'source-over';
+  return c;
+}
+function layersAt(scale) {
+  const n = Math.round(RES * scale), mk = (src) => { const c = document.createElement('canvas'); c.width = c.height = n; c.getContext('2d').drawImage(src, 0, 0, n, n); return c; };
+  const ik = mk(ink); ik.getContext('2d').drawImage(sketch, 0, 0, n, n);
+  return { n, paint: paintWithShade(n), ink: ik };
+}
+let seed = 1; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const FILTERS = [
+  { id: 'none', name: 'Just me', icon: '🙂', run: (s) => composite(s) },
+  { id: 'crayon', name: 'Crayon', icon: '🖍️', run: (s) => {
+    const c = composite(s), g = c.getContext('2d'), n = c.width, img = g.getImageData(0, 0, n, n), d = img.data; seed = 7;
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) { const i = (y * n + x) * 4, grain = 0.72 + 0.28 * (rnd() * 0.6 + 0.4 * Math.sin(x * 0.9 + y * 0.35));
+      if (d[i] + d[i + 1] + d[i + 2] < 740) for (let k = 0; k < 3; k++) d[i + k] = 255 - (255 - d[i + k]) * grain; }
+    g.putImageData(img, 0, 0); return c; } },
+  { id: 'water', name: 'Watercolor', icon: '💧', run: (s) => {
+    const L = layersAt(s), c = document.createElement('canvas'); c.width = c.height = L.n; const g = c.getContext('2d');
+    g.fillStyle = '#FFFDF7'; g.fillRect(0, 0, L.n, L.n);
+    g.filter = `blur(${Math.max(1, L.n / 220)}px)`; g.globalAlpha = 0.85; g.drawImage(L.paint, 0, 0); g.globalAlpha = 0.35; g.drawImage(L.paint, L.n * 0.004, L.n * 0.003);
+    g.filter = 'none'; g.globalAlpha = 0.9; g.drawImage(L.ink, 0, 0); g.globalAlpha = 1;
+    const img = g.getImageData(0, 0, L.n, L.n), d = img.data; seed = 3;
+    for (let i = 0; i < d.length; i += 4) { const f = 0.93 + rnd() * 0.07; d[i] *= f; d[i + 1] *= f; d[i + 2] *= f; }
+    g.putImageData(img, 0, 0); return c; } },
+  { id: 'sparkle', name: 'Sparkle', icon: '✨', run: (s) => {
+    const c = composite(s), g = c.getContext('2d'), n = c.width, pd = layersAt(s).paint.getContext('2d').getImageData(0, 0, n, n).data; seed = 11;
+    for (let k = 0; k < n * 0.9; k++) { const x = Math.floor(rnd() * n), y = Math.floor(rnd() * n); if (pd[(y * n + x) * 4 + 3] > 100) sparkle(g, x, y, n / 160 + rnd() * n / 90, rnd() < 0.5 ? '#FFFFFF' : '#FFE27A'); }
+    return c; } },
+  { id: 'rainbow', name: 'Rainbow', icon: '🌈', run: (s) => {
+    const c = composite(s), g = c.getContext('2d'), n = c.width, img = g.getImageData(0, 0, n, n), d = img.data;
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) { const i = (y * n + x) * 4; if (d[i] + d[i + 1] + d[i + 2] > 740) continue;
+      const h = ((x + y) / (2 * n)) * 360, [r, gg, b] = hslRgb(h, 0.85, 0.55), k = 0.55; d[i] = d[i] * (1 - k) + r * k; d[i + 1] = d[i + 1] * (1 - k) + gg * k; d[i + 2] = d[i + 2] * (1 - k) + b * k; }
+    g.putImageData(img, 0, 0); return c; } },
+  { id: 'neon', name: 'Neon', icon: '🌟', run: (s) => {
+    const L = layersAt(s), c = document.createElement('canvas'); c.width = c.height = L.n; const g = c.getContext('2d');
+    g.fillStyle = '#0B0820'; g.fillRect(0, 0, L.n, L.n);
+    g.globalAlpha = 0.75; g.drawImage(L.paint, 0, 0); g.globalAlpha = 1;
+    // glowing lines: recolor her lines bright, then blur a copy underneath for the glow
+    const lc = document.createElement('canvas'); lc.width = lc.height = L.n; const lg = lc.getContext('2d');
+    lg.drawImage(L.ink, 0, 0); lg.globalCompositeOperation = 'source-in'; const grad = lg.createLinearGradient(0, 0, L.n, L.n);
+    grad.addColorStop(0, '#FF4FD8'); grad.addColorStop(0.5, '#4FE3FF'); grad.addColorStop(1, '#B7FF4F'); lg.fillStyle = grad; lg.fillRect(0, 0, L.n, L.n);
+    g.globalCompositeOperation = 'lighter'; g.filter = `blur(${Math.max(2, L.n / 120)}px)`; g.drawImage(lc, 0, 0); g.filter = 'none'; g.drawImage(lc, 0, 0); g.globalCompositeOperation = 'source-over';
+    return c; } },
+  { id: 'pop', name: 'Pop art', icon: '💥', run: (s) => {
+    const c = composite(s), g = c.getContext('2d'), n = c.width, img = g.getImageData(0, 0, n, n), d = img.data, cell = Math.max(4, Math.round(n / 90));
+    for (let i = 0; i < d.length; i += 4) for (let k = 0; k < 3; k++) d[i + k] = Math.round(d[i + k] / 85) * 85;
+    g.putImageData(img, 0, 0);
+    // halftone dots over the colored parts
+    g.fillStyle = 'rgba(20,10,40,0.28)';
+    for (let y = cell / 2; y < n; y += cell) for (let x = cell / 2; x < n; x += cell) { const i = (Math.floor(y) * n + Math.floor(x)) * 4; const lum = (d[i] + d[i + 1] + d[i + 2]) / 765; if (lum < 0.97) { g.beginPath(); g.arc(x, y, cell * 0.42 * (1 - lum * 0.6), 0, 6.283); g.fill(); } }
+    g.drawImage(ink, 0, 0, n, n); return c; } }
+];
+function hslRgb(h, s, l) { const a = s * Math.min(l, 1 - l), f = (k) => { const t = (k + h / 30) % 12; return l - a * Math.max(-1, Math.min(t - 3, 9 - t, 1)); }; return [f(0) * 255, f(8) * 255, f(4) * 255]; }
+let chosen = 'none', finalCanvas = null;
+function startFinish() {
+  show('finish'); say('Pick a magic filter for your picture!');
+  const row = $('filters'); row.innerHTML = '';
+  for (const f of FILTERS) {
+    const b = document.createElement('button'); b.className = 'filt'; b.dataset.f = f.id; b.setAttribute('aria-label', f.name);
+    const prev = f.run(0.16); prev.className = 'fprev'; b.appendChild(prev);
+    const t = document.createElement('span'); t.textContent = f.icon + ' ' + f.name; b.appendChild(t);
+    b.addEventListener('click', () => applyFilter(f.id));
+    row.appendChild(b);
+  }
+  applyFilter('none');
+}
+function applyFilter(id) {
+  chosen = id;
+  document.querySelectorAll('.filt').forEach(b => b.classList.toggle('on', b.dataset.f === id));
+  finalCanvas = FILTERS.find(f => f.id === id).run(1);
+  const big = $('result'); big.width = big.height = RES; big.getContext('2d').drawImage(finalCanvas, 0, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Her gallery, kept on the tablet. Pictures are stored as JPEG text and turned back
+// into pictures without any image URLs (so nothing for a strict page to block).
+// ---------------------------------------------------------------------------
+const GKEY = 'drawwithme-gallery';
+function loadGallery() { try { return JSON.parse(localStorage.getItem(GKEY) || '[]'); } catch (e) { return []; } }
+function saveGallery(list) {
+  // drop the oldest pictures if the tablet's storage for this app is full
+  for (let n = list.length; n > 0; n--) { try { localStorage.setItem(GKEY, JSON.stringify(list.slice(0, n))); return true; } catch (e) {} }
+  return false;
+}
+function savePicture() {
+  const small = document.createElement('canvas'); small.width = small.height = 900;
+  small.getContext('2d').drawImage(finalCanvas, 0, 0, 900, 900);
+  const jpg = small.toDataURL('image/jpeg', 0.85).split(',')[1];
+  const list = loadGallery(); list.unshift({ id: Date.now(), name: subject ? subject.name : 'Picture', jpg });
+  const ok = saveGallery(list.slice(0, 30));
+  say(ok ? 'Saved! Great job!' : 'Great job!');
+  confetti(); renderGallery();
+  setTimeout(() => { show('home'); }, 1800);
+}
+async function jpgToCanvas(b64, canvas) {
+  const bin = atob(b64), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/jpeg' }));
+  canvas.width = bmp.width; canvas.height = bmp.height; canvas.getContext('2d').drawImage(bmp, 0, 0);
+}
+function renderGallery() {
+  const list = loadGallery(), el = $('gallery');
+  $('galbar').hidden = list.length === 0;
+  $('galcount').textContent = '📷 My pictures' + (list.length ? ' · ' + list.length : '');
+  const peek = $('galpeek'); peek.innerHTML = '';
+  for (const item of list.slice(0, 4)) { const c = document.createElement('canvas'); peek.appendChild(c); jpgToCanvas(item.jpg, c).catch(() => {}); }
+  el.innerHTML = '';
+  for (const item of list) {
+    const b = document.createElement('button'); b.className = 'gal'; b.setAttribute('aria-label', item.name);
+    const c = document.createElement('canvas'); b.appendChild(c); el.appendChild(b);
+    jpgToCanvas(item.jpg, c).catch(() => {});
+    b.addEventListener('click', () => { $('galsheet').hidden = true; show('view'); jpgToCanvas(item.jpg, $('viewcanvas')); $('viewdel').onclick = () => { saveGallery(loadGallery().filter(x => x.id !== item.id)); renderGallery(); show('home'); }; });
+  }
+}
+function confetti() {
+  const box = $('confetti'); box.innerHTML = '';
+  const cols = ['#FF5A4E', '#FFC93C', '#3BB273', '#4FC3F7', '#8E5BD6', '#FF6FB5'];
+  for (let i = 0; i < 70; i++) { const d = document.createElement('i'); d.style.left = Math.random() * 100 + '%'; d.style.background = cols[i % cols.length]; d.style.animationDelay = Math.random() * 0.5 + 's'; d.style.animationDuration = 1.4 + Math.random() + 's'; box.appendChild(d); }
+  box.hidden = false; setTimeout(() => { box.hidden = true; }, 2600);
+}
+
+// ---------------------------------------------------------------------------
+// Home: the picture buttons draw themselves from the library.
+// ---------------------------------------------------------------------------
+function thumb(s, px) {
+  const c = document.createElement('canvas'); c.width = c.height = px * 2;
+  const g = c.getContext('2d'); g.scale(px * 2 / 1000, px * 2 / 1000); g.lineWidth = 22; g.lineCap = g.lineJoin = 'round'; g.strokeStyle = '#3B3355';
+  for (const st of s.steps) {
+    if (st.shade) { g.save(); g.clip(new Path2D(st.shade.area)); g.fillStyle = 'rgba(60,58,72,0.25)'; g.fillRect(0, 0, 1000, 1000); g.restore(); continue; }
+    if (st.tool === 'sketch') continue;
+    g.stroke(new Path2D(st.path));
+  }
+  c.style.width = c.style.height = px + 'px';
+  return c;
+}
+function markStyle() { document.querySelectorAll('#style button').forEach(b => b.classList.toggle('on', b.dataset.s === drawStyle)); }
+let pickCat = 'all';
+function buildHome() {
+  document.querySelectorAll('#style button').forEach(b => b.addEventListener('click', () => { drawStyle = b.dataset.s; try { localStorage.setItem('drawwithme-style', drawStyle); } catch (e) {} markStyle(); rebuildPicks(); }));
+  markStyle(); $('style').hidden = !(canLearn() || hasDetailed());
+  for (const s of loadLearned().reverse()) addLearned(s);
+  rebuildPicks();
+  if (!Recognition) setMicState('off', 'Pick something to draw!');
+  else setMicState('ready', '');
+  renderGallery();
+}
+function rebuildPicks() {
+  const grid = $('picks'); grid.innerHTML = '';
+  // The chosen style's drawings (simple ones if there are no detailed ones yet).
+  let pool = ofStyle(drawStyle); if (!pool.length) pool = ofStyle('simple');
+  const cats = ['all', ...(pool.some(s => s.learned) ? ['new'] : []), ...Object.keys(CATEGORY_NAMES).filter(c => pool.some(s => s.cat === c))];
+  if (!cats.includes(pickCat)) pickCat = 'all';
+  const chips = $('cats'); chips.innerHTML = '';
+  chips.hidden = cats.length <= 2;
+  for (const c of cats) {
+    const b = document.createElement('button'); b.textContent = c === 'all' ? 'Everything' : c === 'new' ? 'New' : CATEGORY_NAMES[c];
+    b.classList.toggle('on', c === pickCat); b.addEventListener('click', () => { pickCat = c; rebuildPicks(); }); chips.appendChild(b);
+  }
+  const shown = pool.filter(s => pickCat === 'all' || s.cat === pickCat || (pickCat === 'new' && s.learned));
+  const learned = shown.filter(s => s.learned), rest = shown.filter(s => !s.learned);
+  const group = (title) => { const h = document.createElement('div'); h.className = 'pickhead'; h.textContent = title; grid.appendChild(h); };
+  // Names she has already saved a picture of, so finished drawings get a star on their tile.
+  const drawn = new Set(loadGallery().map(g => g.name));
+  if (shown.length > 1) {
+    // Drawing of the day: the same one all day (so it feels like a thing), different tomorrow.
+    const day = Math.floor(Date.now() / 86400000), today = shown[day % shown.length];
+    const tb = document.createElement('button'); tb.className = 'pick today'; tb.setAttribute('aria-label', 'Drawing of the day: ' + today.name);
+    tb.appendChild(thumb(today, 84));
+    const tt = document.createElement('span'); tt.textContent = 'Today: ' + today.name; tb.appendChild(tt);
+    tb.addEventListener('click', () => { say('Today we draw a ' + today.name.toLowerCase() + '!'); startDrawing(today); });
+    grid.appendChild(tb);
+    // Surprise me: a random one she has not drawn yet, if any are left.
+    const sb = document.createElement('button'); sb.className = 'pick surprise'; sb.setAttribute('aria-label', 'Surprise me');
+    const dice = document.createElement('div'); dice.className = 'dice'; dice.textContent = '\u{1F3B2}'; sb.appendChild(dice);
+    const st = document.createElement('span'); st.textContent = 'Surprise me!'; sb.appendChild(st);
+    sb.addEventListener('click', () => {
+      const fresh = shown.filter(s => !drawn.has(s.name)), from = fresh.length ? fresh : shown;
+      const s = from[Math.floor(Math.random() * from.length)];
+      say('Surprise! Let\'s draw a ' + s.name.toLowerCase() + '!'); startDrawing(s);
+    });
+    grid.appendChild(sb);
+  }
+  if (learned.length && rest.length) group('New drawings');
+  for (const s of [...learned, ...rest]) {
+    if (s === rest[0] && learned.length) group('More drawings');
+    const b = document.createElement('button'); b.className = 'pick'; b.setAttribute('aria-label', s.name + (drawn.has(s.name) ? ', you drew this' : ''));
+    b.appendChild(thumb(s, 84));
+    const t = document.createElement('span'); t.textContent = s.name; b.appendChild(t);
+    if (drawn.has(s.name)) { const star = document.createElement('span'); star.className = 'drew'; star.textContent = '\u2B50'; b.appendChild(star); }
+    b.addEventListener('click', () => startDrawing(s));
+    grid.appendChild(b);
+  }
+}
+
+
+// ---------------------------------------------------------------------------
+// Lab (grown-ups only: open the page with ?lab). Try any request against a model and
+// see the result immediately, without saving it or touching her daily count.
+// ---------------------------------------------------------------------------
+function startLab() {
+  const el = $('lab'); el.hidden = false;
+  $('labkey').value = CFG.apiKey || '';
+  $('labmodel').value = CFG.model;
+  $('labgo').onclick = async () => {
+    const asked = $('labask').value.trim(); if (!asked) return;
+    $('labout').textContent = 'Asking ' + $('labmodel').value + '…';
+    const res = await learnDrawing(asked, { key: $('labkey').value.trim(), model: $('labmodel').value, lab: true, style: $('labstyle').value });
+    const u = res.usage || {};
+    $('labout').textContent = (res.subject ? 'OK' : 'Rejected: ' + (res.error || res.refuse)) +
+      (res.ms ? `  |  ${(res.ms / 1000).toFixed(1)} s, ${u.input_tokens || '?'} in / ${u.output_tokens || '?'} out tokens` : '') + '\n\n' + (res.raw || '');
+    const c = $('labcanvas'), g = c.getContext('2d'); c.width = c.height = 600; g.fillStyle = '#FFFFFF'; g.fillRect(0, 0, 600, 600);
+    if (res.subject) {
+      g.save(); g.scale(0.6, 0.6); g.lineCap = g.lineJoin = 'round';
+      res.subject.steps.forEach((st, i) => {
+        if (st.shade) { g.save(); g.clip(new Path2D(st.shade.area)); g.fillStyle = `rgba(60,58,72,${TONES[st.shade.tone]})`; g.fillRect(0, 0, 1000, 1000); g.restore(); return; }
+        g.strokeStyle = st.tool === 'sketch' ? 'rgba(90,95,110,0.4)' : '#222'; g.lineWidth = st.tool === 'sketch' ? 5 : 9; g.stroke(new Path2D(st.path)); });
+      g.restore();
+      $('labuse').hidden = false;
+      $('labuse').onclick = () => { $('lab').hidden = true; startDrawing(res.subject); };
+    } else $('labuse').hidden = true;
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Library builder (grown-ups, on a PC: open with ?lab&build). Makes simple and detailed
+// lessons for everything in the catalog, a few at a time; progress is kept in the browser
+// so it can be paused and resumed; review the thumbnails, tap a bad one to reject it,
+// redo, and export library.js to put beside the app.
+// ---------------------------------------------------------------------------
+const BuildDB = {
+  db: null,
+  open() { return this.db ? Promise.resolve(this.db) : new Promise((ok, bad) => { const r = indexedDB.open('drawwithme-build', 1); r.onupgradeneeded = () => r.result.createObjectStore('items'); r.onsuccess = () => ok(this.db = r.result); r.onerror = () => bad(r.error); }); },
+  async all() { const db = await this.open(); return new Promise(ok => { const out = {}; const t = db.transaction('items').objectStore('items').openCursor(); t.onsuccess = () => { const c = t.result; if (c) { out[c.key] = c.value; c.continue(); } else ok(out); }; }); },
+  async put(k, v) { const db = await this.open(); return new Promise(ok => { const t = db.transaction('items', 'readwrite'); t.objectStore('items').put(v, k); t.oncomplete = ok; }); }
+};
+async function startBuilder() {
+  const el = $('builder'); el.hidden = false; $('lab').hidden = true;
+  $('bkey').value = CFG.apiKey || ''; $('bmodel').value = CFG.model;
+  let items = await BuildDB.all(), running = false;
+  const key = (c, st) => c.id + '|' + st;
+  const styles = () => ['simple', 'detailed'].filter(st => $('b' + st).checked);
+  const jobs = () => CATALOG.flatMap(c => styles().map(st => ({ c, st, k: key(c, st) })));
+  function cost() {
+    let i = 0, o = 0; for (const v of Object.values(items)) if (v.usage) { i += v.usage.input_tokens || 0; o += v.usage.output_tokens || 0; }
+    return (i / 1e6) * +$('bpin').value + (o / 1e6) * +$('bpout').value;
+  }
+  function card(j) {
+    let d = document.getElementById('bc-' + j.k);
+    if (!d) { d = document.createElement('div'); d.className = 'bcard'; d.id = 'bc-' + j.k; d.innerHTML = '<canvas width="240" height="240"></canvas><span></span>';
+      d.addEventListener('click', async () => { const v = items[j.k]; if (!v || (v.status !== 'ok' && v.status !== 'rejected')) return; v.status = v.status === 'ok' ? 'rejected' : 'ok'; await BuildDB.put(j.k, v); card(j); stats(); });
+      $('bgrid').appendChild(d); }
+    const v = items[j.k], g = d.querySelector('canvas').getContext('2d');
+    d.className = 'bcard ' + (v ? v.status : 'todo');
+    d.querySelector('span').textContent = j.c.name + (j.st === 'detailed' ? ' ★' : '');
+    d.title = v && v.error ? v.error : '';
+    g.fillStyle = '#FFFFFF'; g.fillRect(0, 0, 240, 240);
+    if (v && v.steps) {
+      g.save(); g.scale(0.24, 0.24); g.lineCap = g.lineJoin = 'round';
+      for (const st of v.steps) {
+        if (st.shade) { g.save(); g.clip(new Path2D(st.shade.area)); g.fillStyle = `rgba(60,58,72,${TONES[st.shade.tone] || 0.3})`; g.fillRect(0, 0, 1000, 1000); g.restore(); continue; }
+        g.strokeStyle = st.tool === 'sketch' ? 'rgba(90,95,110,0.35)' : '#222'; g.lineWidth = st.tool === 'sketch' ? 5 : 10; g.stroke(new Path2D(st.path));
+      }
+      g.restore();
+    }
+  }
+  function stats() {
+    const js = jobs(), n = { ok: 0, rejected: 0, failed: 0 };
+    for (const j of js) { const v = items[j.k]; if (v) n[v.status] = (n[v.status] || 0) + 1; }
+    $('bstats').textContent = `${n.ok} good, ${n.rejected} rejected, ${n.failed} failed, ${js.length - n.ok - n.rejected - n.failed} to go, of ${js.length}  |  about $${cost().toFixed(2)} so far`;
+  }
+  function render() { $('bgrid').innerHTML = ''; for (const j of jobs()) card(j); stats(); }
+  async function run(filter) {
+    if (running) return; running = true; $('bstart').disabled = $('bredo').disabled = true;
+    const queue = jobs().filter(filter), workers = +$('bconc').value;
+    const work = async () => {
+      while (running && queue.length) {
+        const j = queue.shift();
+        const res = await learnDrawing(j.c.name.toLowerCase(), { key: $('bkey').value.trim(), model: $('bmodel').value, style: j.st, lab: true });
+        items[j.k] = res.subject ? { status: 'ok', steps: res.subject.steps, usage: res.usage } : { status: 'failed', error: res.error || res.refuse || 'failed', usage: res.usage };
+        await BuildDB.put(j.k, items[j.k]); card(j); stats();
+      }
+    };
+    await Promise.all(Array.from({ length: workers }, work));
+    running = false; $('bstart').disabled = $('bredo').disabled = false;
+  }
+  $('bstart').onclick = () => run(j => !items[j.k]);
+  $('bredo').onclick = () => run(j => items[j.k] && (items[j.k].status === 'failed' || items[j.k].status === 'rejected'));
+  $('bpause').onclick = () => { running = false; };
+  $('bsimple').onchange = $('bdetailed').onchange = render;
+  $('bexport').onclick = () => {
+    const out = [];
+    for (const c of CATALOG) for (const st of ['simple', 'detailed']) {
+      const v = items[key(c, st)];
+      if (v && v.status === 'ok') out.push({ id: c.id + '-' + st, name: c.name, words: c.words, cat: c.cat, style: st, steps: v.steps });
+    }
+    const text = '// Draw With Me library: ' + out.length + ' lessons, made ' + new Date().toISOString().slice(0, 10) + '\nwindow.DWM_LIBRARY = ' + JSON.stringify(out) + ';\n';
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/javascript' })); a.download = 'library.js';
+    document.body.appendChild(a); a.click(); a.remove();
+    $('bstats').textContent = 'Exported ' + out.length + ' lessons to library.js';
+    window.__lastExport = text;
+  };
+  render();
+}
+// ---------------------------------------------------------------------------
+// Wiring
+// ---------------------------------------------------------------------------
+touch.addEventListener('pointerdown', startStroke);
+touch.addEventListener('pointermove', moveStroke);
+touch.addEventListener('pointerup', endStroke);
+touch.addEventListener('pointercancel', endStroke);
+$('mic').addEventListener('click', listen);
+$('next').addEventListener('click', nextStep);
+$('again').addEventListener('click', playStep);
+$('helpme').addEventListener('click', helpStep);
+$('undo').addEventListener('click', undo);
+$('undo2').addEventListener('click', undo);
+$('done').addEventListener('click', startFinish);
+$('save').addEventListener('click', savePicture);
+$('backcolor').addEventListener('click', () => { show('color'); });
+document.querySelectorAll('.home').forEach(b => b.addEventListener('click', () => { cancelAnimationFrame(anim); try { speechSynthesis.cancel(); } catch (e) {} $('drawstage').appendChild($('stage')); show('home'); }));
+$('retry').addEventListener('click', () => {
+  if (!subject || !subject.learned) return;
+  cancelAnimationFrame(anim); $('drawstage').appendChild($('stage')); show('home');
+  tryToLearn(subject.asked || subject.name.toLowerCase(), subject.id);
+});
+$('sound').addEventListener('click', () => { soundOn = !soundOn; $('sound').textContent = soundOn ? '🔊' : '🔇'; if (!soundOn) try { speechSynthesis.cancel(); } catch (e) {} });
+$('viewclose').addEventListener('click', () => show('home'));
+$('galbar').addEventListener('click', () => { $('galsheet').hidden = false; });
+$('galclose').addEventListener('click', () => { $('galsheet').hidden = true; });
+buildHome(); buildPalette(); buildPen(); show('home');
+if (/[?&]build\b/.test(location.search)) startBuilder();
+else if (/[?&]lab\b/.test(location.search)) startLab();
+if (window.speechSynthesis) speechSynthesis.onvoiceschanged = () => { voice = pickVoice(); };
+// For testing only: exposed when opened with ?dwmtest
+if (/dwmtest/.test(location.search)) window.__dwm = { shadeL, sketch, setDrawTool: (t) => { drawTool = t; markPen(); }, setStyle: (st) => { drawStyle = st; }, DETAILED_EXAMPLE, composite, setPen: (c, s) => { penColor = c; penSize = s; markPen(); }, LESSON_VERSION, tryToLearn, checkLesson, learnDrawing, loadLearned, learnedToday, CFG, startDrawing, nextStep, helpStep, startColoring, bucketFill, startFinish, applyFilter, savePicture, matchSubject, SUBJECTS, paint, ink, setTool: (t, c) => { tool = t; if (c) color = c; }, get stepIdx() { return stepIdx; }, loadGallery, FILTERS };
+</script>
+</body>
+</html>
