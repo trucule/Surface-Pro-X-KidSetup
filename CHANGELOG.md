@@ -1,5 +1,15 @@
 # Changes
 
+## 2026-10-07
+- **Story Maker voices from VoiceStudio**: `TTS_PROVIDER=voicestudio` with `TTS_URL` and `TTS_PIN` points the app at
+  the VoiceStudio app shared on the LAN from the PC. The cast is thirteen designed voice profiles (Narrator plus the
+  twelve friends), matched by name at startup; `apps/story-maker/voices.js` holds each one's tuned sampler settings
+  and Beep gets a robot effect in Web Audio. A scene's lines are all requested up front and rendered in reading
+  order, two at a time. When the PC is off, the Azure or OpenAI key (if set) is used, then the Windows voices.
+- Bun is now an elderly British gentleman rabbit and Twinkle the confident leader; the story writer is told so.
+- `make-voices.py --engine voicestudio --voice Narrator` renders the fixed prompts of every app with a VoiceStudio
+  profile.
+
 ## 2026-10-06
 - **Music Box v2**: Voice Lab page with six recording pads (raw audio kept in IndexedDB), effects (chipmunk, giant,
   backwards, robot, echo), "sing my notes" (her voice becomes a pitched instrument on the grid and the keyboard) and

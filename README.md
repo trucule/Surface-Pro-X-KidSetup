@@ -76,9 +76,13 @@ Three more apps (`apps/count-with-me.html`, `apps/music-box.html`, `apps/story-m
   personality), a place, a story kind (adventure, mystery, friendship, silly, bedtime), a drama dial (cozy, a little
   trouble, big trouble) and a length (3 or 6 parts). The story is told scene by scene; each scene ends in a choice.
   With `ANTHROPIC_API_KEY` in `.env`, Claude writes each scene live (`STORY_MODEL`, Haiku by default; `DRAW_DAILY_LIMIT`
-  also caps stories per day). Without a key, a built-in branching story is used. Every line is read by its speaker:
-  with `TTS_PROVIDER` / `TTS_KEY` (Azure Speech, with `TTS_REGION`, or OpenAI) each character has its own natural
-  voice and the narrator a warm adult one; otherwise the Windows voices are used, varied per character.
+  also caps stories per day). Without a key, a built-in branching story is used. Every line is read by its speaker.
+  Voices, best first: `TTS_PROVIDER=voicestudio` with `TTS_URL` and `TTS_PIN` uses the VoiceStudio app on your PC
+  (Settings > Sharing & Remote Access > Share on your network) and the thirteen designed profiles named in
+  `apps/story-maker/voices.js` (Narrator plus the cast; the file also holds each one's tuned sampler settings, and
+  Beep's robot effect). That works at home while the PC is on; add `TTS_KEY` (Azure Speech with `TTS_REGION`, or
+  OpenAI with `TTS_FALLBACK=openai`) and it takes over when the PC is unreachable. With `TTS_PROVIDER=azure|openai`
+  the key is the primary voice. Without any of these, the Windows voices are used, varied per character.
 
 ## Draw With Me library
 `apps/draw-with-me/library.js` holds the pre-made lessons (152 as of this package: 70 simple, 82 detailed). To add more, use the separate

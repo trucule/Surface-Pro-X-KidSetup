@@ -14,7 +14,8 @@
       (storyModel, Haiku by default), as JSON lines with speakers and moods. dailyLimit caps stories per day.
     - Without one, a built-in branching story is used, so the app always works offline.
   Two ways the words get spoken:
-    - With TTS settings in config.js (Azure Speech or OpenAI), each line is synthesized in that speaker's voice.
+    - With TTS settings in config.js, each line is synthesized in that speaker's voice: VoiceStudio on the LAN
+      (designed voices, see voices.js), else Azure Speech or OpenAI; the Windows voices are the last fallback.
     - Otherwise the Windows voices are used, a different one (and pitch) per character. Static prompts can also
       come from a voice pack (voices/make-voices.py), like the other apps.
 -->
@@ -83,6 +84,7 @@
   </section>
 </div>
 <script src="config.js"></script>
+<script src="voices.js"></script>
 <script id="voicepack">/* voice pack goes here: run voices/make-voices.py */</script>
 <script>
 // ---------------------------------------------------------------------------
@@ -90,10 +92,10 @@
 // TTS, and a pitch/rate for the Windows voices so they still sound different from each other.
 // ---------------------------------------------------------------------------
 const CAST = [
-  { id: 'bun', name: 'Bun', emoji: '🐰', kind: 'bunny', trait: 'brave and kind, hops when excited', azure: 'en-US-JaneNeural', openai: 'shimmer', pitch: 1.3, rate: 1.0 },
+  { id: 'bun', name: 'Bun', emoji: '🐰', kind: 'bunny', trait: 'a kindly elderly gentleman rabbit who speaks in a gentle British way, tells short "in my day" stories, wise and warm', azure: 'en-US-JaneNeural', openai: 'shimmer', pitch: 1.3, rate: 1.0 },
   { id: 'spark', name: 'Spark', emoji: '🐉', kind: 'little dragon', trait: 'silly, sneezes tiny sparks, loves jokes', azure: 'en-US-DavisNeural', openai: 'echo', pitch: 0.8, rate: 0.95 },
   { id: 'beep', name: 'Beep', emoji: '🤖', kind: 'robot', trait: 'curious, counts things, says beep boop', azure: 'en-US-TonyNeural', openai: 'onyx', pitch: 0.7, rate: 1.05 },
-  { id: 'twinkle', name: 'Twinkle', emoji: '🦄', kind: 'unicorn', trait: 'dreamy and gentle, notices sparkly things', azure: 'en-US-AriaNeural', openai: 'nova', pitch: 1.4, rate: 0.9 },
+  { id: 'twinkle', name: 'Twinkle', emoji: '🦄', kind: 'unicorn', trait: 'confident, strong and capable, the leader who keeps everyone safe and makes the plan', azure: 'en-US-AriaNeural', openai: 'nova', pitch: 1.4, rate: 0.9 },
   { id: 'pip', name: 'Pip', emoji: '🐧', kind: 'penguin', trait: 'shy at first, very loyal, loves sliding', azure: 'en-US-SaraNeural', openai: 'fable', pitch: 1.2, rate: 1.0 },
   { id: 'scarlett', name: 'Scarlett', emoji: '👧', kind: 'girl', trait: 'clever and bold, has good ideas', azure: 'en-US-AnaNeural', openai: 'shimmer', pitch: 1.5, rate: 1.0 },
   { id: 'hop', name: 'Hop', emoji: '🐸', kind: 'frog', trait: 'jumpy and loud, says RIBBIT when surprised', azure: 'en-US-JasonNeural', openai: 'echo', pitch: 0.9, rate: 1.15 },
@@ -122,28 +124,95 @@ const VOICE = (() => {
   const key = t => String(t).trim().toLowerCase().replace(/\s+/g, ' ');
   function ctx() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } if (actx && actx.state === 'suspended') actx.resume(); return actx; }
   function stop() { if (cur) { try { cur.onended = null; cur.stop(); } catch (e) {} cur = null; } try { speechSynthesis.cancel(); } catch (e) {} }
-  function playBuffer(buf, done) { const a = ctx(); const s = a.createBufferSource(); s.buffer = buf; s.connect(a.destination); s.onended = () => { if (cur === s) { cur = null; if (done) done(); } }; cur = s; s.start(); }
+  // Effects applied to a character's audio: "robot" is a ring modulator plus a touch of bit crushing.
+  function chain(a, fx) {
+    const out = a.createGain(); out.gain.value = 1;
+    if (fx !== 'robot') { out.connect(a.destination); return out; }
+    const ring = a.createGain(); ring.gain.value = 0; const lfo = a.createOscillator(); lfo.type = 'sine'; lfo.frequency.value = 55; lfo.connect(ring.gain); lfo.start();
+    const dry = a.createGain(); dry.gain.value = 0.35; const wet = a.createGain(); wet.gain.value = 0.9;
+    const crush = a.createWaveShaper(); const n = 256, curve = new Float32Array(n); const levels = 24; for (let i = 0; i < n; i++) { const x = i * 2 / n - 1; curve[i] = Math.round(x * levels) / levels; } crush.curve = curve;
+    const hp = a.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 220; const lp = a.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 3400;
+    out.connect(ring); ring.connect(wet); out.connect(dry); wet.connect(crush); dry.connect(crush); crush.connect(hp).connect(lp).connect(a.destination);
+    return out;
+  }
+  function playBuffer(buf, done, fx) { const a = ctx(); const s = a.createBufferSource(); s.buffer = buf; s.connect(chain(a, fx)); s.onended = () => { if (cur === s) { cur = null; if (done) done(); } }; cur = s; s.start(); }
   async function decode(bytes) { const a = ctx(); return a.decodeAudioData(bytes.slice(0)); }
-  // Live TTS: Azure Speech (SSML, styles per mood) or OpenAI. Returns an AudioBuffer or null.
-  async function synth(text, who, mood) {
-    const t = CFG.tts; if (!t || !t.key || !ctx()) return null;
-    const k = (who.id || 'n') + '|' + (mood || '') + '|' + key(text); if (cache.has(k)) return cache.get(k);
-    let bytes = null;
+  const vsCfg = () => (window.VS_VOICES || {});
+  function fxFor(who) { const v = vsCfg()[who.id]; return v && v.fx; }
+
+  // --- VoiceStudio on the LAN (designed voices, GPU on the PC) -------------------------------------
+  // Reached only while the PC is on and sharing; otherwise the Azure or OpenAI key (if any) is used, and
+  // after that the Windows voices. Health is rechecked every 20 s so a story recovers when the PC comes back.
+  const vs = { ok: null, at: 0, ids: null, active: 0, queue: [] };
+  const vsHeaders = t => (t.pin ? { 'x-omnivoice-pin': t.pin } : {});
+  async function vsAlive(t) {
+    if (vs.ok !== null && Date.now() - vs.at < 20000) return vs.ok;
+    vs.at = Date.now();
+    try { const c = new AbortController(); const tm = setTimeout(() => c.abort(), 1500); const r = await fetch(t.url + '/health', { headers: vsHeaders(t), signal: c.signal }); clearTimeout(tm); vs.ok = r.ok; }
+    catch (e) { vs.ok = false; }
+    if (!vs.ok) vs.ids = null;
+    return vs.ok;
+  }
+  async function vsVoiceId(t, who) {
+    if (!vs.ids) {
+      if (!vs.idsP) vs.idsP = (async () => {
+        try { const r = await fetch(t.url + '/v1/audio/voices', { headers: vsHeaders(t) }); const j = await r.json(); const ids = {}; for (const v of (j.voices || [])) if (v.type === 'profile') ids[String(v.name).toLowerCase()] = v.voice_id; vs.ids = ids; }
+        catch (e) { vs.ids = null; }
+        vs.idsP = null;
+      })();
+      await vs.idsP; if (!vs.ids) return null;
+    }
+    const v = vsCfg()[who.id]; const name = (v && v.profile) || who.name; return vs.ids[String(name).toLowerCase()] || null;
+  }
+  // The GPU renders one line at a time; two in flight keeps it busy without starving the line being read.
+  function vsSlot() { return new Promise(res => { vs.queue.push(res); vsPump(); }); }
+  function vsPump() { while (vs.active < 2 && vs.queue.length) { vs.active++; vs.queue.shift()(); } }
+  function vsRelease() { vs.active--; vsPump(); }
+  async function vsSynth(t, text, who) {
+    await vsSlot();   // taken in call order, so a scene renders in reading order
     try {
-      if (t.provider === 'openai') {
-        const r = await fetch('https://api.openai.com/v1/audio/speech', { method: 'POST', headers: { 'Authorization': 'Bearer ' + t.key, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: t.model || 'gpt-4o-mini-tts', voice: who.openai || 'nova', input: text, response_format: 'mp3' }) });
-        if (r.ok) bytes = await r.arrayBuffer();
-      } else {
-        const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-        const style = mood && mood !== 'neutral' ? mood : null;
-        const inner = style ? `<mstts:express-as style="${style}">${esc(text)}</mstts:express-as>` : esc(text);
-        const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US"><voice name="${who.azure}"><prosody rate="${who.id === 'narrator' ? '-6%' : '0%'}">${inner}</prosody></voice></speak>`;
-        const r = await fetch(`https://${t.region || 'eastus'}.tts.speech.microsoft.com/cognitiveservices/v1`, { method: 'POST', headers: { 'Ocp-Apim-Subscription-Key': t.key, 'Content-Type': 'application/ssml+xml', 'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3' }, body: ssml });
-        if (r.ok) bytes = await r.arrayBuffer();
-      }
-    } catch (e) { bytes = null; }
-    if (!bytes) { cache.set(k, null); return null; }
-    try { const buf = await decode(bytes); cache.set(k, buf); return buf; } catch (e) { cache.set(k, null); return null; }
+      if (!(await vsAlive(t))) return null;
+      const id = await vsVoiceId(t, who); if (!id) return null;
+      const v = vsCfg()[who.id] || {};
+      const fd = new FormData(); fd.append('text', text); fd.append('profile_id', id);
+      for (const k of ['num_step', 'guidance_scale', 'speed', 't_shift', 'position_temperature', 'class_temperature', 'layer_penalty_factor']) if (v[k] != null) fd.append(k, String(v[k]));
+      const r = await fetch(t.url + '/generate', { method: 'POST', headers: vsHeaders(t), body: fd }); if (!r.ok) { if (r.status === 401 || r.status === 403) vs.ok = false; return null; } return await r.arrayBuffer();
+    } catch (e) { vs.ok = false; return null; }
+    finally { vsRelease(); }
+  }
+
+  // Live TTS. Returns an AudioBuffer or null.
+  async function synth(text, who, mood) {
+    const t = CFG.tts; if (!t || !ctx()) return null;
+    const local = t.provider === 'voicestudio' && t.url;
+    if (!local && !t.key) return null;
+    const k = (who.id || 'n') + '|' + (mood || '') + '|' + key(text); if (cache.has(k)) return cache.get(k);
+    const pending = (async () => {
+      let bytes = null;
+      try {
+        if (local) bytes = await vsSynth(t, text, who);
+        if (!bytes && t.key && t.fallback !== 'none') {
+          if (t.provider === 'openai' || t.fallback === 'openai') {
+            const r = await fetch('https://api.openai.com/v1/audio/speech', { method: 'POST', headers: { 'Authorization': 'Bearer ' + t.key, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: t.model || 'gpt-4o-mini-tts', voice: who.openai || 'nova', input: text, response_format: 'mp3' }) });
+            if (r.ok) bytes = await r.arrayBuffer();
+          } else {
+            const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const style = mood && mood !== 'neutral' ? mood : null;
+            const inner = style ? `<mstts:express-as style="${style}">${esc(text)}</mstts:express-as>` : esc(text);
+            const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US"><voice name="${who.azure}"><prosody rate="${who.id === 'narrator' ? '-6%' : '0%'}">${inner}</prosody></voice></speak>`;
+            const r = await fetch(`https://${t.region || 'eastus'}.tts.speech.microsoft.com/cognitiveservices/v1`, { method: 'POST', headers: { 'Ocp-Apim-Subscription-Key': t.key, 'Content-Type': 'application/ssml+xml', 'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3' }, body: ssml });
+            if (r.ok) bytes = await r.arrayBuffer();
+          }
+        }
+      } catch (e) { bytes = null; }
+      if (!bytes) return null;
+      try { return await decode(bytes); } catch (e) { return null; }
+    })();
+    cache.set(k, pending);
+    const buf = await pending;
+    if (!buf) cache.delete(k);   // a failed line is retried next time (the PC may be back)
+    else cache.set(k, buf);
+    return buf;
   }
   // Windows voices: a different voice per character where the system has several, plus pitch and rate.
   let sysVoices = null;
@@ -166,11 +235,12 @@ const VOICE = (() => {
   async function say(text, who, mood, done) {
     stop(); who = who || NARRATOR; const p = window.VOICE_PACK, k = key(text);
     if (p && p[k] && who === NARRATOR) { try { const bin = atob(p[k]), bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); playBuffer(await decode(bytes.buffer), done); return; } catch (e) {} }
-    const buf = await synth(text, who, mood); if (buf) { playBuffer(buf, done); return; }
+    const buf = await synth(text, who, mood); if (buf) { playBuffer(buf, done, fxFor(who)); return; }
     systemSay(text, who, done);
   }
   function prefetch(text, who, mood) { synth(text, who, mood); }
-  return { say, stop, prefetch, live: () => !!(CFG.tts && CFG.tts.key) };
+  function prefetchAll(lines) { for (const l of lines) synth(l.text, l.who, l.mood); }
+  return { say, stop, prefetch, prefetchAll, live: () => !!(CFG.tts && (CFG.tts.key || (CFG.tts.provider === 'voicestudio' && CFG.tts.url))), vs };
 })();
 function say(t, done) { VOICE.say(t, NARRATOR, null, done); }
 
@@ -260,8 +330,8 @@ function showScene(scene) {
     for (const word of l.text.split(' ')) { const sp = document.createElement('span'); sp.className = 'w'; sp.textContent = word + ' '; sp.onclick = (e) => { e.stopPropagation(); VOICE.say(word.replace(/[^\w']/g, ''), NARRATOR); }; body.appendChild(sp); }
     p.appendChild(body); p.onclick = () => readFrom(i); text.appendChild(p);
   });
-  // Warm the voice cache for the first few lines so the reading does not stall.
-  scene.lines.slice(0, 4).forEach(l => VOICE.prefetch(l.text, l.who, l.mood));
+  // Request every line of the scene now; the GPU works through them in order while the first ones play.
+  VOICE.prefetchAll(scene.lines);
   readFrom(0);
 }
 function readFrom(i) {

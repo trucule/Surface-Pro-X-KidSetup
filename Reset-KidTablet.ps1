@@ -1861,8 +1861,9 @@ function Update-KidAppConfig {
             DRAW_MODEL=claude-sonnet-5-5              (optional; claude-haiku-4-5-20251001 costs less)
             DRAW_DAILY_LIMIT=25                       (optional: new drawings per day; Story Maker: stories per day)
             STORY_MODEL=claude-haiku-4-5-20251001     (optional: Story Maker's writer)
-            TTS_PROVIDER=azure | openai               (optional: live voices for Story Maker)
-            TTS_KEY=...   TTS_REGION=eastus           (TTS_REGION for azure only)
+            TTS_PROVIDER=voicestudio | azure | openai (optional: live voices for Story Maker)
+            TTS_URL=http://10.0.0.169:3901  TTS_PIN=  (voicestudio: VoiceStudio's LAN share on your PC)
+            TTS_KEY=...   TTS_REGION=eastus           (azure/openai; with voicestudio they are the fallback)
         The .env stays outside the app folders; only config.js sits next to the app that reads it.
     #>
     [CmdletBinding()]
@@ -1880,10 +1881,21 @@ function Update-KidAppConfig {
         if ($key) {
             $cfg = [ordered]@{ apiKey = $key; model = $model; dailyLimit = $limit }
             if ($vars['STORY_MODEL']) { $cfg['storyModel'] = $vars['STORY_MODEL'] }
-            if ($vars['TTS_KEY']) { $cfg['tts'] = [ordered]@{ provider = $(if ($vars['TTS_PROVIDER']) { $vars['TTS_PROVIDER'] } else { 'azure' }); key = $vars['TTS_KEY']; region = $vars['TTS_REGION'] } }
+            if ($vars['TTS_KEY'] -or $vars['TTS_URL']) {
+                $provider = if ($vars['TTS_PROVIDER']) { $vars['TTS_PROVIDER'] } elseif ($vars['TTS_URL']) { 'voicestudio' } else { 'azure' }
+                $tts = [ordered]@{ provider = $provider }
+                if ($vars['TTS_URL']) { $tts['url'] = $vars['TTS_URL'].TrimEnd('/') }
+                if ($vars['TTS_PIN']) { $tts['pin'] = $vars['TTS_PIN'] }
+                if ($vars['TTS_KEY']) { $tts['key'] = $vars['TTS_KEY'] }
+                if ($vars['TTS_REGION']) { $tts['region'] = $vars['TTS_REGION'] }
+                # With voicestudio, the key (if any) is the fallback; say which kind it is.
+                if ($provider -eq 'voicestudio' -and $vars['TTS_KEY']) { $tts['fallback'] = if ($vars['TTS_FALLBACK']) { $vars['TTS_FALLBACK'] } else { 'azure' } }
+                $cfg['tts'] = $tts
+            }
             $json = $cfg | ConvertTo-Json -Compress -Depth 4
             Set-Content -LiteralPath $cfgFile -Value "window.DWM_CONFIG = $json;" -Encoding UTF8
-            Write-Verbose "$($dir.Name): learning on ($model, $limit new drawings a day)"
+            $voices = if ($cfg.Contains('tts')) { ", voices: $($cfg['tts']['provider'])" } else { '' }
+            Write-Verbose "$($dir.Name): learning on ($model, $limit new drawings a day$voices)"
         } elseif (Test-Path $cfgFile) {
             Remove-Item -LiteralPath $cfgFile -Force
             Write-Verbose "$($dir.Name): learning off (no ANTHROPIC_API_KEY in $EnvFile)"
@@ -2888,6 +2900,7 @@ Export-ModuleMember -Function `
     Add-KidStoreApp, Find-KidStoreApp, Find-KidWallpaper, Add-KidLocalApp, Start-KidStoreInstall, Invoke-KidStoreQueue, Complete-KidStoreInstall,
     Get-KidTabletConfig, Get-KidApp, Add-KidWebApp, Add-KidDesktopApp, Find-KidPackagedApp,
     Add-KidPackagedApp, Get-KidAvailableApp, Add-KidAvailableApp, Set-KidApp, Set-KidTabletSetting, Remove-KidApp, Add-KidAllowedDomain, Remove-KidAllowedDomain, Update-KidAppConfig
+
 '@
 Set-Content -Path $moduleFile -Value $module -Encoding UTF8
 Import-Module $moduleFile -Force

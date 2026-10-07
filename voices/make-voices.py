@@ -6,12 +6,18 @@ Run on your PC (not the tablet), from the KidTablet-setup folder:
 
     python voices\make-voices.py --engine edge  --voice en-US-AnaNeural
     python voices\make-voices.py --engine piper --voice C:\piper\en_US-amy-medium.onnx
+    python voices\make-voices.py --engine voicestudio --voice Narrator --url http://10.0.0.169:3901 --pin 123456
 
 Engines
   edge   Microsoft's neural voices through the free Edge Read Aloud service (pip install edge-tts). Needs internet
          while running. en-US-AnaNeural is a child voice; en-US-JennyNeural / AriaNeural are warm adult voices.
   piper  Fully local, open-source neural TTS (pip install piper-tts; download a voice .onnx + .json from
          https://github.com/rhasspy/piper/blob/master/VOICES.md). Needs ffmpeg on PATH to encode MP3.
+  voicestudio
+         A voice profile in the VoiceStudio app on this PC (--voice is the profile name, e.g. Narrator). Uses
+         VoiceStudio's LAN share (--url and --pin from Settings > Sharing & Remote Access) or, run on the PC
+         itself, --url http://127.0.0.1:3900 with no PIN. If the profile is a Story Maker character, its sampler
+         settings from apps/story-maker/voices.js are applied. Needs ffmpeg on PATH to encode MP3.
 
 What it does
   1. Collects every phrase each app can say (lesson steps, recipe steps, counting words, story sentences, prompts).
@@ -121,6 +127,37 @@ def synth_piper(texts, model, cache):
         subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-i', wav, '-ar', '24000', '-ac', '1', '-b:a', '32k', p], check=True)
         os.remove(wav)
 
+def synth_voicestudio(texts, profile, cache, url, pin):
+    import urllib.request, urllib.parse, uuid
+    url = url.rstrip('/'); headers = {'x-omnivoice-pin': pin} if pin else {}
+    def call(path, data=None, ctype=None):
+        req = urllib.request.Request(url + path, data=data, headers=dict(headers, **({'Content-Type': ctype} if ctype else {})))
+        with urllib.request.urlopen(req, timeout=600) as r: return r.read()
+    voices = json.loads(call('/v1/audio/voices'))['voices']
+    ids = {v['name'].lower(): v['voice_id'] for v in voices if v.get('type') == 'profile'}
+    if profile.lower() not in ids: sys.exit(f'VoiceStudio has no voice profile named {profile!r}. Profiles: {sorted(ids)}')
+    pid = ids[profile.lower()]
+    # Sampler settings tuned for this character in VoiceStudio, if it is one of the Story Maker cast.
+    params = {}
+    try:
+        js = open(os.path.join(APPS, 'story-maker', 'voices.js'), encoding='utf-8').read()
+        body = js[js.index('{'):js.rindex('}') + 1]
+        body = re.sub(r'(\w+):', r'"\1":', body).replace("'", '"')
+        for v in json.loads(body).values():
+            if v.get('profile', '').lower() == profile.lower():
+                params = {k: v[k] for k in ('num_step', 'guidance_scale', 'speed', 't_shift', 'position_temperature', 'class_temperature', 'layer_penalty_factor') if k in v}
+    except Exception as e:
+        print('   (no sampler settings for this profile:', e, ')')
+    for i, (t, p) in enumerate(zip(texts, cache)):
+        boundary = '----kt' + uuid.uuid4().hex
+        fields = dict(text=t, profile_id=pid, **{k: str(v) for k, v in params.items()})
+        body = b''.join(f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode('utf-8') for k, v in fields.items()) + f'--{boundary}--\r\n'.encode()
+        wav = call('/generate', body, f'multipart/form-data; boundary={boundary}')
+        tmp = p[:-4] + '.wav'; open(tmp, 'wb').write(wav)
+        subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-i', tmp, '-ar', '24000', '-ac', '1', '-b:a', '32k', p], check=True)
+        os.remove(tmp)
+        if (i + 1) % 25 == 0: print(f'   {i + 1}/{len(texts)}')
+
 def inject(path, pack_js, inline=True):
     s = open(path, encoding='utf-8').read()
     if inline:
@@ -132,8 +169,10 @@ def inject(path, pack_js, inline=True):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--engine', choices=['edge', 'piper'], required=True)
-    ap.add_argument('--voice', required=True, help='edge voice name, or path to a piper .onnx model')
+    ap.add_argument('--engine', choices=['edge', 'piper', 'voicestudio'], required=True)
+    ap.add_argument('--voice', required=True, help='edge voice name, path to a piper .onnx model, or a VoiceStudio profile name')
+    ap.add_argument('--url', default='http://127.0.0.1:3900', help='voicestudio: the backend or LAN share address')
+    ap.add_argument('--pin', default='', help='voicestudio: the LAN share PIN, if using the share address')
     ap.add_argument('--apps', default='all', help='comma list: ' + ','.join(BUILDERS))
     ap.add_argument('--list', action='store_true', help='only print the phrases per app')
     a = ap.parse_args()
@@ -151,7 +190,10 @@ def main():
         todo = [(p, f) for p, f in zip(phrases, paths) if not os.path.exists(f)]
         if todo:
             print(f'   synthesizing {len(todo)} new clips')
-            (synth_edge if a.engine == 'edge' else synth_piper)([t for t, _ in todo], a.voice, [f for _, f in todo])
+            texts, files = [t for t, _ in todo], [f for _, f in todo]
+            if a.engine == 'edge': synth_edge(texts, a.voice, files)
+            elif a.engine == 'piper': synth_piper(texts, a.voice, files)
+            else: synth_voicestudio(texts, a.voice, files, a.url, a.pin)
         pack = {key(p): base64.b64encode(open(f, 'rb').read()).decode() for p, f in zip(phrases, paths) if os.path.exists(f)}
         js = 'window.VOICE_PACK = ' + json.dumps(pack, separators=(',', ':')) + ';'
         if app == 'draw-with-me': inject(os.path.join(APPS, 'draw-with-me', 'voices.js'), js, inline=False)
