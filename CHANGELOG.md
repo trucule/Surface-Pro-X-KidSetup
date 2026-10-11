@@ -1,6 +1,10 @@
 # Changes
 
 ## 2026-10-10
+- ET Ducky scripts for the voices: `Update-KidTabletApps.ps1` installs a package zip from a URL (GitHub zipball with an
+  optional token, optional SHA256), carrying each app's voice pack over from the copy already on the tablet, and runs
+  the package's Install-KidApps.ps1; `Set-KidTabletVoices.ps1` writes the TTS_* settings into .env, checks that
+  VoiceStudio answers from the tablet and lists any missing cast profile, then rewrites config.js and syncs.
 - Turning the screen off now closes whatever app she has open, so she is back on the home screen when it comes on
   (an app left open used to stop responding to touch after the screen went off and on). The launcher listens for
   display off/on, asks every app window to close, force-closes stragglers after 3 seconds, and brings itself to the

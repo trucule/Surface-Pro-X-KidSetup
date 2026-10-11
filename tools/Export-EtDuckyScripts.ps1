@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Writes the ET Ducky scripts (Deploy, Update, Sync, Status) into a scripts repo folder.
+    Writes the ET Ducky scripts (Deploy, Update, Sync, Status, Update-Apps, Set-Voices) into a scripts repo folder.
 
 .DESCRIPTION
     Update-KidTablet.ps1 is built from etducky\Update-KidTablet.template.ps1 with the current
@@ -32,4 +32,6 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 Copy-Item (Join-Path $root 'Deploy-KidTablet.ps1')          (Join-Path $Destination 'Deploy-KidTablet.ps1') -Force
 Copy-Item (Join-Path $root 'etducky\Sync-KidTablet.ps1')      (Join-Path $Destination 'Sync-KidTablet.ps1') -Force
 Copy-Item (Join-Path $root 'etducky\Get-KidTabletStatus.ps1') (Join-Path $Destination 'Get-KidTabletStatus.ps1') -Force
-Write-Host "Wrote Deploy-KidTablet.ps1, Update-KidTablet.ps1, Sync-KidTablet.ps1, Get-KidTabletStatus.ps1 to $Destination"
+Copy-Item (Join-Path $root 'etducky\Update-KidTabletApps.ps1') (Join-Path $Destination 'Update-KidTabletApps.ps1') -Force
+Copy-Item (Join-Path $root 'etducky\Set-KidTabletVoices.ps1')  (Join-Path $Destination 'Set-KidTabletVoices.ps1') -Force
+Write-Host "Wrote Deploy, Update, Sync, Get-KidTabletStatus, Update-KidTabletApps and Set-KidTabletVoices scripts to $Destination"
