@@ -34,4 +34,10 @@ Copy-Item (Join-Path $root 'etducky\Sync-KidTablet.ps1')      (Join-Path $Destin
 Copy-Item (Join-Path $root 'etducky\Get-KidTabletStatus.ps1') (Join-Path $Destination 'Get-KidTabletStatus.ps1') -Force
 Copy-Item (Join-Path $root 'etducky\Update-KidTabletApps.ps1') (Join-Path $Destination 'Update-KidTabletApps.ps1') -Force
 Copy-Item (Join-Path $root 'etducky\Set-KidTabletVoices.ps1')  (Join-Path $Destination 'Set-KidTabletVoices.ps1') -Force
-Write-Host "Wrote Deploy, Update, Sync, Get-KidTabletStatus, Update-KidTabletApps and Set-KidTabletVoices scripts to $Destination"
+# Story Maker carried inside a script (small enough), with the voice pack kept on the tablet.
+$smTemplate = Get-Content -LiteralPath (Join-Path $root 'etducky\Update-KidTabletStoryMaker.template.ps1') -Raw
+$smIndex  = (Get-Content -LiteralPath (Join-Path $root 'apps\story-maker\index.html') -Raw).TrimEnd("`r", "`n")
+$smVoices = (Get-Content -LiteralPath (Join-Path $root 'apps\story-maker\voices.js') -Raw).TrimEnd("`r", "`n")
+if ($smIndex -match "(?m)^'@" -or $smVoices -match "(?m)^'@") { throw "A Story Maker file has a line starting with '@, which ends a here-string." }
+[IO.File]::WriteAllText((Join-Path $Destination 'Update-KidTabletStoryMaker.ps1'), $smTemplate.Replace('__INDEX__', $smIndex).Replace('__VOICES__', $smVoices), $utf8)
+Write-Host "Wrote Deploy, Update, Sync, Get-KidTabletStatus, Update-KidTabletApps, Update-KidTabletStoryMaker and Set-KidTabletVoices scripts to $Destination"
