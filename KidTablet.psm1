@@ -431,6 +431,13 @@ static class Native
 
     [StructLayout(LayoutKind.Sequential)]
     public struct LASTINPUTINFO { public uint cbSize; public uint dwTime; }
+
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern IntPtr RegisterPowerSettingNotification(IntPtr hRecipient, ref Guid powerSettingGuid, int flags);
 }
 
 [ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -560,6 +567,87 @@ class HomeForm : Form
             canvas.ContentHeight = Math.Max(viewport.ClientSize.Height, canvas.LayoutTiles(width));
         }
         finally { relayingOut = false; }
+    }
+
+    // Display on/off (GUID_CONSOLE_DISPLAY_STATE): data 0 = off, 1 = on, 2 = dimmed.
+    static Guid DisplayState = new Guid("6fe69556-704a-47a0-8f24-c28d936fda47");
+    const int WM_POWERBROADCAST = 0x0218, PBT_POWERSETTINGCHANGE = 0x8013, WM_CLOSE = 0x0010;
+    readonly System.Windows.Forms.Timer sweepTimer = new System.Windows.Forms.Timer();
+    readonly HashSet<int> closing = new HashSet<int>();
+
+    protected override void OnHandleCreated(EventArgs e)
+    {
+        base.OnHandleCreated(e);
+        try { Native.RegisterPowerSettingNotification(Handle, ref DisplayState, 0); } catch (Exception ex) { LogError("RegisterPowerSettingNotification: " + ex.Message); }
+        sweepTimer.Interval = 3000;
+        sweepTimer.Tick += (s, ev) => { sweepTimer.Stop(); ForceCloseApps(); ComeToFront(); };
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == WM_POWERBROADCAST && (int)m.WParam == PBT_POWERSETTINGCHANGE && m.LParam != IntPtr.Zero)
+        {
+            // POWERBROADCAST_SETTING: Guid (16 bytes), DataLength (4), Data
+            var g = (Guid)Marshal.PtrToStructure(m.LParam, typeof(Guid));
+            if (g == DisplayState)
+            {
+                int state = Marshal.ReadInt32(m.LParam, 20);
+                // Screen off: leave every app and go home. Screen on: finish the job (standby can
+                // freeze apps before they close) and make sure the home screen is in front.
+                if (state == 0 || state == 1) { CloseApps(); sweepTimer.Stop(); sweepTimer.Start(); if (state == 1) ComeToFront(); }
+            }
+        }
+        base.WndProc(ref m);
+    }
+
+    // Shell parts that must never be closed.
+    static readonly HashSet<string> ShellProcesses = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
+        "explorer", "ShellExperienceHost", "StartMenuExperienceHost", "SearchHost", "SearchApp", "TextInputHost",
+        "LockApp", "ShellHost", "TabTip", "SystemSettings", "ctfmon", "dwm", "csrss", "winlogon", "sihost", "taskhostw", "RuntimeBroker" };
+
+    // Asks every app window in her session to close (like pressing its X).
+    void CloseApps()
+    {
+        int me = Process.GetCurrentProcess().Id;
+        int session = Process.GetCurrentProcess().SessionId;
+        Native.EnumWindows((h, l) =>
+        {
+            if (h == Handle || !Native.IsWindowVisible(h) || Native.GetWindow(h, 4) != IntPtr.Zero) return true;   // owned = dialog of an app
+            uint pid; Native.GetWindowThreadProcessId(h, out pid);
+            if (pid == 0 || pid == me) return true;
+            var cls = new StringBuilder(256); Native.GetClassName(h, cls, cls.Capacity);
+            string c = cls.ToString();
+            if (c == "Shell_TrayWnd" || c == "Shell_SecondaryTrayWnd" || c == "Progman" || c == "WorkerW" || c == "Windows.UI.Core.CoreWindow") return true;
+            string name;
+            try { var p = Process.GetProcessById((int)pid); if (p.SessionId != session) return true; name = p.ProcessName; } catch (Exception) { return true; }
+            bool storeApp = c == "ApplicationFrameWindow";                       // Store apps live in ApplicationFrameHost
+            if (!storeApp && ShellProcesses.Contains(name)) return true;
+            if (!storeApp && name.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase)) return true;
+            Native.PostMessage(h, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
+            if (!storeApp) closing.Add((int)pid);
+            return true;
+        }, IntPtr.Zero);
+    }
+
+    // Anything that didn't close when asked (or was frozen by standby) is ended.
+    void ForceCloseApps()
+    {
+        int session = Process.GetCurrentProcess().SessionId;
+        var pids = new HashSet<int>(closing);
+        closing.Clear();
+        try { foreach (var p in Process.GetProcessesByName("msedge")) if (p.SessionId == session) pids.Add(p.Id); } catch (Exception) { }
+        foreach (int pid in pids)
+        {
+            try { var p = Process.GetProcessById(pid); if (p.SessionId == session && !p.HasExited) p.Kill(); } catch (Exception) { }
+        }
+        CloseApps();    // Store app windows that are still there
+        closing.Clear();
+    }
+
+    void ComeToFront()
+    {
+        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Normal;
+        Show(); Activate(); Native.SetForegroundWindow(Handle);
     }
 
     protected override void OnShown(EventArgs e)

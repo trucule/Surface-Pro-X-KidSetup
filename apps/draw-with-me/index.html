@@ -958,6 +958,7 @@ function playStep() {
   say(st.say);
 }
 function startDrawing(s) {
+  $('drawstage').appendChild($('stage'));   // the canvas may still be on the coloring screen from the last picture
   subject = s; stepIdx = 0; undoStack.length = 0;
   for (const c of [pctx, sctx, kctx, ictx]) c.clearRect(0, 0, RES, RES);
   sketch.style.visibility = 'visible';

@@ -1,5 +1,16 @@
 # Changes
 
+## 2026-10-10
+- Turning the screen off now closes whatever app she has open, so she is back on the home screen when it comes on
+  (an app left open used to stop responding to touch after the screen went off and on). The launcher listens for
+  display off/on, asks every app window to close, force-closes stragglers after 3 seconds, and brings itself to the
+  front.
+- Draw With Me: the second drawing in a row showed no instructions, because the canvas was still parked on the
+  coloring screen after saving. Starting any drawing now moves it back first.
+- ET Ducky scripts: `etducky/` holds Sync-KidTablet.ps1, Get-KidTabletStatus.ps1 and the Update-KidTablet template;
+  `tools/Export-EtDuckyScripts.ps1 -Destination <scripts-me>` writes them, with the current module embedded, into the
+  scripts repo ET Ducky imports from. It refuses to export a package whose embedded module copies are stale.
+
 ## 2026-10-07
 - **Story Maker voices from VoiceStudio**: `TTS_PROVIDER=voicestudio` with `TTS_URL` and `TTS_PIN` points the app at
   the VoiceStudio app shared on the LAN from the PC. The cast is thirteen designed voice profiles (Narrator plus the
