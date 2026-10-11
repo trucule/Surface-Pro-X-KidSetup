@@ -1,5 +1,13 @@
 # Changes
 
+## 2026-10-11
+- VoiceStudio on the LAN without a secret on the tablet: the PC trusts the home subnet (`OMNIVOICE_TRUSTED_NETWORKS`),
+  so `Set-KidTabletVoices.ps1` now defaults to `$TtsSecret = 'none'`, removes any `TTS_PIN` from .env, and the script
+  text carries no credential (no re-approval in ET Ducky when the PC's key rotates). `env.example` and the README
+  describe the PC setup: the desktop app pins its backend to localhost, so `OMNIVOICE_BACKEND_CMD` overrides the
+  backend command with `--host 0.0.0.0`; `OMNIVOICE_BIND_HOST` is not read by the desktop launcher.
+- `Set-KidTabletVoices.ps1` no longer sets the execution policy (not needed under the ET Ducky agent).
+
 ## 2026-10-10
 - ET Ducky scripts for the voices: `Update-KidTabletApps.ps1` installs a package zip from a URL (GitHub zipball with an
   optional token, optional SHA256), carrying each app's voice pack over from the copy already on the tablet, and runs

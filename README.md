@@ -77,10 +77,15 @@ Three more apps (`apps/count-with-me.html`, `apps/music-box.html`, `apps/story-m
   trouble, big trouble) and a length (3 or 6 parts). The story is told scene by scene; each scene ends in a choice.
   With `ANTHROPIC_API_KEY` in `.env`, Claude writes each scene live (`STORY_MODEL`, Haiku by default; `DRAW_DAILY_LIMIT`
   also caps stories per day). Without a key, a built-in branching story is used. Every line is read by its speaker.
-  Voices, best first: `TTS_PROVIDER=voicestudio` with `TTS_URL` and `TTS_PIN` uses the VoiceStudio app on your PC
-  (Settings > Sharing & Remote Access > Share on your network) and the thirteen designed profiles named in
-  `apps/story-maker/voices.js` (Narrator plus the cast; the file also holds each one's tuned sampler settings, and
-  Beep's robot effect). That works at home while the PC is on; add `TTS_KEY` (Azure Speech with `TTS_REGION`, or
+  Voices, best first: `TTS_PROVIDER=voicestudio` with `TTS_URL` uses the VoiceStudio app on your PC and the thirteen
+  designed profiles named in `apps/story-maker/voices.js` (Narrator plus the cast; the file also holds each one's
+  tuned sampler settings, and Beep's robot effect). The PC side is in `env.example`: the desktop app only listens on
+  localhost, so its backend command is overridden with the `OMNIVOICE_BACKEND_CMD` user variable (the app's own
+  `python.exe -m uvicorn main:app --app-dir <runtime>\backend --host 0.0.0.0 --port 3900`), and
+  `%USERPROFILE%\.config\omnivoice\env` holds `OMNIVOICE_API_KEY` plus `OMNIVOICE_TRUSTED_NETWORKS=10.0.0.0/24`, so
+  the tablet needs no credential (`TTS_PIN` stays unset; `Set-KidTabletVoices.ps1` removes it). The app's own
+  "Share on your network" (port 3901 + PIN in `TTS_PIN`) works too but the PIN changes each time it is enabled.
+  That works at home while the PC is on; add `TTS_KEY` (Azure Speech with `TTS_REGION`, or
   OpenAI with `TTS_FALLBACK=openai`) and it takes over when the PC is unreachable. With `TTS_PROVIDER=azure|openai`
   the key is the primary voice. Without any of these, the Windows voices are used, varied per character.
 

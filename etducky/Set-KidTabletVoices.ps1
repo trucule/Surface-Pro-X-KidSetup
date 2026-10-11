@@ -9,7 +9,9 @@
     when the PC cannot be reached. Leave a setting blank to leave that .env line as it is; set it to
     the word none to remove the line.
 
-    The secret below is the VoiceStudio LAN-share PIN or the OMNIVOICE_API_KEY set on the PC.
+    No secret is needed when the PC trusts the tablet's subnet (OMNIVOICE_TRUSTED_NETWORKS=10.0.0.0/24 in
+    the PC's ~/.config/omnivoice/env): the default 'none' removes any TTS_PIN from .env so the app sends no
+    credential. Set a secret only for a PC that is not trusting the subnet (the share PIN or OMNIVOICE_API_KEY).
 
     Exit code 0 on success, 1 on failure. A voice server that does not answer is reported, not fatal:
     the app falls back on its own.
@@ -18,13 +20,12 @@
 # ---- Settings ---------------------------------------------------------------
 $TtsProvider    = 'voicestudio'            # voicestudio | azure | openai | none
 $TtsUrl         = 'http://10.0.0.169:3900' # voicestudio: the PC's address (3900 with OMNIVOICE_BIND_HOST, 3901 for the share)
-$TtsSecret      = ''                       # voicestudio: OMNIVOICE_API_KEY or the share PIN
+$TtsSecret      = 'none'                   # none = no credential (PC trusts the subnet); else OMNIVOICE_API_KEY or share PIN
 $TtsFallback    = 'azure'                  # azure | openai | none: which key to use when the PC is off
 $RestartSession = $false                   # config.js is read when an app starts; restart only if she is in Story Maker now
 # -----------------------------------------------------------------------------
 
 $ErrorActionPreference = 'Stop'
-try { Set-ExecutionPolicy Bypass -Scope Process -Force } catch { }
 
 try {
     $moduleFile = Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules\KidTablet\KidTablet.psm1'
@@ -46,7 +47,7 @@ try {
 
     if ($TtsProvider -eq 'voicestudio' -and $TtsUrl) {
         $headers = @{}
-        if ($TtsSecret) { $headers['x-omnivoice-pin'] = $TtsSecret; $headers['Authorization'] = "Bearer $TtsSecret" }
+        if ($TtsSecret -and $TtsSecret -ne 'none') { $headers['x-omnivoice-pin'] = $TtsSecret; $headers['Authorization'] = "Bearer $TtsSecret" }
         try {
             $r = Invoke-WebRequest -Uri ($TtsUrl.TrimEnd('/') + '/v1/audio/voices') -Headers $headers -UseBasicParsing -TimeoutSec 8
             $names = @(($r.Content | ConvertFrom-Json).voices | Where-Object { $_.type -eq 'profile' } | ForEach-Object { $_.name })
@@ -54,7 +55,7 @@ try {
             $missing = @($cast | Where-Object { $names -notcontains $_ })
             Write-Host ("VoiceStudio reachable at {0}: {1} voice profiles{2}" -f $TtsUrl, $names.Count, $(if ($missing) { '; MISSING: ' + ($missing -join ', ') } else { '; the whole cast is there' }))
         } catch {
-            Write-Warning ("VoiceStudio did not answer at {0} ({1}). Stories will use the fallback voices until it does. Check: VoiceStudio running on the PC, OMNIVOICE_BIND_HOST=0.0.0.0 or Share on your network on, firewall, and the secret." -f $TtsUrl, $_.Exception.Message)
+            Write-Warning ("VoiceStudio did not answer at {0} ({1}). Stories will use the fallback voices until it does. Check: VoiceStudio running on the PC and bound to the LAN, the firewall, and OMNIVOICE_TRUSTED_NETWORKS (or the secret)." -f $TtsUrl, $_.Exception.Message)
         }
     }
 
