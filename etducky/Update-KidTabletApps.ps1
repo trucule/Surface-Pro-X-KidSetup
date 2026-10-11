@@ -8,11 +8,11 @@
     updates the module and rewrites each app's config.js from .env.
 
     Voice packs are kept: an app in the new package that has no pack gets the pack from the copy
-    already on the tablet (the <script id="voicepack"> block, or apps\draw-with-me\voices.js), so
+    already on the tablet (the voicepack script block, or apps\draw-with-me\voices.js), so
     pre-rendered prompts survive an update without rerunning make-voices.py.
 
     The package is unpacked to $StageDir (default C:\KidTablet-new\KidTablet-setup), replacing the
-    previous copy, which is kept in C:\ProgramData\KidTablet\backup\package-<time>.zip.
+    previous copy, which is kept in C:\ProgramData\KidTablet\backup\package-TIMESTAMP.zip.
 
     Exit code 0 on success, 1 on failure.
 #>
@@ -29,18 +29,21 @@ $ErrorActionPreference = 'Stop'
 try { Set-ExecutionPolicy Bypass -Scope Process -Force } catch { }
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+# Built from pieces: ET Ducky reads a literal angle-bracket tag in a script as a parameter prompt.
+$script:PackPattern = '<' + 'script id="voicepack">.*?<' + '/script>'
+
 function Get-VoicePack([string]$path) {
     if (-not (Test-Path -LiteralPath $path)) { return $null }
     $t = [IO.File]::ReadAllText($path)
     if ($t -notmatch 'window\.VOICE_PACK = \{') { return $null }
     if ($path -like '*.js') { return $t }
-    $m = [regex]::Match($t, '<script id="voicepack">.*?</script>', 'Singleline')
+    $m = [regex]::Match($t, $script:PackPattern, 'Singleline')
     if ($m.Success) { return $m.Value } else { return $null }
 }
 function Set-VoicePack([string]$path, [string]$pack) {
     $t = [IO.File]::ReadAllText($path)
     if ($path -like '*.js') { [IO.File]::WriteAllText($path, $pack, (New-Object Text.UTF8Encoding $false)); return }
-    $m = [regex]::Match($t, '<script id="voicepack">.*?</script>', 'Singleline')
+    $m = [regex]::Match($t, $script:PackPattern, 'Singleline')
     if (-not $m.Success) { return }
     $t = $t.Substring(0, $m.Index) + $pack + $t.Substring($m.Index + $m.Length)
     [IO.File]::WriteAllText($path, $t, (New-Object Text.UTF8Encoding $false))
