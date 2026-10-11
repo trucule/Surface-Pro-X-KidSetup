@@ -18,7 +18,7 @@
 #>
 
 # ---- Settings ---------------------------------------------------------------
-$PackageUrl     = 'https://api.github.com/repos/trucule/KidTablet-setup/zipball/main'
+$PackageUrl     = 'https://api.github.com/repos/trucule/Surface-Pro-X-KidSetup/zipball/main'
 $PackageToken   = ''        # GitHub fine-grained token with read access to that repo (private repo), else blank
 $PackageSha256  = ''        # optional: refuse the download if its SHA256 differs
 $StageDir       = 'C:\KidTablet-new\KidTablet-setup'
