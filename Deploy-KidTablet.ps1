@@ -159,20 +159,44 @@ function Assert-SafeName {
     }
 }
 
+function Set-LockedDirAcl {
+    # Replaces a folder's DACL with explicit rules (SID, rights) and makes Administrators the owner.
+    # Writes only the Access and Owner sections: PowerShell's Set-Acl with a freshly built
+    # DirectorySecurity also writes the audit (SACL) section, which needs SeSecurityPrivilege, and
+    # the ET Ducky agent's SYSTEM token does not hold it (an interactive admin does, which is why
+    # the installer worked at the tablet but not from the dashboard).
+    param([string]$Path, [object[]]$Rules)
+    $sections = [System.Security.AccessControl.AccessControlSections]'Access, Owner'
+    $acl = [System.IO.Directory]::GetAccessControl($Path, $sections)
+    $acl.SetAccessRuleProtection($true, $false)
+    foreach ($r in @($acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))) { [void]$acl.RemoveAccessRuleAll($r) }
+    $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    $none = [System.Security.AccessControl.PropagationFlags]::None
+    foreach ($pair in $Rules) {
+        $id = New-Object System.Security.Principal.SecurityIdentifier $pair[0]
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($id, $pair[1], $inherit, $none, 'Allow')))
+    }
+    try {
+        $acl.SetOwner((New-Object System.Security.Principal.SecurityIdentifier 'S-1-5-32-544'))
+        [System.IO.Directory]::SetAccessControl($Path, $acl)
+    } catch {
+        # A token that may not take ownership (a restricted service account) still gets the DACL.
+        $acl = [System.IO.Directory]::GetAccessControl($Path, [System.Security.AccessControl.AccessControlSections]::Access)
+        $acl.SetAccessRuleProtection($true, $false)
+        foreach ($r in @($acl.GetAccessRules($true, $false, [System.Security.Principal.SecurityIdentifier]))) { [void]$acl.RemoveAccessRuleAll($r) }
+        foreach ($pair in $Rules) {
+            $id = New-Object System.Security.Principal.SecurityIdentifier $pair[0]
+            $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($id, $pair[1], $inherit, $none, 'Allow')))
+        }
+        [System.IO.Directory]::SetAccessControl($Path, $acl)
+    }
+}
+
 function Initialize-DataDir {
     # SYSTEM and Administrators only. SYSTEM reads this folder, so the child
     # account must not be able to write to it.
     New-Item -ItemType Directory -Path $script:DataDir -Force | Out-Null
-    $acl = New-Object System.Security.AccessControl.DirectorySecurity
-    $acl.SetAccessRuleProtection($true, $false)
-    $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
-    foreach ($sid in 'S-1-5-18', 'S-1-5-32-544') {
-        $id = New-Object System.Security.Principal.SecurityIdentifier $sid
-        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
-            $id, 'FullControl', $inherit, [System.Security.AccessControl.PropagationFlags]::None, 'Allow')))
-    }
-    $acl.SetOwner((New-Object System.Security.Principal.SecurityIdentifier 'S-1-5-32-544'))
-    Set-Acl -Path $script:DataDir -AclObject $acl
+    Set-LockedDirAcl $script:DataDir @(@('S-1-5-18', 'FullControl'), @('S-1-5-32-544', 'FullControl'))
     # Leftover from the first version of the setup script.
     Remove-Item (Join-Path $script:DataDir 'Apply-AssignedAccess.ps1') -Force -ErrorAction SilentlyContinue
 }
@@ -2098,16 +2122,7 @@ function Initialize-LocalAppsDir {
     # Admins and SYSTEM write; her account can only read. A folder made directly under
     # C:\ would otherwise inherit rights that let any signed-in user modify files.
     New-Item -ItemType Directory -Path $script:LocalAppsDir -Force | Out-Null
-    $acl = New-Object System.Security.AccessControl.DirectorySecurity
-    $acl.SetAccessRuleProtection($true, $false)
-    $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
-    $none = [System.Security.AccessControl.PropagationFlags]::None
-    foreach ($pair in @(@('S-1-5-18', 'FullControl'), @('S-1-5-32-544', 'FullControl'), @('S-1-5-32-545', 'ReadAndExecute'))) {
-        $id = New-Object System.Security.Principal.SecurityIdentifier $pair[0]
-        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($id, $pair[1], $inherit, $none, 'Allow')))
-    }
-    $acl.SetOwner((New-Object System.Security.Principal.SecurityIdentifier 'S-1-5-32-544'))
-    Set-Acl -Path $script:LocalAppsDir -AclObject $acl
+    Set-LockedDirAcl $script:LocalAppsDir @(@('S-1-5-18', 'FullControl'), @('S-1-5-32-544', 'FullControl'), @('S-1-5-32-545', 'ReadAndExecute'))
 }
 
 function Add-KidLocalApp {

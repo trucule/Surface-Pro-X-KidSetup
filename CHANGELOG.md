@@ -1,6 +1,11 @@
 # Changes
 
 ## 2026-10-11
+- Installing apps from ET Ducky works. `Add-KidLocalApp` (and the data folder setup) used `Set-Acl` with a freshly
+  built ACL, which also writes the audit section and so needs SeSecurityPrivilege; the ET Ducky agent's SYSTEM
+  token does not hold it, so every remote install stopped at the first app with "The process does not possess
+  the 'SeSecurityPrivilege' privilege" while an interactive admin run succeeded. The module now writes only the
+  Access and Owner sections through .NET (`Set-LockedDirAcl`), and takes just the DACL when ownership is refused.
 - A Home button for leaving apps. Edge's own close button is a small target at tablet DPI and often ignores
   the first taps after standby, so the launcher now pins a large "Home" pill over the top-right corner
   whenever an app is in front (covering the caption buttons, so a stray tap cannot minimize either). One tap
