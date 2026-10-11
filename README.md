@@ -46,6 +46,11 @@ Built from `lab-games` (separate source zip; `npm ci && npm test && npm run buil
 Steps are read aloud as she reaches them, tapping the step line repeats it, and the book shows a Today card plus
 stars on recipes she has finished before (stored under `lab-done-kitchen` / `lab-done-chem`).
 
+## Leaving an app
+While an app is in front, the launcher pins a large **Home** pill over the top-right corner of the screen, on top
+of the app window's own caption buttons. One tap closes every open app (politely first, then force after 3 seconds)
+and brings the tiles back. Turning the screen off and on does the same thing.
+
 ## Draw With Me home screen
 The picks grid starts with a **Today** tile (the drawing of the day, chosen from the current category and style) and a
 **Surprise me!** dice (a random drawing she has not saved a picture of yet). Tiles she has already saved a picture

@@ -1,6 +1,11 @@
 # Changes
 
 ## 2026-10-11
+- A Home button for leaving apps. Edge's own close button is a small target at tablet DPI and often ignores
+  the first taps after standby, so the launcher now pins a large "Home" pill over the top-right corner
+  whenever an app is in front (covering the caption buttons, so a stray tap cannot minimize either). One tap
+  asks every app to close, sweeps anything stuck after 3 seconds and brings the tiles back, the same path the
+  screen-off handler uses. The pill never takes focus, so the app keeps the keyboard until it closes.
 - VoiceStudio on the LAN without a secret on the tablet: the PC trusts the home subnet (`OMNIVOICE_TRUSTED_NETWORKS`),
   so `Set-KidTabletVoices.ps1` now defaults to `$TtsSecret = 'none'`, removes any `TTS_PIN` from .env, and the script
   text carries no credential (no re-approval in ET Ducky when the PC's key rotates). `env.example` and the README

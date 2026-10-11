@@ -478,6 +478,7 @@ static class Native
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern IntPtr RegisterPowerSettingNotification(IntPtr hRecipient, ref Guid powerSettingGuid, int flags);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
 }
 
 [ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -513,6 +514,7 @@ class HomeForm : Form
     readonly System.Windows.Forms.Timer timer = new System.Windows.Forms.Timer();
     readonly System.Windows.Forms.Timer windowTimer = new System.Windows.Forms.Timer();
     readonly HashSet<IntPtr> seenWindows = new HashSet<IntPtr>();
+    readonly HomeButton homeButton;
     readonly List<Image> backgrounds = new List<Image>();
     int backgroundIndex;
     DateTime configStamp = DateTime.MinValue;
@@ -551,6 +553,7 @@ class HomeForm : Form
         // One fixed surface the size of the screen. It holds the wallpaper and every tile,
         // pre-rendered, and scrolls by drawing that picture at an offset: nothing moves.
         canvas = new TileCanvas(this, S(280), S(210), S(48), S(16), S(48));
+        homeButton = new HomeButton(this, scale);
         viewport.Dock = DockStyle.Fill;
         viewport.BackColor = BackColor;
         viewport.Controls.Add(canvas);
@@ -563,7 +566,7 @@ class HomeForm : Form
         timer.Tick += (s, e) => Tick();
         timer.Start();
         windowTimer.Interval = 400;
-        windowTimer.Tick += (s, e) => MaximizeNewWindows();
+        windowTimer.Tick += (s, e) => { MaximizeNewWindows(); UpdateHomeButton(); };
         windowTimer.Start();
         // Only the screen's working area matters here; ignore other settings broadcasts
         // (wallpaper slideshows, theme and color changes).
@@ -682,6 +685,31 @@ class HomeForm : Form
         }
         CloseApps();    // Store app windows that are still there
         closing.Clear();
+    }
+
+    // The Home pill was tapped: leave every app and come back to the tiles, the same way the
+    // screen-off handler does (ask politely, sweep whatever is stuck 3 seconds later).
+    public void GoHome()
+    {
+        homeButton.Hide();
+        CloseApps(); sweepTimer.Stop(); sweepTimer.Start(); ComeToFront();
+    }
+
+    // The pill shows while something other than the home screen is in front. Edge's own close
+    // button is a small target at tablet DPI and often ignores the first taps after standby.
+    void UpdateHomeButton()
+    {
+        IntPtr fg = Native.GetForegroundWindow();
+        uint pid = 0;
+        if (fg != IntPtr.Zero) Native.GetWindowThreadProcessId(fg, out pid);
+        bool appInFront = fg != IntPtr.Zero && pid != 0 && pid != (uint)Process.GetCurrentProcess().Id && Native.IsWindowVisible(fg);
+        if (appInFront)
+        {
+            var cls = new StringBuilder(256); Native.GetClassName(fg, cls, cls.Capacity);
+            string c = cls.ToString();
+            if (c == "Shell_TrayWnd" || c == "Shell_SecondaryTrayWnd" || c == "Progman" || c == "WorkerW") appInFront = false;
+        }
+        if (appInFront) homeButton.ShowPinned(); else if (homeButton.Visible) homeButton.Hide();
     }
 
     void ComeToFront()
@@ -931,6 +959,101 @@ class HomeForm : Form
 // slice of it (at the scroll offset) to the screen with one BitBlt. Scrolling changes
 // the offset and asks for a repaint, so Windows paints the latest position once per
 // frame. No window moves and no timer decides when the picture updates.
+// A big Home pill pinned over the top-right corner of the screen, on top of an app window's own
+// caption buttons, so one easy tap closes the app and no accidental tap minimizes it. It never
+// takes focus (WS_EX_NOACTIVATE), so the app underneath keeps the keyboard until it closes.
+class HomeButton : Form
+{
+    readonly HomeForm owner;
+    readonly float scale;
+    bool down;
+
+    public HomeButton(HomeForm owner, float scale)
+    {
+        this.owner = owner;
+        this.scale = scale;
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        TopMost = true;
+        StartPosition = FormStartPosition.Manual;
+        BackColor = Color.FromArgb(36, 36, 56);
+        DoubleBuffered = true;
+        Cursor = Cursors.Hand;
+        int w = S(176), h = S(56);
+        Rectangle screen = Screen.PrimaryScreen.Bounds;
+        Bounds = new Rectangle(screen.Right - w - S(8), screen.Top + S(6), w, h);
+        using (var path = Rounded(new Rectangle(0, 0, w, h), h / 2)) Region = new Region(path);
+    }
+
+    int S(int v) { return (int)(v * scale); }
+
+    protected override bool ShowWithoutActivation { get { return true; } }
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ExStyle |= 0x08000000 | 0x80;   // WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW
+            return cp;
+        }
+    }
+
+    public void ShowPinned()
+    {
+        if (Visible) return;
+        Show();
+        // HWND_TOPMOST, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
+        Native.SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+    }
+
+    static GraphicsPath Rounded(Rectangle r, int radius)
+    {
+        var path = new GraphicsPath();
+        int d = radius * 2;
+        path.AddArc(r.X, r.Y, d, d, 180, 90);
+        path.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+        path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+        path.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+        path.CloseFigure();
+        return path;
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.Clear(down ? Color.FromArgb(92, 92, 140) : Color.FromArgb(36, 36, 56));
+        using (var path = Rounded(new Rectangle(S(1), S(1), Width - S(3), Height - S(3)), (Height - S(3)) / 2))
+        using (var edge = new Pen(Color.FromArgb(200, 255, 255, 255), S(2)))
+            g.DrawPath(edge, path);
+        int cx = S(34), cy = Height / 2, r = S(12);
+        using (var pen = new Pen(Color.White, S(3)))
+        {
+            pen.LineJoin = LineJoin.Round;
+            pen.StartCap = LineCap.Round;
+            pen.EndCap = LineCap.Round;
+            g.DrawLines(pen, new[] { new Point(cx - r, cy), new Point(cx, cy - r), new Point(cx + r, cy) });
+            g.DrawRectangle(pen, cx - r + S(4), cy, 2 * r - S(8), r);
+        }
+        using (var f = new Font("Segoe UI", 15f, FontStyle.Bold))
+            TextRenderer.DrawText(g, "Home", f, new Rectangle(S(58), 0, Width - S(58), Height), Color.White,
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPrefix);
+    }
+
+    protected override void OnMouseDown(MouseEventArgs e) { down = true; Invalidate(); }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        bool hit = down && ClientRectangle.Contains(e.Location);
+        down = false;
+        Invalidate();
+        if (hit) owner.GoHome();
+    }
+
+    protected override void OnMouseLeave(EventArgs e) { down = false; Invalidate(); }
+}
+
 class TileCanvas : Control
 {
     readonly HomeForm host;
@@ -2968,7 +3091,6 @@ Export-ModuleMember -Function `
     Add-KidStoreApp, Find-KidStoreApp, Find-KidWallpaper, Add-KidLocalApp, Start-KidStoreInstall, Invoke-KidStoreQueue, Complete-KidStoreInstall,
     Get-KidTabletConfig, Get-KidApp, Add-KidWebApp, Add-KidDesktopApp, Find-KidPackagedApp,
     Add-KidPackagedApp, Get-KidAvailableApp, Add-KidAvailableApp, Set-KidApp, Set-KidTabletSetting, Remove-KidApp, Add-KidAllowedDomain, Remove-KidAllowedDomain, Update-KidAppConfig
-
 '@
     Set-Content -Path $moduleFile -Value $module -Encoding UTF8
     Import-Module $moduleFile -Force
