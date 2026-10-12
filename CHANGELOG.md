@@ -4,6 +4,8 @@
 - The repo is public under the MIT license (`LICENSE`, `THIRD-PARTY-NOTICES.md`). The README is written for
   someone setting up their own tablet: what you get, prerequisites, setup steps, making it yours, updating,
   remote management, voices, the apps, repo layout. The author's LAN address in examples is now a placeholder.
+- The Kitchen Lab and Chemistry Lab source is in `src/lab-games/` (simulation, renderer, tests, Kenney CC0 models,
+  esbuild bundler), so every app in `apps/` can be rebuilt from this repo.
 
 ## 2026-10-11
 - Installing apps from ET Ducky works. `Add-KidLocalApp` (and the data folder setup) used `Set-Acl` with a freshly

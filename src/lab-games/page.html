@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kitchen Lab</title>
+<!--
+  Kitchen Lab. Third-party pieces bundled in this file:
+  three.js r149 (MIT, Copyright 2010-2023 Three.js Authors);
+  WebXR Input Profiles generic hand model (MIT, Copyright 2019 Amazon);
+  Kenney Food Kit and Furniture Kit models (CC0 1.0, kenney.nl).
+-->
+<style>
+  html, body { margin: 0; height: 100%; background: #BFE7F2; overflow: hidden; }
+  body { touch-action: none; user-select: none; -webkit-user-select: none; }
+  #c { display: block; width: 100vw; height: 100vh; touch-action: none; }
+  canvas.thumb { display: inline-block; flex: none; vertical-align: middle; }
+  /* Slim control rail on the left edge, see-through so the kitchen shows behind it. */
+  #ui {
+    position: fixed; right: max(12px, env(safe-area-inset-right)); top: 50%; transform: translateY(-50%);
+    display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 14px 10px;
+    border-radius: 999px; background: rgba(43, 33, 64, 0.38);
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  }
+  #ui button {
+    width: 58px; height: 58px; border-radius: 50%; border: 3px solid #2B2140; background: rgba(250, 246, 255, 0.92);
+    padding: 0; cursor: pointer; touch-action: none; display: grid; place-items: center;
+    transition: transform 0.1s, background 0.2s;
+  }
+  #ui button:active { transform: scale(0.92); }
+  #ui button:focus-visible, #heat:focus-visible { outline: 4px solid #FFC93C; outline-offset: 3px; }
+  #ui button.on[data-id="blend"] { background: #FFE066; }
+  #ui svg { width: 38px; height: 38px; overflow: visible; }
+  #ui .blades { transform-origin: 32px 32px; }
+  #ui button.on .blades { animation: spin 0.35s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Heat dial: a thermometer-shaped track; drag the knob up for hot, down for cold. */
+  #heat { --f: 0.5; position: relative; width: 58px; height: 210px; touch-action: none; cursor: grab; display: grid; justify-items: center; }
+  #heat .track {
+    position: absolute; top: 22px; bottom: 22px; width: 18px; border-radius: 9px; border: 3px solid #2B2140;
+    background: linear-gradient(to top, #3D8BFF 0%, #8FDAFF 30%, #F4EEFA 47%, #F4EEFA 53%, #FFB52E 72%, #FF5A4E 100%);
+  }
+  #heat .mid { position: absolute; top: 50%; width: 30px; height: 3px; margin-top: -1.5px; background: #2B2140; border-radius: 2px; }
+  #heat .icon { position: absolute; width: 22px; height: 22px; }
+  #heat .icon.hot { top: -2px; } #heat .icon.cold { bottom: -2px; }
+  #heat .knob {
+    position: absolute; left: 50%; width: 40px; height: 40px; margin-left: -20px; border-radius: 50%;
+    top: calc(22px + (1 - var(--f)) * (100% - 44px) - 20px);
+    background: #FFFFFF; border: 3px solid #2B2140; box-shadow: 0 2px 0 rgba(43, 33, 64, 0.35);
+    display: grid; place-items: center; font-size: 20px; line-height: 1;
+  }
+  #heat[data-mode="warm"] .knob { background: #FFD08A; } #heat[data-mode="boil"] .knob { background: #FF7A5C; }
+  #heat[data-mode="cool"] .knob { background: #C9ECFF; } #heat[data-mode="cold"] .knob { background: #7FC8FF; }
+  @media (prefers-reduced-motion: reduce) { #ui button.on .blades { animation: none; } #ui button { transition: none; } }
+
+  /* Kitchen areas: a slim pill on the left. */
+  #sections {
+    position: fixed; left: max(12px, env(safe-area-inset-left)); top: 50%; transform: translateY(-50%);
+    display: flex; flex-direction: column; gap: 10px; padding: 12px 9px; border-radius: 999px;
+    background: rgba(43, 33, 64, 0.38); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  }
+  #sections button {
+    position: relative; width: 58px; height: 58px; border-radius: 50%; border: 3px solid #2B2140;
+    background: rgba(250, 246, 255, 0.92); padding: 0; cursor: pointer; touch-action: none; display: grid; place-items: center;
+    transition: transform 0.1s, background 0.2s;
+  }
+  #sections button:active { transform: scale(0.92); }
+  #sections button.on { background: #FFC93C; box-shadow: 0 0 0 4px rgba(255, 201, 60, 0.45); }
+  #sections button:focus-visible { outline: 4px solid #FFC93C; outline-offset: 3px; }
+  #sections svg { width: 38px; height: 38px; }
+  #badge {
+    position: absolute; top: -6px; right: -6px; min-width: 24px; height: 24px; padding: 0 5px; border-radius: 12px;
+    background: #3BB273; color: #FFFFFF; border: 2px solid #FFFFFF; font: 800 15px/20px system-ui, sans-serif; text-align: center;
+  }
+  
+  @keyframes bump { 40% { transform: scale(1.5); } }
+  /* Area name, shown briefly when she moves. */
+  #toast {
+    position: fixed; top: max(18px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); pointer-events: none;
+    padding: 8px 26px; border-radius: 999px; background: rgba(43, 33, 64, 0.72); color: #FFFFFF;
+    font: 800 30px/1.2 system-ui, sans-serif; letter-spacing: 0.02em; opacity: 0;
+  }
+  #toast.go { animation: toast 1.6s ease-out; }
+  @keyframes toast { 0% { opacity: 0; } 12% { opacity: 1; } 70% { opacity: 1; } 100% { opacity: 0; } }
+  #fade { position: fixed; inset: 0; background: #FFF8EC; opacity: 0; pointer-events: none; }
+
+  @keyframes fade { 0% { opacity: 0.9; } 100% { opacity: 0; } }
+  /* Tools only where they make sense: the blender and broom at the counter, heat at the counter and oven. */
+  body[data-section="fridge"] #ui > :not([data-id="sound"]),
+  body[data-section="pantry"] #ui > :not([data-id="sound"]),
+  body[data-section="cabinets"] #ui > :not([data-id="sound"]),
+  body[data-section="oven"] #ui [data-id="blend"], body[data-section="oven"] #ui [data-id="broom"] { display: none; }
+  /* Ovens only heat: the cold half of the dial is greyed out. */
+  body[data-section="oven"] #heat .track { background: linear-gradient(to top, #CFC8D8 0%, #CFC8D8 50%, #FFB52E 72%, #FF5A4E 100%); }
+  body[data-section="oven"] #heat .icon.cold { opacity: 0.25; }
+  @media (prefers-reduced-motion: reduce) { #toast.go, #fade.go, #badge.go { animation: none; } #toast.go { opacity: 1; } }
+  @media (max-height: 560px) { #sections button { width: 46px; height: 46px; } #sections svg { width: 30px; height: 30px; } }
+
+  #bookbtn { background: #FFF1F6 !important; }
+  /* Basket: a slim strip along the bottom with pictures of what she has collected. */
+  #basket {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: max(10px, env(safe-area-inset-bottom));
+    max-width: calc(100vw - 240px); display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px;
+    background: rgba(43, 33, 64, 0.38); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    overflow-x: auto; overflow-y: hidden; touch-action: pan-x; scrollbar-width: none;
+  }
+  #basket::-webkit-scrollbar { display: none; }
+  #basket .tag { font-size: 30px; line-height: 1; padding: 0 2px; flex: none; }
+  #basket .empty { color: #FFFFFF; font: 700 16px/1.2 system-ui, sans-serif; white-space: nowrap; padding-right: 6px; }
+  #basket .slot {
+    flex: none; width: 74px; height: 70px; border-radius: 16px; border: 3px solid #2B2140; padding: 0;
+    background: rgba(250, 246, 255, 0.92); touch-action: pan-x; cursor: grab; display: grid; place-items: center;
+  }
+  #basket .slot canvas { pointer-events: none; }
+  .ing { display: inline-flex; flex-direction: column; align-items: center; pointer-events: none; }
+  .ing .lbl { font: 700 11px/1.1 system-ui, sans-serif; color: #2B2140; max-width: 70px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
+  #book .need { gap: 6px; }
+  #book .need .lbl { max-width: 52px; }
+  #tracker .chip .lbl { max-width: 48px; font-size: 10px; }
+  #basket .slot.go { animation: bump 0.35s ease-out; }
+  @keyframes bump { 40% { transform: scale(1.25); } }
+  /* Recipe tracker: top left, small until tapped. */
+  #tracker {
+    position: fixed; z-index: 20; top: max(12px, env(safe-area-inset-top)); left: max(100px, calc(env(safe-area-inset-left) + 100px));
+    max-width: min(420px, calc(100vw - 220px)); border-radius: 22px; padding: 8px 12px;
+    background: rgba(255, 252, 245, 0.94); border: 3px solid #2B2140; color: #2B2140; font: 700 17px/1.25 system-ui, sans-serif;
+  }
+  #tracker .thead { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  #tracker .ticon { font-size: 28px; }
+  #tracker .tname { font-weight: 800; }
+  #tracker .tnow { flex: 1; color: #6A5A86; font-weight: 600; }
+  #tracker .tclose { border: none; background: none; font-size: 20px; cursor: pointer; color: #2B2140; }
+  #tracker .tneed, #tracker .tsteps { display: none; }
+  #tracker.open .tneed { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 4px; }
+  #tracker.open .tsteps { display: block; margin: 4px 0 2px; padding: 0; list-style: none; }
+  #tracker.open .tnow { display: none; }
+  #tracker .chip { border: 2px solid #2B2140; border-radius: 12px; padding: 1px; background: #FFFFFF; opacity: 0.55; cursor: pointer; }
+  #tracker .chip.have { opacity: 1; background: #DFF6E8; }
+  #tracker .tsteps li { display: flex; align-items: center; gap: 6px; padding: 3px 0; }
+  #tracker .tsteps li.done { color: #3B8A5F; }
+  #tracker .act { width: 26px; text-align: center; }
+  #tracker .pic { display: inline-block; width: 28px; flex: none; }
+  /* Recipe book. */
+  #book { position: fixed; inset: 0; z-index: 30; background: rgba(43, 33, 64, 0.45); display: grid; place-items: center; }
+  #book[hidden], #tracker[hidden], #celebrate[hidden] { display: none; }
+  #book .sheet { width: min(760px, 92vw); max-height: 88vh; overflow: auto; border-radius: 28px; padding: 18px; background: #FFF8EC; border: 4px solid #2B2140; }
+  #book .bookhead { display: flex; justify-content: space-between; align-items: center; font: 800 30px system-ui, sans-serif; color: #2B2140; margin-bottom: 10px; }
+  #book .bookhead button { border: none; background: none; font-size: 30px; cursor: pointer; }
+  #bookgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+  #book .cathead { grid-column: 1 / -1; font: 800 20px system-ui, sans-serif; color: #6A5A86; margin: 6px 2px -4px; }
+  #book .card { border: 3px solid #2B2140; border-radius: 20px; background: #FFFFFF; padding: 10px; cursor: pointer; display: grid; justify-items: center; gap: 4px; }
+  #book .card:active { transform: scale(0.96); }
+  #book .big { font-size: 46px; line-height: 1.1; }
+  #book .name { font: 800 19px system-ui, sans-serif; color: #2B2140; }
+  #book .need { display: flex; gap: 2px; flex-wrap: wrap; justify-content: center; }
+  #freeplay { margin-top: 14px; width: 100%; padding: 12px; border-radius: 18px; border: 3px solid #2B2140; background: #FFC93C; font: 800 20px system-ui, sans-serif; cursor: pointer; }
+  /* Celebration. */
+  #celebrate { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; align-content: center; pointer-events: auto; overflow: hidden; }
+  #celebrate .cicon { font-size: 120px; animation: pop 0.6s ease-out; }
+  #celebrate .ctext { font: 800 40px system-ui, sans-serif; color: #FFFFFF; text-shadow: 0 3px 0 #2B2140, 0 0 12px rgba(43, 33, 64, 0.6); }
+  @keyframes pop { 0% { transform: scale(0.2); } 70% { transform: scale(1.15); } }
+  #celebrate .confetti i { position: absolute; top: -20px; width: 12px; height: 18px; border-radius: 3px; animation: fall linear forwards; }
+  @keyframes fall { to { transform: translateY(110vh) rotate(720deg); } }
+  #toast { top: max(80px, env(safe-area-inset-top)); }
+  @media (prefers-reduced-motion: reduce) { #celebrate .cicon, #celebrate .confetti i { animation: none; } #celebrate .confetti { display: none; } }
+
+  /* Ouch! A big shaky burst of words, a red flash at the screen's edges, and the kitchen jolts. */
+  #ouchtext {
+    position: fixed; left: 50%; top: 38%; transform: translate(-50%, -50%); z-index: 50; pointer-events: none; opacity: 0;
+    font: 900 64px/1 system-ui, sans-serif; color: #FF3B30; white-space: nowrap; letter-spacing: 0.02em;
+    text-shadow: 0 4px 0 #2B2140, 0 0 0 #2B2140, 3px 3px 0 #FFFFFF, -3px -3px 0 #FFFFFF, 3px -3px 0 #FFFFFF, -3px 3px 0 #FFFFFF;
+  }
+  #ouchtext.go { animation: ouchburst 1.4s ease-out; }
+  @keyframes ouchburst {
+    0% { opacity: 0; transform: translate(-50%, -50%) scale(0.4) rotate(-6deg); }
+    10% { opacity: 1; transform: translate(-50%, -50%) scale(1.15) rotate(4deg); }
+    18% { transform: translate(-52%, -50%) scale(1) rotate(-4deg); }
+    26% { transform: translate(-48%, -50%) scale(1.05) rotate(4deg); }
+    34% { transform: translate(-51%, -50%) scale(1) rotate(-3deg); }
+    42% { transform: translate(-49%, -50%) scale(1.03) rotate(2deg); }
+    80% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(0); }
+    100% { opacity: 0; transform: translate(-50%, -60%) scale(0.95); }
+  }
+  #ouchflash { position: fixed; inset: 0; z-index: 45; pointer-events: none; opacity: 0; box-shadow: inset 0 0 140px 50px rgba(255, 40, 30, 0.75); }
+  #ouchflash.go { animation: ouchflash 0.9s ease-out; }
+  @keyframes ouchflash { 0% { opacity: 1; } 25% { opacity: 0.4; } 40% { opacity: 0.9; } 100% { opacity: 0; } }
+  #c.go { animation: jolt 0.45s linear; }
+  @keyframes jolt { 10% { transform: translate(-8px, 3px); } 25% { transform: translate(7px, -4px); } 40% { transform: translate(-6px, 2px); } 55% { transform: translate(5px, -2px); } 70% { transform: translate(-3px, 1px); } 100% { transform: none; } }
+  @media (prefers-reduced-motion: reduce) { #ouchtext.go { animation: none; opacity: 1; transition: opacity 1.4s; } #c.go { animation: none; } }
+  #loading { position: fixed; inset: 0; display: grid; place-items: center; background: #BFE7F2; transition: opacity 0.4s; }
+  #loading span { width: 26px; height: 26px; margin: 0 8px; border-radius: 50%; background: #FF8A3D; border: 5px solid #2B2140; display: inline-block; animation: hop 0.8s infinite ease-in-out; }
+  #loading span:nth-child(2) { animation-delay: 0.15s; background: #5CC46B; } #loading span:nth-child(3) { animation-delay: 0.3s; background: #3D8BFF; }
+  @keyframes hop { 50% { transform: translateY(-18px); } }
+  body.ready #loading { opacity: 0; pointer-events: none; }
+  @media (prefers-reduced-motion: reduce) { #loading span { animation: none; } }
+  @media (max-height: 560px) { #heat { height: 150px; } #ui { gap: 8px; padding: 10px 8px; } #ui button { width: 48px; height: 48px; } #ui svg { width: 30px; height: 30px; } }
+</style>
+</head>
+<body data-section="counter">
+<canvas id="c" aria-label="Kitchen Lab. Drag bottles and objects from the shelves into the pot and see what happens."></canvas>
+<div id="loading" aria-label="Loading"><div><span></span><span></span><span></span></div></div>
+<div id="fade"></div>
+<div id="toast" aria-live="polite"></div>
+<nav id="sections" aria-label="Kitchen areas">
+  <button id="bookbtn" aria-label="Recipe book">
+    <svg viewBox="0 0 64 64" stroke="#2B2140" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M8 14Q20 8 32 14V54Q20 48 8 54Z" fill="#FFD6E7"/><path d="M56 14Q44 8 32 14V54Q44 48 56 54Z" fill="#FFEFA8"/>
+      <path d="M15 24H25M15 32H25M39 24H49M39 32H49" fill="none" stroke-width="3"/>
+    </svg>
+  </button>
+  <button data-section="counter" class="on" aria-label="Counter" aria-pressed="true">
+    <svg viewBox="0 0 64 64" stroke="#2B2140" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M14 26H50V48Q50 54 44 54H20Q14 54 14 48Z" fill="#BFE6FF"/><path d="M10 26H54" fill="none"/><path d="M8 32H14M50 32H56" fill="none"/>
+      <path d="M24 18Q26 12 24 8M32 18Q34 12 32 8M40 18Q42 12 40 8" fill="none" stroke-width="3"/>
+    </svg>
+  </button>
+  <button data-section="fridge" aria-label="Fridge" aria-pressed="false">
+    <svg viewBox="0 0 64 64" stroke="#2B2140" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+      <rect x="16" y="6" width="32" height="52" rx="5" fill="#E8F6FF"/><path d="M16 24H48" fill="none"/><path d="M22 13V18M22 30V40" fill="none"/>
+    </svg>
+  </button>
+  <button data-section="pantry" aria-label="Pantry" aria-pressed="false">
+    <svg viewBox="0 0 64 64" stroke="#2B2140" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+      <path d="M8 22H56M8 42H56" fill="none"/><rect x="13" y="8" width="11" height="14" rx="2" fill="#FFD27A"/><rect x="28" y="12" width="10" height="10" rx="2" fill="#F08C5A"/>
+      <rect x="42" y="9" width="9" height="13" rx="2" fill="#BFE6FF"/><path d="M14 42Q14 30 24 30Q34 30 34 42Z" fill="#E7B36A"/><circle cx="45" cy="36" r="6" fill="#F5A3C7"/>
+    </svg>
+  </button>
+  <button data-section="cabinets" aria-label="Cabinets" aria-pressed="false">
+    <svg viewBox="0 0 64 64" stroke="#2B2140" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+      <rect x="8" y="12" width="48" height="40" rx="4" fill="#F7F2E8"/><path d="M32 12V52" fill="none"/><circle cx="27" cy="32" r="2.5" fill="#2B2140"/><circle cx="37" cy="32" r="2.5" fill="#2B2140"/>
+    </svg>
+  </button>
+  <button data-section="oven" aria-label="Oven" aria-pressed="false">
+    <svg viewBox="0 0 64 64" stroke="#2B2140" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+      <rect x="8" y="8" width="48" height="48" rx="5" fill="#ECEFF3"/><path d="M8 20H56" fill="none"/><circle cx="18" cy="14" r="2.5" fill="#2B2140"/><circle cx="28" cy="14" r="2.5" fill="#2B2140"/>
+      <rect x="15" y="27" width="34" height="22" rx="3" fill="#FF9A4D"/>
+    </svg>
+  </button>
+</nav>
+
+<div id="basket" aria-label="Basket">
+  <span class="tag" aria-hidden="true">🧺</span>
+  <span class="empty">Tap food in the fridge, pantry or cabinets</span>
+</div>
+<div id="tracker" hidden>
+  <div class="thead" role="button" aria-label="Show recipe steps">
+    <span class="ticon"></span><span class="tname"></span><span class="tnow"></span>
+    <button class="tclose" aria-label="Stop this recipe">✕</button>
+  </div>
+  <div class="tneed"></div>
+  <ol class="tsteps"></ol>
+</div>
+<div id="book" hidden>
+  <div class="sheet" role="dialog" aria-label="Recipe book">
+    <div class="bookhead"><span>Recipes</span><button id="bookclose" aria-label="Close">✕</button></div>
+    <div id="bookgrid"></div>
+    <button id="freeplay">Just play</button>
+  </div>
+</div>
+<div id="celebrate" hidden><div class="confetti"></div><div class="cicon"></div><div class="ctext"></div></div>
+<div id="ouchflash"></div>
+<div id="ouchtext" role="alert">Ouch! Ouch! Ouch!</div>
+<div id="ui" role="toolbar" aria-label="Kitchen controls">
+  <div id="heat" role="slider" tabindex="0" aria-label="Heat: drag up for hot, down for cold" aria-valuemin="-25" aria-valuemax="130" aria-valuenow="20">
+    <svg class="icon hot" viewBox="0 0 24 24"><path d="M12 2Q16 8 15 12Q18 10 18 7Q22 13 19 18Q16 23 12 23Q6 23 5 17Q4 12 9 8Q9 11 11 12Q10 6 12 2Z" fill="#FF7A3D" stroke="#2B2140" stroke-width="2" stroke-linejoin="round"/></svg>
+    <div class="track"></div><div class="mid"></div>
+    <div class="knob" aria-hidden="true"></div>
+    <svg class="icon cold" viewBox="0 0 24 24" fill="none" stroke="#2B2140" stroke-width="2.4" stroke-linecap="round"><path d="M12 2V22M3.3 7L20.7 17M3.3 17L20.7 7"/></svg>
+  </div>
+  <button data-id="blend" aria-label="Blender blades on or off">
+    <svg viewBox="0 0 64 64" stroke="#2B2140" stroke-width="4" stroke-linejoin="round" stroke-linecap="round">
+      <g class="blades"><path d="M32 32L52 22Q56 28 50 32Z M32 32L12 42Q8 36 14 32Z M32 32L42 52Q36 56 32 50Z M32 32L22 12Q28 8 32 14Z" fill="#D6DEE8"/>
+      <circle cx="32" cy="32" r="7" fill="#7C899B"/></g>
+    </svg>
+  </button>
+  <button data-id="empty" aria-label="Empty the pot">
+    <svg viewBox="0 0 64 64" stroke="#2B2140" stroke-width="5" stroke-linejoin="round">
+      <g transform="rotate(35 30 30)"><rect x="10" y="18" width="40" height="30" rx="6" fill="#BFE6FF"/><rect x="6" y="14" width="48" height="8" rx="4" fill="#B7C3D1"/></g>
+      <circle cx="54" cy="46" r="4" fill="#5BB8F5" stroke-width="2.5"/><circle cx="58" cy="57" r="3.5" fill="#5BB8F5" stroke-width="2.5"/>
+    </svg>
+  </button>
+  <button data-id="broom" aria-label="Sweep the counter">
+    <svg viewBox="0 0 64 64" stroke="#2B2140" stroke-width="5" stroke-linejoin="round" stroke-linecap="round">
+      <g transform="rotate(-28 32 32)"><rect x="28" y="2" width="8" height="34" rx="4" fill="#B86F2E"/><path d="M16 36H48L54 60H10Z" fill="#FFC93C"/></g>
+    </svg>
+  </button>
+  <button data-id="sound" aria-label="Sound on or off">
+    <svg viewBox="0 0 64 64" stroke="#2B2140" stroke-width="5" stroke-linejoin="round" stroke-linecap="round" fill="none">
+      <path d="M8 24H20L34 10V54L20 40H8Z" fill="#FFFFFF"/><path class="waves" d="M42 22Q50 32 42 42M48 14Q62 32 48 50"/>
+    </svg>
+  </button>
+</div>
+<script>
+/*GAME*/
+</script>
+</body>
+</html>

@@ -131,7 +131,7 @@ Nothing is sent anywhere and no API key is needed. To reset her sticker board, c
 folder in her Edge profile, or open the app, press F12 and run `localStorage.removeItem('tracer-stickers')`.
 
 ### Kitchen Lab and Chemistry Lab
-Built from `lab-games` (separate source zip; `npm ci && npm test && npm run build`, then copy `dist/*.html` here).
+Built from `src/lab-games/` (`npm ci && npm test && npm run build`, then copy `dist/*.html` here).
 Steps are read aloud as she reaches them, tapping the step line repeats it, and the book shows a Today card plus
 stars on recipes she has finished before (stored under `lab-done-kitchen` / `lab-done-chem`).
 
@@ -179,8 +179,9 @@ Three more apps (`apps/count-with-me.html`, `apps/music-box.html`, `apps/story-m
   the key is the primary voice. Without any of these, the Windows voices are used, varied per character.
 
 ### Draw With Me library
-`apps/draw-with-me/library.js` holds the pre-made lessons (152 as of this package: 70 simple, 82 detailed). To add more, use the separate
-`draw-with-me-kit.zip`, then copy its updated `library.js` into `apps/draw-with-me/` and run `Install-KidApps.ps1`.
+`apps/draw-with-me/library.js` holds the pre-made lessons (152 as of this package: 70 simple, 82 detailed). To add more, edit
+`library.js` (each lesson is a JSON object with its steps and the spoken lines) and run `Install-KidApps.ps1`; with an
+Anthropic key, the app also learns new drawings on request and keeps them in the tablet's local storage.
 Always install Draw With Me from the folder (it keeps `library.js` next to the app).
 
 ## Useful commands (after `Import-Module 'C:\Program Files\WindowsPowerShell\Modules\KidTablet' -Force`)
@@ -199,10 +200,11 @@ Always install Draw With Me from the folder (it keeps `library.js` next to the a
 | `voices/` | `make-voices.py` builds voice clip packs into the apps. |
 | `etducky/` | Scripts for running the setup from an RMM, and the template the exporter fills. |
 | `tools/` | `Test-KidTabletPackage.ps1` (package self-check) and `Export-EtDuckyScripts.ps1`. |
-| `src/` | Sources for apps that are built or minified before they land in `apps/`. |
+| `src/` | Sources for the apps that are built before they land in `apps/`: `lab-games/` (Kitchen Lab and Chemistry Lab), the Playground Lab source, and the first Story Maker for reference. |
 
-Kitchen Lab and Chemistry Lab are built from a separate `lab-games` project (`npm ci && npm test && npm run build`,
-then copy `dist/*.html` into `apps/`). The built files are in the repo; the source project is not yet.
+Kitchen Lab and Chemistry Lab are built from `src/lab-games/` (`npm ci && npm test && npm run build`, then copy
+`dist/*.html` into `apps/`; its README explains the layout). Playground Lab is built from
+`src/playground-lab-3d.src.html` as `src/README.md` describes. The other apps are single files edited in place.
 
 ## License
 MIT. See `LICENSE`. Bundled libraries are listed in `THIRD-PARTY-NOTICES.md`.
