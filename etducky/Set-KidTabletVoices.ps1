@@ -9,7 +9,7 @@
     when the PC cannot be reached. Leave a setting blank to leave that .env line as it is; set it to
     the word none to remove the line.
 
-    No secret is needed when the PC trusts the tablet's subnet (OMNIVOICE_TRUSTED_NETWORKS=10.0.0.0/24 in
+    No secret is needed when the PC trusts the tablet's subnet (OMNIVOICE_TRUSTED_NETWORKS=192.168.1.0/24 in
     the PC's ~/.config/omnivoice/env): the default 'none' removes any TTS_PIN from .env so the app sends no
     credential. Set a secret only for a PC that is not trusting the subnet (the share PIN or OMNIVOICE_API_KEY).
 
@@ -19,7 +19,7 @@
 
 # ---- Settings ---------------------------------------------------------------
 $TtsProvider    = 'voicestudio'            # voicestudio | azure | openai | none
-$TtsUrl         = 'http://10.0.0.169:3900' # voicestudio: the PC's address (3900 with OMNIVOICE_BIND_HOST, 3901 for the share)
+$TtsUrl         = 'http://192.168.1.10:3900' # voicestudio: the PC's address (3900 with OMNIVOICE_BIND_HOST, 3901 for the share)
 $TtsSecret      = 'none'                   # none = no credential (PC trusts the subnet); else OMNIVOICE_API_KEY or share PIN
 $TtsFallback    = 'azure'                  # azure | openai | none: which key to use when the PC is off
 $RestartSession = $false                   # config.js is read when an app starts; restart only if she is in Story Maker now

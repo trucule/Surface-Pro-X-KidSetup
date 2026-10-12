@@ -2097,7 +2097,7 @@ function Update-KidAppConfig {
             DRAW_DAILY_LIMIT=25                       (optional: new drawings per day; Story Maker: stories per day)
             STORY_MODEL=claude-haiku-4-5-20251001     (optional: Story Maker's writer)
             TTS_PROVIDER=voicestudio | azure | openai (optional: live voices for Story Maker)
-            TTS_URL=http://10.0.0.169:3901  TTS_PIN=  (voicestudio: VoiceStudio's LAN share on your PC)
+            TTS_URL=http://192.168.1.10:3901  TTS_PIN=  (voicestudio: VoiceStudio's LAN share on your PC)
             TTS_KEY=...   TTS_REGION=eastus           (azure/openai; with voicestudio they are the fallback)
         The .env stays outside the app folders; only config.js sits next to the app that reads it.
     #>

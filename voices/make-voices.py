@@ -6,7 +6,7 @@ Run on your PC (not the tablet), from the KidTablet-setup folder:
 
     python voices\make-voices.py --engine edge  --voice en-US-AnaNeural
     python voices\make-voices.py --engine piper --voice C:\piper\en_US-amy-medium.onnx
-    python voices\make-voices.py --engine voicestudio --voice Narrator --url http://10.0.0.169:3901 --pin 123456
+    python voices\make-voices.py --engine voicestudio --voice Narrator --url http://192.168.1.10:3901 --pin 123456
 
 Engines
   edge   Microsoft's neural voices through the free Edge Read Aloud service (pip install edge-tts). Needs internet
