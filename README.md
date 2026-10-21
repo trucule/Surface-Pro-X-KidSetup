@@ -12,8 +12,9 @@ Built for a Surface Pro X. Any Windows 11 Pro device with a touch screen works t
 - Edge locked to an allowlist of domains. Everything else is blocked.
 - A touch-first home screen (`KidHome.exe`, built on the tablet from source in the module) with large tiles, a
   wallpaper, and a Home button that closes any app.
-- Nine offline HTML apps: Level Up (reading, math, color science, patterns, time and money, shapes and fractions,
-  each climbing from kindergarten to about 4th grade), Draw With Me (step-by-step drawing lessons), Trace With Me
+- Ten offline HTML apps: Level Up (reading, math, color science, patterns, time and money, shapes and fractions,
+  each climbing from kindergarten to about 4th grade), Voice Band (her voice as an instrument: sing a melody, voice
+  effects, a looper band), Draw With Me (step-by-step drawing lessons), Trace With Me
   (letters, numbers, shapes), Count With Me, Music Box, Story Maker (a read-aloud branching story app), Kitchen Lab,
   Chemistry Lab, and Playground Lab (3D physics). Each one is described below.
 - Optional AI: with an Anthropic API key, Draw With Me learns new drawings on request and Story Maker writes each
@@ -144,6 +145,24 @@ subject starts near 2nd grade and moves up after two in a row for its first eigh
 quickly. A wrong answer shows the right one and why. **Daily Quest** mixes ten questions across subjects. Questions
 are generated, so they do not come in a fixed order, and they are read aloud with the Windows voice (the 🔈 button
 repeats). Progress is in `localStorage` under `levelup-v1`.
+
+### Voice Band
+`apps/voice-band.html` has three rooms, all built on her microphone:
+- **Sing a Melody**: while she sings, a ball climbs a ladder of note names. Her tune is turned into notes (pitch
+  tracking, then each steady stretch snapped to the nearest semitone) and shown with their letters. She can play it
+  back on piano, flute, robot, bells or guitar, add a harmony, hear her own voice, or hear her voice auto-tuned to
+  C major. **Copy me** plays a short tune for her to sing back; it compares the shape of the tune, so she can sing
+  in her own key, and each match makes the next tune one note longer (level kept under `voiceband-copy`).
+- **Voice Effects**: robot, monster, chipmunk, echo, choir, alien, auto-tune, backwards, underwater and radio. She
+  records once and can tap through every effect on the same recording. **Live** mode runs six of them in real time
+  and needs headphones (live sound through the tablet's own speakers feeds back).
+- **Looper Band**: four tracks over a two-bar loop at slow, medium or fast. Recording starts on the beat after a
+  count-in, is shifted for the tablet's audio delay, and loops in time with the other tracks. Each track has its own
+  effect, mute and clear. The band is kept in IndexedDB (database `voiceband`).
+
+Audio uses ScriptProcessor nodes because file:// pages cannot load AudioWorklet modules here.
+`tools/test-voice-band.py` checks pitch detection, note finding, every effect and all three rooms with a fake
+microphone.
 
 ### Trace With Me
 `apps/trace-with-me.html` is a finger-tracing app: capital letters, small letters, numbers 0-9 and six shapes. A big

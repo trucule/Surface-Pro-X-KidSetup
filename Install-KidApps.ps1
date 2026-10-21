@@ -51,6 +51,7 @@ $apps = @(
     @{ Name = 'Story Maker';   Path = 'apps\story-maker';        Tile = 'apps\story-maker-tile.png';    Color = '#5CD38B' }
     @{ Name = 'Playground Lab'; Path = 'apps\playground-lab.html'; Tile = 'apps\playground-lab-tile.png'; Color = '#58C7F0' }
     @{ Name = 'Level Up';      Path = 'apps\level-up.html';      Tile = 'apps\level-up-tile.png';       Color = '#FF8A5B' }
+    @{ Name = 'Voice Band';    Path = 'apps\voice-band.html';    Tile = 'apps\voice-band-tile.png';     Color = '#9B6BFF' }
 )
 foreach ($app in $apps) {
     $src = Join-Path $here $app.Path

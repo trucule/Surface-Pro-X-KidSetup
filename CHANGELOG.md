@@ -1,6 +1,19 @@
 # Changes
 
 ## 2026-10-21
+- `Update-KidTabletApps.ps1` runs the install as a one-time scheduled task (`KidTablet-UpdateApps`, as SYSTEM) and
+  returns at once, so ET Ducky's command time limit no longer stops an install partway through. Progress goes to
+  `C:\ProgramData\KidTablet\jobs\update-apps.log`. Package backups are capped at the two newest.
+- `Get-KidTabletStatus.ps1` shows the background update's state and log, and reads `launch.log` from her profile,
+  where the launcher writes it (it used to look in ProgramData and always said "No log").
+- The ET Ducky export keeps the Story Maker script's escaping (`<` as `~LT~`, `://` as `~CS~`, so ET Ducky prompts
+  for no parameters) and leaves an existing `Set-KidTabletVoices.ps1` alone, since it holds local settings. Story
+  Maker sends the voice server secret as both `x-omnivoice-pin` and `Authorization: Bearer`, as the working script
+  already did.
+- New app: **Voice Band**. Sing a Melody (live pitch ladder, her tune as notes, playback on five instruments, harmony,
+  her voice auto-tuned, and a Copy me pitch-matching game that grows a note each time), Voice Effects (ten effects
+  on a recording, six live with headphones), Looper Band (four tracks over a two-bar loop, counted in and lined up
+  for audio delay, saved in IndexedDB).
 - New app: **Level Up**, replacing the Kindergarten Kids Learning tile. Six subjects (Reading, Math, Color Lab,
   Patterns, Time & Money, Shapes & Fractions), 50 levels from kindergarten to about 4th grade, generated questions,
   a level per subject that moves up after four right in a row and down after two misses in four, and a Daily Quest

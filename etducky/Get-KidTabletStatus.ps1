@@ -61,9 +61,17 @@ if (Test-Path $appsDir) {
     Write-Output "$appsDir not found."
 }
 
-foreach ($log in 'launch.log', 'kiosk-apply.log') {
-    Section $log
-    $p = Join-Path $dataDir $log
-    if (Test-Path $p) { Get-Content $p -Tail $LogLines | ForEach-Object { Write-Output $_ } } else { Write-Output 'No log.' }
+Section 'Background update (Update-KidTabletApps)'
+$task = Get-ScheduledTask -TaskName 'KidTablet-UpdateApps' -ErrorAction SilentlyContinue
+if ($task) { $info = $task | Get-ScheduledTaskInfo; Write-Output ('Task {0}; last run {1:yyyy-MM-dd HH:mm}, result {2}' -f $task.State, $info.LastRunTime, $info.LastTaskResult) } else { Write-Output 'Never run.' }
+$jobLog = Join-Path $dataDir 'jobs\update-apps.log'
+if (Test-Path $jobLog) { Get-Content $jobLog -Tail $LogLines | Where-Object { $_ -notmatch '^\*{10}' } | ForEach-Object { Write-Output $_ } }
+
+# The launcher writes launch.log into her own profile; the kiosk log is machine-wide.
+$logs = @(Get-ChildItem 'C:\Users\*\AppData\Local\KidTablet\launch.log' -ErrorAction SilentlyContinue) + @(Get-Item (Join-Path $dataDir 'kiosk-apply.log') -ErrorAction SilentlyContinue)
+foreach ($f in 'launch.log', 'kiosk-apply.log') {
+    Section $f
+    $hit = $logs | Where-Object Name -eq $f
+    if ($hit) { foreach ($h in $hit) { Get-Content $h.FullName -Tail $LogLines | ForEach-Object { Write-Output $_ } } } else { Write-Output 'No log.' }
 }
 exit 0

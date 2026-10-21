@@ -12,7 +12,10 @@
     pre-rendered prompts survive an update without rerunning make-voices.py.
 
     The package is unpacked to $StageDir (default C:\KidTablet-new\KidTablet-setup), replacing the
-    previous copy, which is kept in C:\ProgramData\KidTablet\backup\package-TIMESTAMP.zip.
+    previous copy, which is kept in C:\ProgramData\KidTablet\backup\package-TIMESTAMP.zip (the two newest are kept).
+
+    The install itself runs as a one-time scheduled task, so ET Ducky's command time limit cannot cut it off
+    halfway. This script returns as soon as the task has started; Get-KidTabletStatus.ps1 shows its log.
 
     Exit code 0 on success, 1 on failure.
 #>
@@ -57,6 +60,33 @@ try {
     $moduleFile = Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules\KidTablet\KidTablet.psm1'
     if (-not (Test-Path $moduleFile)) { throw 'KidTablet is not installed on this device. Run Deploy-KidTablet.ps1 first.' }
 
+    # ET Ducky ends a script when its command time limit runs out, and a full install takes longer than that, so the
+    # copy ET Ducky runs hands the work to a one-time scheduled task (as SYSTEM) and returns straight away. The task
+    # runs this same script with $KidTabletRunAsJob set and writes everything to jobs\update-apps.log.
+    $jobDir = Join-Path $env:ProgramData 'KidTablet\jobs'
+    $jobLog = Join-Path $jobDir 'update-apps.log'
+    if (-not (Get-Variable KidTabletRunAsJob -Scope Global -ErrorAction SilentlyContinue)) {
+        New-Item -ItemType Directory -Path $jobDir -Force | Out-Null
+        $taskName = 'KidTablet-UpdateApps'
+        $existing = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+        if ($existing -and $existing.State -eq 'Running') { Write-Host "An update is already running. Progress is in $jobLog"; exit 0 }
+        $text = if ($PSCommandPath -and (Test-Path -LiteralPath $PSCommandPath)) { [IO.File]::ReadAllText($PSCommandPath) }
+                elseif ($MyInvocation.MyCommand.ScriptBlock) { $MyInvocation.MyCommand.ScriptBlock.ToString() }
+                else { throw 'Cannot read this script to hand it to a background task.' }
+        $jobScript = Join-Path $jobDir 'update-apps.ps1'
+        [IO.File]::WriteAllText($jobScript, ('$global:KidTabletRunAsJob = $true' + "`r`n" + $text), (New-Object Text.UTF8Encoding $true))
+        $action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$jobScript`""
+        $runAs    = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 1)
+        Register-ScheduledTask -TaskName $taskName -Action $action -Principal $runAs -Settings $settings -Force | Out-Null
+        Start-ScheduledTask -TaskName $taskName
+        Write-Host "Update started in the background. It takes several minutes and ends by signing her out and back in."
+        Write-Host "Follow it with Get-KidTabletStatus.ps1 (it shows the end of $jobLog)."
+        exit 0
+    }
+    Start-Transcript -Path $jobLog -Force | Out-Null
+    Write-Host ("Update started {0:yyyy-MM-dd HH:mm:ss}" -f (Get-Date))
+
     $work = Join-Path $env:ProgramData 'KidTablet\packages'
     New-Item -ItemType Directory -Path $work -Force | Out-Null
     $zip = Join-Path $work 'package.zip'
@@ -91,6 +121,8 @@ try {
         $backup = Join-Path $backupDir ('package-{0}.zip' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
         Compress-Archive -Path (Join-Path $StageDir '*') -DestinationPath $backup -Force
         Write-Host "Previous package saved to $backup"
+        # Keep the two newest; each one is the whole package with its voice packs.
+        Get-ChildItem $backupDir -Filter 'package-*.zip' | Sort-Object LastWriteTime -Descending | Select-Object -Skip 2 | Remove-Item -Force
         Remove-Item $StageDir -Recurse -Force
     }
     New-Item -ItemType Directory -Path $StageDir -Force | Out-Null
@@ -104,8 +136,12 @@ try {
         else { & (Join-Path $StageDir 'Install-KidApps.ps1') -SkipRestart }
     } finally { Pop-Location }
     Write-Host ('Module now: {0}' -f (Get-FileHash $moduleFile).Hash)
+    Write-Host ("Update finished {0:yyyy-MM-dd HH:mm:ss}" -f (Get-Date))
+    try { Stop-Transcript | Out-Null } catch { }
     exit 0
 } catch {
     Write-Error ("KidTablet app update failed: {0}`r`nWhere: {1}" -f $_.Exception.Message, $_.ScriptStackTrace)
+    Write-Host ("Update FAILED {0:yyyy-MM-dd HH:mm:ss}: {1}" -f (Get-Date), $_.Exception.Message)
+    try { Stop-Transcript | Out-Null } catch { }
     exit 1
 }

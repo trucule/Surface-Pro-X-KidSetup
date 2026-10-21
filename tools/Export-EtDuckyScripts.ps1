@@ -33,11 +33,19 @@ Copy-Item (Join-Path $root 'Deploy-KidTablet.ps1')          (Join-Path $Destinat
 Copy-Item (Join-Path $root 'etducky\Sync-KidTablet.ps1')      (Join-Path $Destination 'Sync-KidTablet.ps1') -Force
 Copy-Item (Join-Path $root 'etducky\Get-KidTabletStatus.ps1') (Join-Path $Destination 'Get-KidTabletStatus.ps1') -Force
 Copy-Item (Join-Path $root 'etducky\Update-KidTabletApps.ps1') (Join-Path $Destination 'Update-KidTabletApps.ps1') -Force
-Copy-Item (Join-Path $root 'etducky\Set-KidTabletVoices.ps1')  (Join-Path $Destination 'Set-KidTabletVoices.ps1') -Force
+# Set-KidTabletVoices holds this household's voice server address in its Settings block, so an existing copy in the
+# scripts repo is left alone; the package copy has a placeholder address.
+$voicesScript = Join-Path $Destination 'Set-KidTabletVoices.ps1'
+if (-not (Test-Path $voicesScript)) { Copy-Item (Join-Path $root 'etducky\Set-KidTabletVoices.ps1') $voicesScript }
+else { Write-Host 'Set-KidTabletVoices.ps1 already exists in the destination; left as is (it holds local settings).' }
 # Story Maker carried inside a script (small enough), with the voice pack kept on the tablet.
 $smTemplate = Get-Content -LiteralPath (Join-Path $root 'etducky\Update-KidTabletStoryMaker.template.ps1') -Raw
 $smIndex  = (Get-Content -LiteralPath (Join-Path $root 'apps\story-maker\index.html') -Raw).TrimEnd("`r", "`n")
 $smVoices = (Get-Content -LiteralPath (Join-Path $root 'apps\story-maker\voices.js') -Raw).TrimEnd("`r", "`n")
 if ($smIndex -match "(?m)^'@" -or $smVoices -match "(?m)^'@") { throw "A Story Maker file has a line starting with '@, which ends a here-string." }
-[IO.File]::WriteAllText((Join-Path $Destination 'Update-KidTabletStoryMaker.ps1'), $smTemplate.Replace('__INDEX__', $smIndex).Replace('__VOICES__', $smVoices), $utf8)
+if ($smIndex -match '~LT~|~CS~' -or $smVoices -match '~LT~|~CS~') { throw 'A Story Maker file contains ~LT~ or ~CS~, which the script uses as escapes.' }
+# ET Ducky reads a tag-like token as a parameter prompt and counts URLs against a script, so every '<' is written as
+# ~LT~ and every '://' as ~CS~; the script turns them back before writing the files.
+$esc = { param($t) $t.Replace('<', '~LT~').Replace('://', '~CS~') }
+[IO.File]::WriteAllText((Join-Path $Destination 'Update-KidTabletStoryMaker.ps1'), $smTemplate.Replace('__INDEX__', (& $esc $smIndex)).Replace('__VOICES__', (& $esc $smVoices)), $utf8)
 Write-Host "Wrote Deploy, Update, Sync, Get-KidTabletStatus, Update-KidTabletApps, Update-KidTabletStoryMaker and Set-KidTabletVoices scripts to $Destination"

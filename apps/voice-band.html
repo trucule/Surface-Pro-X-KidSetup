@@ -1,0 +1,607 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Voice Band</title>
+<!--
+  Voice Band. Her voice as an instrument, three rooms, one offline file, no API.
+
+  Sing a Melody: she sings or hums; a ball climbs a ladder of notes while she sings. Her tune is turned into notes
+  (pitch tracking, then notes snapped to the nearest semitone), shown with their letter names, and played back on
+  piano, flute, robot, bells or guitar, or as her own voice snapped in tune. "Copy me" plays a short tune for her to
+  sing back; matching it grows the next tune by one note.
+
+  Voice Effects: record and play back through ten effects (robot, monster, chipmunk, echo, choir, alien, auto-tune,
+  backwards, underwater, radio). Record-then-play is the default because live sound through the tablet's own
+  speakers feeds back; Live mode (with headphones) runs six of the effects in real time.
+
+  Looper Band: four tracks over a two-bar loop at three speeds. Each recording starts on the beat after a count-in,
+  is lined up for the tablet's audio delay, and loops in time with the others. Each track gets its own effect.
+  Tracks are kept in IndexedDB (database voiceband) so her band is still there next time.
+
+  Audio is Web Audio with ScriptProcessor nodes (no worklet modules, which file:// pages cannot load here).
+  The microphone is pre-approved for her local apps.
+-->
+<style>
+  :root { --ink: #2B2140; --paper: #FFF9F0; --pink: #FF4F8B; --sun: #FFC93C; --sky: #58C7F0; --leaf: #5CD38B; --grape: #9B6BFF; --coral: #FF8A5B; --night: #1E1830; }
+  html, body { margin: 0; height: 100%; background: var(--paper); overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); }
+  body { touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+  button { font-family: inherit; color: var(--ink); cursor: pointer; }
+  .screen { position: fixed; inset: 0; display: none; flex-direction: column; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  .screen.on { display: flex; }
+  header { display: flex; align-items: center; gap: 12px; padding: 12px 210px 8px 18px; } /* right side: room for the tablet's Home pill */
+  header h1 { margin: 0 auto 0 0; font-size: 32px; font-weight: 900; }
+  .back { border: 4px solid var(--ink); background: #fff; border-radius: 999px; padding: 8px 18px; font-size: 22px; font-weight: 900; }
+  .pill { border: 4px solid var(--ink); background: #fff; border-radius: 999px; padding: 8px 18px; font-size: 22px; font-weight: 900; }
+  .pill.on { background: var(--sun); }
+  .big { border: 5px solid var(--ink); border-radius: 999px; background: var(--pink); color: #fff; font-size: 30px; font-weight: 900; padding: 16px 34px; box-shadow: 0 8px 0 var(--ink); text-shadow: 0 2px 0 rgba(0,0,0,.25); }
+  .big:active { transform: translateY(4px); box-shadow: 0 4px 0 var(--ink); }
+  .big.rec { background: #E0243C; animation: pulse 1s infinite; }
+  .big.ghost { background: #fff; color: var(--ink); text-shadow: none; }
+  @keyframes pulse { 50% { transform: scale(1.05); } }
+  .msg { font-size: 26px; font-weight: 800; text-align: center; min-height: 36px; }
+
+  /* Home */
+  #rooms { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; padding: 18px 28px 40px; align-content: center; }
+  .room { border: 5px solid var(--ink); border-radius: 32px; padding: 26px; text-align: left; box-shadow: 0 10px 0 var(--ink); min-height: 330px; display: flex; flex-direction: column; gap: 10px; }
+  .room:active { transform: translateY(5px); box-shadow: 0 5px 0 var(--ink); }
+  .room .ic { font-size: 90px; line-height: 1; }
+  .room .nm { font-size: 34px; font-weight: 900; }
+  .room .ds { font-size: 21px; font-weight: 700; opacity: .85; line-height: 1.35; }
+
+  /* Sing */
+  #singBody { flex: 1; min-height: 0; display: grid; grid-template-columns: 150px 1fr; gap: 18px; padding: 6px 22px 16px; }
+  #ladder { border: 4px solid var(--ink); border-radius: 22px; background: #fff; position: relative; overflow: hidden; }
+  #ladder .rung { position: absolute; left: 0; right: 0; height: 1px; border-top: 2px dashed #e5dcef; font-size: 15px; font-weight: 900; padding-left: 8px; color: #8a7fa0; }
+  #ball { position: absolute; left: 70px; width: 54px; height: 54px; border-radius: 50%; background: var(--pink); border: 4px solid var(--ink); transform: translateY(-50%); display: none; transition: top .06s linear; }
+  #singMain { display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+  #roll { flex: 1; min-height: 180px; border: 4px solid var(--ink); border-radius: 22px; background: #fff; width: 100%; }
+  .row { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; }
+  .inst { border: 4px solid var(--ink); border-radius: 20px; background: #fff; font-size: 22px; font-weight: 900; padding: 10px 16px; min-width: 110px; }
+  .inst.on { background: var(--sun); }
+  #copyStars { font-size: 26px; font-weight: 900; }
+
+  /* Effects */
+  #fxBody { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 16px; padding: 6px 26px 16px; }
+  #fxGrid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; }
+  .fx { border: 4px solid var(--ink); border-radius: 24px; background: #fff; padding: 12px 6px; font-size: 20px; font-weight: 900; display: flex; flex-direction: column; align-items: center; gap: 4px; box-shadow: 0 6px 0 var(--ink); }
+  .fx .e { font-size: 52px; line-height: 1.1; }
+  .fx.on { background: var(--sun); }
+  .fx.dim { opacity: .35; }
+  #meter { height: 22px; border: 4px solid var(--ink); border-radius: 999px; background: #fff; overflow: hidden; width: min(600px, 80vw); }
+  #meter i { display: block; height: 100%; width: 0; background: var(--leaf); transition: width .05s; }
+  .warn { font-size: 20px; font-weight: 800; background: #FFF0C2; border: 3px solid var(--ink); border-radius: 16px; padding: 8px 14px; }
+
+  /* Looper */
+  #loopBody { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 4px 26px 16px; }
+  #playhead { position: relative; height: 34px; border: 4px solid var(--ink); border-radius: 999px; background: #fff; overflow: hidden; }
+  #playhead i { position: absolute; top: 0; bottom: 0; left: 0; width: 0; background: var(--sky); }
+  #playhead .beats { position: absolute; inset: 0; display: grid; grid-template-columns: repeat(8, 1fr); }
+  #playhead .beats span { border-right: 2px solid #c9bedb; }
+  .track { display: grid; grid-template-columns: 90px 1fr 170px 130px 110px 96px; align-items: center; gap: 12px; border: 4px solid var(--ink); border-radius: 22px; background: #fff; padding: 8px 12px; }
+  .track.rec { background: #FFE0E5; }
+  .track.wait { background: #FFF4D6; }
+  .track .ti { font-size: 44px; text-align: center; }
+  .track canvas { width: 100%; height: 64px; }
+  .track button { border: 4px solid var(--ink); border-radius: 16px; background: #fff; font-size: 20px; font-weight: 900; padding: 10px 8px; }
+  .track button.recb { background: var(--pink); color: #fff; }
+  .track button.on { background: var(--sun); }
+  #countIn { position: fixed; inset: 0; display: none; place-items: center; z-index: 9; pointer-events: none; }
+  #countIn.on { display: grid; }
+  #countIn span { font-size: 220px; font-weight: 900; color: var(--pink); text-shadow: 0 8px 0 var(--ink); }
+  @media (max-width: 900px) { #rooms { grid-template-columns: 1fr; } #fxGrid { grid-template-columns: repeat(3, 1fr); } .track { grid-template-columns: 60px 1fr 120px 100px 90px 80px; } }
+</style>
+</head>
+<body>
+<section id="home" class="screen on">
+  <header><h1>🎤 Voice Band</h1></header>
+  <div id="rooms">
+    <button class="room" data-go="sing" style="background:#FFE7F0"><div class="ic">🎶</div><div class="nm">Sing a Melody</div><div class="ds">Sing or hum a tune. See your notes, then hear them on piano, flute, robot or bells. Play "Copy me" to match tunes.</div></button>
+    <button class="room" data-go="fx" style="background:#E8F7FF"><div class="ic">🤖</div><div class="nm">Voice Effects</div><div class="ds">Turn your voice into a robot, a monster, a chipmunk, a whole choir, and more.</div></button>
+    <button class="room" data-go="loop" style="background:#EAFBEF"><div class="ic">🥁</div><div class="nm">Looper Band</div><div class="ds">Beatbox, hum and sing in layers. Each part loops and plays together like a band.</div></button>
+  </div>
+</section>
+
+<section id="sing" class="screen">
+  <header>
+    <button class="back" data-back>◀ Rooms</button><h1>🎶 Sing a Melody</h1>
+    <button class="pill on" id="tabFree">🎤 Sing</button><button class="pill" id="tabCopy">🎯 Copy me</button>
+  </header>
+  <div id="singBody">
+    <div id="ladder"><div id="ball"></div></div>
+    <div id="singMain">
+      <div class="msg" id="singMsg">Tap the button and sing or hum a little tune.</div>
+      <canvas id="roll"></canvas>
+      <div class="row" id="singRow1">
+        <button class="big" id="singRec">🎤 Sing!</button>
+        <button class="big ghost" id="copyPlay" style="display:none">▶ Hear the tune</button>
+        <span id="copyStars" style="display:none"></span>
+      </div>
+      <div class="row" id="singRow2">
+        <button class="inst on" data-inst="piano">🎹 Piano</button>
+        <button class="inst" data-inst="flute">🪈 Flute</button>
+        <button class="inst" data-inst="robot">🤖 Robot</button>
+        <button class="inst" data-inst="bells">🔔 Bells</button>
+        <button class="inst" data-inst="pluck">🎸 Guitar</button>
+      </div>
+      <div class="row" id="singRow3">
+        <button class="inst" id="playNotes">▶ Play my notes</button>
+        <button class="inst" id="playHarm">✨ With harmony</button>
+        <button class="inst" id="playMe">🗣️ My voice</button>
+        <button class="inst" id="playTuned">🎯 My voice, in tune</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="fx" class="screen">
+  <header>
+    <button class="back" data-back>◀ Rooms</button><h1>🤖 Voice Effects</h1>
+    <button class="pill on" id="modeRec">⏺ Record &amp; play</button><button class="pill" id="modeLive">🎧 Live</button>
+  </header>
+  <div id="fxBody">
+    <div id="fxGrid"></div>
+    <div class="row"><div id="meter"><i></i></div></div>
+    <div class="msg" id="fxMsg">Pick an effect, then tap Record and say something.</div>
+    <div class="row">
+      <button class="big" id="fxRec">⏺ Record</button>
+      <button class="big ghost" id="fxPlay">▶ Play again</button>
+    </div>
+    <div class="row"><div class="warn" id="liveWarn" style="display:none">🎧 Live mode needs headphones. Without them, the speakers and microphone squeal.</div></div>
+  </div>
+</section>
+
+<section id="loop" class="screen">
+  <header>
+    <button class="back" data-back>◀ Rooms</button><h1>🥁 Looper Band</h1>
+    <button class="pill" data-bpm="80">🐢 Slow</button><button class="pill on" data-bpm="100">🚶 Medium</button><button class="pill" data-bpm="120">🐇 Fast</button>
+  </header>
+  <div id="loopBody">
+    <div class="row">
+      <button class="big" id="loopPlay">▶ Play</button>
+      <button class="inst on" id="clickOn">🕺 Beat on</button>
+      <div class="msg" id="loopMsg" style="flex:1">Tap ⏺ on a track to record a part. It counts you in first.</div>
+    </div>
+    <div id="playhead"><i></i><div class="beats"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div></div>
+    <div id="tracks"></div>
+  </div>
+  <div id="countIn"><span id="countNum"></span></div>
+</section>
+
+<script>
+// ---------------------------------------------------------------------------
+// Audio basics
+// ---------------------------------------------------------------------------
+let ACTX = null;
+function audio() { if (!ACTX) { try { ACTX = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' }); } catch (e) { ACTX = null; } } if (ACTX && ACTX.state === 'suspended') ACTX.resume(); return ACTX; }
+function say(t) { try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(t); u.rate = .95; u.pitch = 1.05; speechSynthesis.speak(u); } catch (e) {} }
+const $ = id => document.getElementById(id);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let micStream = null;
+async function openMic(clean) {
+  closeMic();
+  // Singing wants the raw voice (noise suppression smears pitch); the looper wants echo cancellation so the loops
+  // already playing are not recorded again into the new part.
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: clean ? { echoCancellation: false, noiseSuppression: false, autoGainControl: true } : { echoCancellation: true, noiseSuppression: false, autoGainControl: true } });
+  return micStream;
+}
+function closeMic() { if (micStream) { micStream.getTracks().forEach(t => t.stop()); micStream = null; } }
+function concat(chunks) { const n = chunks.reduce((s, c) => s + c.length, 0), out = new Float32Array(n); let o = 0; for (const c of chunks) { out.set(c, o); o += c.length; } return out; }
+function rms(d) { let s = 0; for (let i = 0; i < d.length; i++) s += d[i] * d[i]; return Math.sqrt(s / d.length); }
+function normalize(d, peakTo = .9) { let p = 0; for (let i = 0; i < d.length; i++) p = Math.max(p, Math.abs(d[i])); if (p < 1e-6) return d; const g = peakTo / p; const o = new Float32Array(d.length); for (let i = 0; i < d.length; i++) o[i] = d[i] * g; return o; }
+function trim(d, rate) {
+  let peak = 0; for (let i = 0; i < d.length; i++) peak = Math.max(peak, Math.abs(d[i]));
+  if (peak < 0.02) return null;
+  const th = Math.max(0.01, peak * 0.06), pad = Math.floor(rate * 0.08);
+  let s = 0, e = d.length - 1; while (s < e && Math.abs(d[s]) < th) s++; while (e > s && Math.abs(d[e]) < th) e--;
+  s = Math.max(0, s - pad); e = Math.min(d.length, e + pad + 1);
+  if (e - s < rate * 0.12) return null;
+  const out = d.slice(s, e), fade = Math.floor(rate * .01);
+  for (let i = 0; i < fade && i < out.length; i++) { out[i] *= i / fade; out[out.length - 1 - i] *= i / fade; }
+  return normalize(out);
+}
+function playBuffer(data, rate, when = 0, dest) {
+  const a = audio(); if (!a || !data || !data.length) return null;
+  const b = a.createBuffer(1, data.length, rate); b.copyToChannel(data, 0);
+  const s = a.createBufferSource(); s.buffer = b; s.connect(dest || a.destination); s.start(when || a.currentTime + .02); return s;
+}
+// Records until she stops (silence after sound) or the time limit. onLevel(rms, frame) runs on every block.
+function recordVoice({ clean = true, maxSec = 12, silenceSec = 1.2, onLevel } = {}) {
+  return new Promise(async (resolve, reject) => {
+    const a = audio(); if (!a || !navigator.mediaDevices) return reject(new Error('nomic'));
+    let stream; try { stream = await openMic(clean); } catch (e) { return reject(new Error('nomic')); }
+    const src = a.createMediaStreamSource(stream), proc = a.createScriptProcessor(2048, 1, 1), sink = a.createGain(); sink.gain.value = 0;
+    const chunks = []; let heard = false, quiet = 0, total = 0, done = false; const rate = a.sampleRate;
+    const finish = () => { if (done) return; done = true; try { proc.disconnect(); src.disconnect(); } catch (e) {} closeMic(); resolve({ data: concat(chunks), rate }); };
+    recordVoice.stop = finish;
+    proc.onaudioprocess = e => {
+      const d = new Float32Array(e.inputBuffer.getChannelData(0)); const r = rms(d);
+      chunks.push(d); total += d.length; if (onLevel) onLevel(r, d, rate);
+      if (r > 0.025) { heard = true; quiet = 0; } else if (heard) quiet += d.length;
+      if ((heard && quiet > rate * silenceSec) || total > rate * maxSec) finish();
+    };
+    src.connect(proc); proc.connect(sink).connect(a.destination);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Pitch: YIN on a 2x-downsampled frame. Returns Hz, or 0 when there is no clear pitch.
+// ---------------------------------------------------------------------------
+function yin(frame, rate) {
+  const n = frame.length >> 1, x = new Float32Array(n);
+  for (let i = 0; i < n; i++) x[i] = (frame[2 * i] + frame[2 * i + 1]) * .5;
+  const r = rate / 2; if (rms(x) < 0.012) return 0;
+  const maxTau = Math.min(Math.floor(r / 75), n >> 1), minTau = Math.floor(r / 1100), W = n - maxTau;
+  if (W < 32) return 0;
+  const d = new Float32Array(maxTau + 1);
+  for (let tau = 1; tau <= maxTau; tau++) { let s = 0; for (let i = 0; i < W; i++) { const v = x[i] - x[i + tau]; s += v * v; } d[tau] = s; }
+  let run = 0, best = -1, bestV = 1;
+  for (let tau = 1; tau <= maxTau; tau++) { run += d[tau]; const c = run ? d[tau] * tau / run : 1; d[tau] = c; }
+  for (let tau = Math.max(2, minTau); tau < maxTau; tau++) {
+    if (d[tau] < 0.15) { while (tau + 1 < maxTau && d[tau + 1] < d[tau]) tau++; best = tau; bestV = d[tau]; break; }
+    if (d[tau] < bestV) { bestV = d[tau]; best = tau; }
+  }
+  if (best < 2 || bestV > 0.3) return 0;
+  const a0 = d[best - 1], a1 = d[best], a2 = d[best + 1] !== undefined ? d[best + 1] : a1, den = a0 - 2 * a1 + a2;
+  const t = den ? best + (a0 - a2) / (2 * den) : best;
+  const f = r / t; return f >= 75 && f <= 1100 ? f : 0;
+}
+const midiOf = f => 69 + 12 * Math.log2(f / 440);
+const freqOf = m => 440 * Math.pow(2, (m - 69) / 12);
+const NOTE = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'G♯', 'A', 'B♭', 'B'];
+const COLORS = ['#FF4F8B', '#FF7A59', '#FF9F1C', '#FFC93C', '#B8D93C', '#5CD38B', '#2EC4B6', '#58C7F0', '#4D8DF7', '#7B6CF6', '#9B6BFF', '#E05BD9'];
+const noteName = m => NOTE[((Math.round(m) % 12) + 12) % 12];
+
+// Pitch track of a recording: one value (MIDI number or null) per hop.
+function pitchTrack(data, rate, hop = 1024, size = 2048) {
+  const out = []; for (let i = 0; i + size <= data.length; i += hop) { const f = yin(data.subarray(i, i + size), rate); out.push(f ? midiOf(f) : null); }
+  return { track: out, hopSec: hop / rate };
+}
+function median(a) { const s = a.slice().sort((x, y) => x - y); return s[s.length >> 1]; }
+// Notes from a pitch track: steady stretches become notes snapped to the nearest semitone.
+function segmentNotes(track, hopSec) {
+  const sm = track.map((v, i) => { if (v === null) return null; const w = track.slice(Math.max(0, i - 2), i + 3).filter(x => x !== null); return w.length >= 2 ? median(w) : v; });
+  const notes = []; let seg = null;
+  const close = () => { if (seg && seg.vals.length * hopSec >= 0.1) notes.push({ start: seg.i0 * hopSec, end: (seg.i0 + seg.vals.length) * hopSec, midi: Math.round(median(seg.vals)) }); seg = null; };
+  sm.forEach((v, i) => {
+    if (v === null) { if (seg && seg.gap++ < 2) return; close(); return; }
+    if (seg && Math.abs(v - median(seg.vals)) < 0.8) { seg.vals.push(v); seg.gap = 0; return; }
+    close(); seg = { i0: i, vals: [v], gap: 0 };
+  });
+  close();
+  const merged = [];
+  for (const n of notes) { const p = merged[merged.length - 1]; if (p && p.midi === n.midi && n.start - p.end < 0.07) p.end = n.end; else merged.push({ ...n }); }
+  return merged;
+}
+
+// ---------------------------------------------------------------------------
+// Instruments (synthesized, no samples)
+// ---------------------------------------------------------------------------
+function tone(inst, freq, t, dur, out, vel = .5) {
+  const a = audio(); const g = a.createGain(); g.connect(out || a.destination); const end = t + Math.max(dur, .15);
+  const osc = (type, f, gain, detune = 0) => { const o = a.createOscillator(); o.type = type; o.frequency.value = f; o.detune.value = detune; const og = a.createGain(); og.gain.value = gain; o.connect(og).connect(g); o.start(t); o.stop(end + 1.6); return o; };
+  if (inst === 'piano') { [[1, .6], [2, .25], [3, .12], [4, .06]].forEach(([h, v]) => osc('sine', freq * h, v)); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vel, t + .006); g.gain.exponentialRampToValueAtTime(vel * .35, t + .25); g.gain.exponentialRampToValueAtTime(.001, end + 1.2); }
+  else if (inst === 'flute') { const o = osc('sine', freq, .8); osc('triangle', freq * 2, .08); const lfo = a.createOscillator(), lg = a.createGain(); lfo.frequency.value = 5.2; lg.gain.value = freq * .006; lfo.connect(lg).connect(o.frequency); lfo.start(t); lfo.stop(end + 1); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vel * .8, t + .07); g.gain.setValueAtTime(vel * .7, end); g.gain.linearRampToValueAtTime(0, end + .12); }
+  else if (inst === 'robot') { const lp = a.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1800; lp.connect(g); const o = a.createOscillator(); o.type = 'square'; o.frequency.value = freq; const og = a.createGain(); og.gain.value = .25; o.connect(og).connect(lp); o.start(t); o.stop(end + .2); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vel, t + .01); g.gain.setValueAtTime(vel, end); g.gain.linearRampToValueAtTime(0, end + .05); }
+  else if (inst === 'bells') { [[1, .5], [2.76, .25], [5.4, .12], [8.93, .05]].forEach(([h, v]) => osc('sine', freq * h, v)); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vel, t + .004); g.gain.exponentialRampToValueAtTime(.001, t + 2.2); }
+  else { const lp = a.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(5000, t); lp.frequency.exponentialRampToValueAtTime(700, t + .6); lp.connect(g); const o = a.createOscillator(); o.type = 'sawtooth'; o.frequency.value = freq; const og = a.createGain(); og.gain.value = .35; o.connect(og).connect(lp); o.start(t); o.stop(t + 2); g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vel, t + .004); g.gain.exponentialRampToValueAtTime(.001, t + 1.6); }
+}
+function click(t, accent) { const a = audio(); const o = a.createOscillator(), g = a.createGain(); o.frequency.value = accent ? 1500 : 1000; g.gain.setValueAtTime(accent ? .35 : .22, t); g.gain.exponentialRampToValueAtTime(.001, t + .05); o.connect(g).connect(a.destination); o.start(t); o.stop(t + .06); }
+
+// ---------------------------------------------------------------------------
+// Offline effects on a recording (Float32Array at rate)
+// ---------------------------------------------------------------------------
+// Pitch shift that keeps the length: the output reads the recording through a delay that slides at (1 - ratio)
+// samples per sample, which plays it back exactly ratio times faster (higher) for the moment. Two read taps half a
+// window apart take turns, crossfading, so the delay can wrap around without a click. The same method runs live.
+function pitchShift(x, rate, ratioAt) {
+  const W = Math.round(rate * .045), out = new Float32Array(x.length); let ph = 0, r = 1;
+  const at = s => { const i = Math.floor(s), f = s - i; return i >= 0 && i + 1 < x.length ? x[i] * (1 - f) + x[i + 1] * f : 0; };
+  for (let n = 0; n < x.length; n++) {
+    if ((n & 63) === 0) r = typeof ratioAt === 'function' ? ratioAt(n / rate) : ratioAt;
+    ph = ((ph + (1 - r)) % W + W) % W;
+    const d1 = ph, d2 = (ph + W / 2) % W, g1 = Math.sin(Math.PI * d1 / W), g2 = Math.sin(Math.PI * d2 / W);
+    out[n] = at(n - d1 - 1) * g1 * g1 + at(n - d2 - 1) * g2 * g2;
+  }
+  return out;
+}
+function lowpass(x, rate, fc) { const a = 1 - Math.exp(-2 * Math.PI * fc / rate), y = new Float32Array(x.length); let s = 0; for (let i = 0; i < x.length; i++) { s += a * (x[i] - s); y[i] = s; } return y; }
+function highpass(x, rate, fc) { const l = lowpass(x, rate, fc), y = new Float32Array(x.length); for (let i = 0; i < x.length; i++) y[i] = x[i] - l[i]; return y; }
+function mix(parts) { const n = Math.max(...parts.map(p => p[0].length)), y = new Float32Array(n); for (const [d, g, off = 0] of parts) for (let i = 0; i < d.length && i + off < n; i++) y[i + off] += d[i] * g; return y; }
+const C_MAJOR = [0, 2, 4, 5, 7, 9, 11];
+function nearestScale(m, scale = C_MAJOR) { const base = Math.floor(m / 12) * 12; let best = null, bd = 99; for (const o of [-12, 0, 12]) for (const s of scale) { const t = base + o + s, dd = Math.abs(t - m); if (dd < bd) { bd = dd; best = t; } } return best; }
+// Auto-tune: every grain is shifted so its pitch lands on the nearest note of C major.
+function autotune(x, rate, strength = 1) {
+  const { track, hopSec } = pitchTrack(x, rate, 512, 2048);
+  const ratios = track.map(m => m === null ? 1 : Math.pow(2, (strength * (nearestScale(m) - m)) / 12));
+  const sm = []; let prev = 1; for (const r of ratios) { prev = prev + (r - prev) * .6; sm.push(prev); }
+  return pitchShift(x, rate, t => { const i = Math.min(sm.length - 1, Math.max(0, Math.round(t / hopSec - 2))); return sm.length ? sm[i] : 1; });
+}
+const FX = {
+  robot:      { name: 'Robot',      e: '🤖', live: true,  run: (x, r) => { const y = new Float32Array(x.length); for (let i = 0; i < x.length; i++) y[i] = x[i] * Math.sin(2 * Math.PI * 60 * i / r) * 1.4 + x[i] * .15; return y; } },
+  monster:    { name: 'Monster',    e: '👹', live: true,  run: (x, r) => lowpass(pitchShift(x, r, .66), r, 2500) },
+  chipmunk:   { name: 'Chipmunk',   e: '🐿️', live: true,  run: (x, r) => pitchShift(x, r, 1.65) },
+  echo:       { name: 'Echo',       e: '🏔️', live: true,  run: (x, r) => { const d = Math.floor(r * .3), y = new Float32Array(x.length + r * 2); for (let i = 0; i < y.length; i++) y[i] = (i < x.length ? x[i] : 0) + (i >= d ? y[i - d] * .5 : 0); return y; } },
+  choir:      { name: 'Choir',      e: '👯', live: true,  run: (x, r) => mix([[x, .6], [pitchShift(x, r, 1.26), .42, Math.floor(r * .012)], [pitchShift(x, r, 1.5), .38, Math.floor(r * .02)], [pitchShift(x, r, .5), .32, Math.floor(r * .008)]]) },
+  alien:      { name: 'Alien',      e: '👽', live: true,  run: (x, r) => pitchShift(x, r, t => Math.pow(2, (3 + 2.5 * Math.sin(2 * Math.PI * 6 * t)) / 12)) },
+  autotune:   { name: 'Auto-tune',  e: '🎯', live: false, run: (x, r) => autotune(x, r, 1) },
+  backwards:  { name: 'Backwards',  e: '⏪', live: false, run: x => x.slice().reverse() },
+  underwater: { name: 'Underwater', e: '🌊', live: false, run: (x, r) => lowpass(pitchShift(x, r, t => Math.pow(2, Math.sin(2 * Math.PI * 3 * t) * .6 / 12)), r, 600) },
+  radio:      { name: 'Radio',      e: '📻', live: false, run: (x, r) => { const b = lowpass(highpass(x, r, 500), r, 3000), y = new Float32Array(b.length); for (let i = 0; i < b.length; i++) y[i] = Math.tanh(b[i] * 4) * .7; return y; } },
+};
+function applyFx(name, x, rate) { if (!name || name === 'none' || !FX[name]) return x; return normalize(FX[name].run(x, rate)); }
+
+// Live effects: one ScriptProcessor running a two-tap delay-line pitch shifter, ring modulator or echo per block.
+function liveProcessor(a, getFx) {
+  const size = 2048, ring = new Float32Array(16384), mask = 16383, W = 2048; let w = 0, phase = [0, 0, 0], t = 0;
+  const echo = new Float32Array(Math.floor(a.sampleRate * .3)); let ep = 0;
+  const p = a.createScriptProcessor(size, 1, 1);
+  const tap = (ratio, k) => { // delay sweeps across a W-sample window; two taps half a window apart crossfade
+    phase[k] = (phase[k] + (1 - ratio) + W) % W;
+    const d1 = phase[k], d2 = (phase[k] + W / 2) % W, g1 = Math.sin(Math.PI * d1 / W), g2 = Math.sin(Math.PI * d2 / W);
+    const r1 = ring[(w - Math.floor(d1) - 2 + 16384 * 4) & mask], r2 = ring[(w - Math.floor(d2) - 2 + 16384 * 4) & mask];
+    return r1 * g1 * g1 + r2 * g2 * g2;
+  };
+  p.onaudioprocess = e => {
+    const x = e.inputBuffer.getChannelData(0), y = e.outputBuffer.getChannelData(0), fx = getFx(), sr = a.sampleRate;
+    for (let i = 0; i < x.length; i++, t++) {
+      ring[w] = x[i]; let v;
+      if (fx === 'robot') v = x[i] * Math.sin(2 * Math.PI * 60 * t / sr) * 1.4;
+      else if (fx === 'monster') v = tap(.66, 0);
+      else if (fx === 'chipmunk') v = tap(1.65, 0);
+      else if (fx === 'alien') v = tap(Math.pow(2, (3 + 2.5 * Math.sin(2 * Math.PI * 6 * t / sr)) / 12), 0);
+      else if (fx === 'choir') v = x[i] * .5 + tap(1.26, 0) * .4 + tap(1.5, 1) * .35 + tap(.5, 2) * .3;
+      else if (fx === 'echo') { v = x[i] + echo[ep] * .5; echo[ep] = v; ep = (ep + 1) % echo.length; }
+      else v = x[i];
+      y[i] = Math.max(-1, Math.min(1, v));
+      w = (w + 1) & mask;
+    }
+  };
+  return p;
+}
+
+// ---------------------------------------------------------------------------
+// Screens
+// ---------------------------------------------------------------------------
+function show(id) { document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === id)); }
+document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => { audio(); show(b.dataset.go); if (b.dataset.go === 'sing') drawLadder(); if (b.dataset.go === 'loop') enterLooper(); });
+document.querySelectorAll('[data-back]').forEach(b => b.onclick = () => { stopEverything(); show('home'); });
+function stopEverything() { try { if (recordVoice.stop) recordVoice.stop(); } catch (e) {} stopLive(); stopLoop(); closeMic(); try { speechSynthesis.cancel(); } catch (e) {} }
+
+// ---------------------------------------------------------------------------
+// Sing a Melody
+// ---------------------------------------------------------------------------
+const LADDER_LO = 52, LADDER_HI = 84; // E3..C6, covers a child's and a grown-up's singing
+let inst = 'piano', sung = null, sungNotes = [], copyTune = null, copyMode = false, singBusy = false;
+let copyLevel = 1; try { copyLevel = Math.max(1, +(localStorage.getItem('voiceband-copy') || 1)); } catch (e) {}
+function ladderY(m) { const h = $('ladder').clientHeight; return h - (m - LADDER_LO) / (LADDER_HI - LADDER_LO) * h; }
+function drawLadder() {
+  const L = $('ladder'); L.querySelectorAll('.rung').forEach(r => r.remove());
+  for (let m = LADDER_LO; m <= LADDER_HI; m++) if (C_MAJOR.includes(m % 12)) { const r = document.createElement('div'); r.className = 'rung'; r.style.top = ladderY(m) + 'px'; r.textContent = noteName(m) + (m % 12 === 0 ? Math.floor(m / 12) - 1 : ''); r.style.color = COLORS[m % 12]; L.appendChild(r); }
+}
+function setBall(m) { const b = $('ball'); if (m === null) { b.style.display = 'none'; return; } b.style.display = 'block'; const mm = Math.max(LADDER_LO, Math.min(LADDER_HI, m)); b.style.top = ladderY(mm) + 'px'; b.style.background = COLORS[((Math.round(m) % 12) + 12) % 12]; }
+function drawRoll(notes, target) {
+  const c = $('roll'), dpr = devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight; c.width = W * dpr; c.height = H * dpr;
+  const g = c.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0, 0, W, H);
+  const all = [...(notes || []), ...(target || [])];
+  if (!all.length) { g.fillStyle = '#b9adcc'; g.font = '800 26px Segoe UI'; g.textAlign = 'center'; g.fillText('Your notes will show up here', W / 2, H / 2); return; }
+  const lo = Math.min(...all.map(n => n.midi)) - 2, hi = Math.max(...all.map(n => n.midi)) + 2, rowH = (H - 20) / (hi - lo + 1);
+  const end = Math.max(...all.map(n => n.end)), x = t => 14 + t / end * (W - 28);
+  for (let m = lo; m <= hi; m++) { g.fillStyle = m % 12 === 0 ? '#f1ebf8' : (m % 2 ? '#fff' : '#fbf8fe'); g.fillRect(0, 10 + (hi - m) * rowH, W, rowH); }
+  const block = (n, ghost) => { const y = 10 + (hi - n.midi) * rowH, X = x(n.start), w = Math.max(18, x(n.end) - X - 4);
+    g.fillStyle = ghost ? 'rgba(43,33,64,.12)' : COLORS[((n.midi % 12) + 12) % 12]; g.strokeStyle = '#2B2140'; g.lineWidth = ghost ? 2 : 3;
+    g.beginPath(); g.roundRect ? g.roundRect(X, y + 2, w, rowH - 4, 8) : g.rect(X, y + 2, w, rowH - 4); g.fill(); g.stroke();
+    if (!ghost && rowH > 14) { g.fillStyle = '#2B2140'; g.font = `900 ${Math.min(24, rowH * .7)}px Segoe UI`; g.textAlign = 'left'; g.fillText(noteName(n.midi), X + 6, y + rowH * .72); } };
+  (target || []).forEach(n => block(n, true)); (notes || []).forEach(n => block(n, false));
+}
+// Plays a list of notes; returns the time it ends. Note timing is tidied to even steps so it sounds like music.
+function playNotes(notes, instrument, harmony) {
+  const a = audio(); let t = a.currentTime + .08; const beat = .38;
+  for (const n of notes) {
+    const len = Math.max(1, Math.min(4, Math.round((n.end - n.start) / beat))) * beat;
+    tone(instrument, freqOf(n.midi), t, len * .9, null, .45);
+    if (harmony) tone(instrument, freqOf(nearestScale(n.midi + 3.5)), t, len * .9, null, .25);
+    t += len;
+  }
+  return t;
+}
+async function singFree() {
+  if (singBusy) { if (recordVoice.stop) recordVoice.stop(); return; }
+  singBusy = true; $('singRec').classList.add('rec'); $('singRec').textContent = '⏹ Stop'; $('singMsg').textContent = '🎤 Sing! I am listening…';
+  try {
+    const rec = await recordVoice({ clean: true, maxSec: 15, silenceSec: 1.4, onLevel: (r, d, rate) => setBall(r > .02 ? (f => f ? midiOf(f) : null)(yin(d, rate)) : null) });
+    setBall(null); const data = trim(rec.data, rec.rate);
+    if (!data) { $('singMsg').textContent = "I couldn't hear you. Try singing a little louder."; return; }
+    sung = { data, rate: rec.rate }; const { track, hopSec } = pitchTrack(data, rec.rate); sungNotes = segmentNotes(track, hopSec);
+    if (!sungNotes.length) { $('singMsg').textContent = "I heard you, but not a tune. Try humming 'la la la'."; drawRoll([]); return; }
+    $('singMsg').textContent = `You sang ${sungNotes.length} note${sungNotes.length > 1 ? 's' : ''}: ${sungNotes.map(n => noteName(n.midi)).join(' ')}`;
+    drawRoll(sungNotes); playNotes(sungNotes, inst);
+  } catch (e) { $('singMsg').textContent = 'No microphone found.'; }
+  finally { singBusy = false; $('singRec').classList.remove('rec'); $('singRec').textContent = copyMode ? '🎤 My turn!' : '🎤 Sing!'; setBall(null); }
+}
+// Copy me: a short tune from the pentatonic scale, one note longer each level.
+function newCopyTune() {
+  const pent = [60, 62, 64, 67, 69, 72], len = Math.min(8, copyLevel + 2), span = copyLevel < 3 ? 4 : 6; const tune = []; let i = Math.floor(Math.random() * 3);
+  for (let k = 0; k < len; k++) { tune.push(pent[i]); i = Math.max(0, Math.min(span - 1, i + [-1, 1, -2, 2, 0][Math.floor(Math.random() * (copyLevel < 3 ? 2 : 5))])); }
+  copyTune = tune.map((m, k) => ({ midi: m, start: k * .5, end: k * .5 + .45 }));
+  drawRoll([], copyTune); $('copyStars').textContent = `Level ${copyLevel} · ${len} notes`;
+}
+// Compares by the shape of the tune (each step up or down), so it works in her own key.
+function scoreCopy(target, sungN) {
+  if (!sungN.length) return 0;
+  const shift = Math.round(sungN[0].midi - target[0].midi), s = sungN.map(n => n.midi - shift); let ok = 0, j = 0;
+  for (const t of target) { while (j < s.length && Math.abs(s[j] - t.midi) > 1.5 && j < target.length + 2) j++; if (j < s.length && Math.abs(s[j] - t.midi) <= 1.5) { ok++; j++; } }
+  return ok;
+}
+async function copyTurn() {
+  if (!copyTune) newCopyTune();
+  if (singBusy) { if (recordVoice.stop) recordVoice.stop(); return; }
+  singBusy = true; $('singRec').classList.add('rec'); $('singRec').textContent = '⏹ Done'; $('singMsg').textContent = '🎤 Your turn! Sing it back.';
+  try {
+    const rec = await recordVoice({ clean: true, maxSec: 12, silenceSec: 1.2, onLevel: (r, d, rate) => setBall(r > .02 ? (f => f ? midiOf(f) : null)(yin(d, rate)) : null) });
+    setBall(null); const data = trim(rec.data, rec.rate);
+    const notes = data ? (p => segmentNotes(p.track, p.hopSec))(pitchTrack(data, rec.rate)) : [];
+    const ok = scoreCopy(copyTune, notes), need = copyTune.length <= 3 ? copyTune.length : copyTune.length - 1;
+    const shift = notes.length ? Math.round(notes[0].midi - copyTune[0].midi) : 0;
+    drawRoll(notes.map(n => ({ ...n, midi: n.midi - shift, start: n.start * (copyTune[copyTune.length - 1].end / Math.max(.5, notes[notes.length - 1].end)), end: n.end * (copyTune[copyTune.length - 1].end / Math.max(.5, notes[notes.length - 1].end)) })), copyTune);
+    if (ok >= need) { copyLevel++; try { localStorage.setItem('voiceband-copy', copyLevel); } catch (e) {} $('singMsg').textContent = `⭐ ${ok} of ${copyTune.length} notes! Next tune is longer.`; say('Wonderful! You matched it.'); copyTune = null; setTimeout(() => { newCopyTune(); }, 2200); }
+    else { $('singMsg').textContent = notes.length ? `${ok} of ${copyTune.length} notes matched. Listen again and try once more.` : "I couldn't hear a tune. Try 'la la la'."; say(notes.length ? 'Close! Listen again and try once more.' : 'Try singing la la la.'); }
+  } catch (e) { $('singMsg').textContent = 'No microphone found.'; }
+  finally { singBusy = false; $('singRec').classList.remove('rec'); $('singRec').textContent = '🎤 My turn!'; }
+}
+$('singRec').onclick = () => (copyMode ? copyTurn() : singFree());
+$('copyPlay').onclick = () => { if (!copyTune) newCopyTune(); playNotes(copyTune, 'flute'); };
+$('tabFree').onclick = () => { copyMode = false; $('tabFree').classList.add('on'); $('tabCopy').classList.remove('on'); $('copyPlay').style.display = 'none'; $('copyStars').style.display = 'none'; $('singRow3').style.display = ''; $('singRec').textContent = '🎤 Sing!'; $('singMsg').textContent = 'Tap the button and sing or hum a little tune.'; drawRoll(sungNotes); };
+$('tabCopy').onclick = () => { copyMode = true; $('tabCopy').classList.add('on'); $('tabFree').classList.remove('on'); $('copyPlay').style.display = ''; $('copyStars').style.display = ''; $('singRow3').style.display = 'none'; $('singRec').textContent = '🎤 My turn!'; newCopyTune(); $('singMsg').textContent = 'Listen to the tune, then sing it back.'; setTimeout(() => playNotes(copyTune, 'flute'), 300); };
+document.querySelectorAll('.inst[data-inst]').forEach(b => b.onclick = () => { inst = b.dataset.inst; document.querySelectorAll('.inst[data-inst]').forEach(x => x.classList.toggle('on', x === b)); if (copyMode && copyTune) playNotes(copyTune, inst); else if (sungNotes.length) playNotes(sungNotes, inst); else tone(inst, 523.25, audio().currentTime + .02, .5); });
+$('playNotes').onclick = () => sungNotes.length && playNotes(sungNotes, inst);
+$('playHarm').onclick = () => sungNotes.length && playNotes(sungNotes, inst, true);
+$('playMe').onclick = () => sung && playBuffer(sung.data, sung.rate);
+$('playTuned').onclick = async () => { if (!sung) return; $('singMsg').textContent = 'Tuning your voice…'; await sleep(30); if (!sung.tuned) sung.tuned = normalize(autotune(sung.data, sung.rate)); playBuffer(sung.tuned, sung.rate); $('singMsg').textContent = 'Your voice, snapped to the notes.'; };
+addEventListener('resize', () => { if ($('sing').classList.contains('on')) { drawLadder(); drawRoll(copyMode ? [] : sungNotes, copyMode ? copyTune : null); } });
+
+// ---------------------------------------------------------------------------
+// Voice Effects
+// ---------------------------------------------------------------------------
+let fxName = 'robot', fxMode = 'rec', lastRec = null, fxBusy = false, liveNode = null, liveSrc = null, liveOut = null;
+function buildFxGrid() {
+  const g = $('fxGrid'); g.innerHTML = '';
+  for (const [k, f] of Object.entries(FX)) { const b = document.createElement('button'); b.className = 'fx' + (k === fxName ? ' on' : '') + (fxMode === 'live' && !f.live ? ' dim' : ''); b.innerHTML = `<span class="e">${f.e}</span>${f.name}`;
+    b.onclick = () => { if (fxMode === 'live' && !f.live) return; fxName = k; buildFxGrid(); if (fxMode === 'rec' && lastRec && !fxBusy) playFx(); }; g.appendChild(b); }
+}
+async function playFx() { if (!lastRec) return; $('fxMsg').textContent = `${FX[fxName].e} ${FX[fxName].name}!`; await sleep(20); const out = applyFx(fxName, lastRec.data, lastRec.rate); playBuffer(out, lastRec.rate); }
+$('fxRec').onclick = async () => {
+  if (fxMode === 'live') return liveNode ? stopLive() : startLive();
+  if (fxBusy) { if (recordVoice.stop) recordVoice.stop(); return; }
+  fxBusy = true; $('fxRec').classList.add('rec'); $('fxRec').textContent = '⏹ Stop'; $('fxMsg').textContent = '🔴 Talk, sing or make a silly sound!';
+  try {
+    const rec = await recordVoice({ clean: false, maxSec: 8, silenceSec: 1, onLevel: r => $('meter').firstChild.style.width = Math.min(100, r * 400) + '%' });
+    const data = trim(rec.data, rec.rate); $('meter').firstChild.style.width = 0;
+    if (!data) { $('fxMsg').textContent = "I couldn't hear you. Try again a little louder."; return; }
+    lastRec = { data, rate: rec.rate }; await playFx(); $('fxMsg').textContent += ' Tap another effect to hear the same recording.';
+  } catch (e) { $('fxMsg').textContent = 'No microphone found.'; }
+  finally { fxBusy = false; $('fxRec').classList.remove('rec'); $('fxRec').textContent = '⏺ Record'; }
+};
+$('fxPlay').onclick = () => { if (fxMode === 'rec') playFx(); };
+async function startLive() {
+  const a = audio(); try { await openMic(false); } catch (e) { $('fxMsg').textContent = 'No microphone found.'; return; }
+  liveSrc = a.createMediaStreamSource(micStream); liveNode = liveProcessor(a, () => fxName);
+  const comp = a.createDynamicsCompressor(); liveOut = a.createGain(); liveOut.gain.value = .8;
+  liveSrc.connect(liveNode); liveNode.connect(comp).connect(liveOut).connect(a.destination);
+  $('fxRec').classList.add('rec'); $('fxRec').textContent = '⏹ Stop live'; $('fxMsg').textContent = '🎧 Live! Change effects while you talk.';
+}
+function stopLive() { try { if (liveSrc) liveSrc.disconnect(); if (liveNode) liveNode.disconnect(); if (liveOut) liveOut.disconnect(); } catch (e) {} liveNode = liveSrc = liveOut = null; if (fxMode === 'live') { closeMic(); $('fxRec').classList.remove('rec'); $('fxRec').textContent = '🎧 Start live'; } }
+$('modeRec').onclick = () => { stopLive(); fxMode = 'rec'; $('modeRec').classList.add('on'); $('modeLive').classList.remove('on'); $('liveWarn').style.display = 'none'; $('fxPlay').style.display = ''; $('fxRec').textContent = '⏺ Record'; $('fxMsg').textContent = 'Pick an effect, then tap Record and say something.'; buildFxGrid(); };
+$('modeLive').onclick = () => { fxMode = 'live'; $('modeLive').classList.add('on'); $('modeRec').classList.remove('on'); $('liveWarn').style.display = ''; $('fxPlay').style.display = 'none'; $('fxRec').textContent = '🎧 Start live'; if (!FX[fxName].live) fxName = 'robot'; $('fxMsg').textContent = 'Put on headphones, then tap Start live.'; buildFxGrid(); };
+buildFxGrid();
+
+// ---------------------------------------------------------------------------
+// Looper Band
+// ---------------------------------------------------------------------------
+const TRACK_ICONS = ['🥁', '🎵', '🎤', '✨'], TRACK_FX = ['none', 'robot', 'chipmunk', 'monster', 'echo', 'choir'];
+const FX_LABEL = { none: '🙂 Plain', robot: '🤖 Robot', chipmunk: '🐿️ Chipmunk', monster: '👹 Monster', echo: '🏔️ Echo', choir: '👯 Choir' };
+let bpm = 100, loopLen = 8 * 60 / 100, playing = false, t0 = 0, clickOn = true, schedTimer = null, nextBeat = 0, raf = 0, armed = -1;
+const tracks = TRACK_ICONS.map(() => ({ raw: null, rate: 0, fx: 'none', muted: false, buf: null, src: null, gain: null }));
+const DB = (() => {
+  let dbp = null;
+  const open = () => dbp || (dbp = new Promise((res, rej) => { let r; try { r = indexedDB.open('voiceband', 1); } catch (e) { return rej(e); } r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); }));
+  const tx = (mode, fn) => open().then(db => new Promise((res, rej) => { const t = db.transaction('kv', mode), s = t.objectStore('kv'), q = fn(s); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); }));
+  return { get: k => tx('readonly', s => s.get(k)).catch(() => null), put: (k, v) => tx('readwrite', s => s.put(v, k)).catch(() => {}), del: k => tx('readwrite', s => s.delete(k)).catch(() => {}) };
+})();
+function saveTrack(i) { const t = tracks[i]; DB.put('track' + i, t.raw ? { rate: t.rate, raw: t.raw, fx: t.fx, muted: t.muted } : null); }
+async function enterLooper() {
+  buildTracks();
+  const meta = await DB.get('meta'); if (meta && meta.bpm) setBpm(meta.bpm, true);
+  for (let i = 0; i < tracks.length; i++) { const v = await DB.get('track' + i); if (v && v.raw) { Object.assign(tracks[i], { raw: v.raw, rate: v.rate, fx: v.fx || 'none', muted: !!v.muted }); renderTrackBuffer(i); } }
+  buildTracks();
+}
+function buildTracks() {
+  const box = $('tracks'); box.innerHTML = '';
+  tracks.forEach((t, i) => {
+    const row = document.createElement('div'); row.className = 'track' + (armed === i ? ' wait' : ''); row.id = 'trk' + i;
+    row.innerHTML = `<div class="ti">${TRACK_ICONS[i]}</div><canvas></canvas><button class="recb">⏺ Record</button><button class="fxb">${FX_LABEL[t.fx]}</button><button class="mute${t.muted ? ' on' : ''}">${t.muted ? '🔇 Off' : '🔊 On'}</button><button class="clr">🗑️</button>`;
+    row.querySelector('.recb').onclick = () => recordTrack(i);
+    row.querySelector('.fxb').onclick = () => { t.fx = TRACK_FX[(TRACK_FX.indexOf(t.fx) + 1) % TRACK_FX.length]; if (t.raw) { renderTrackBuffer(i); if (playing) startTrack(i); } saveTrack(i); buildTracks(); };
+    row.querySelector('.mute').onclick = () => { t.muted = !t.muted; if (t.gain) t.gain.gain.value = t.muted ? 0 : 1; saveTrack(i); buildTracks(); };
+    row.querySelector('.clr').onclick = () => { stopTrack(i); Object.assign(t, { raw: null, buf: null }); saveTrack(i); buildTracks(); };
+    box.appendChild(row); drawWave(row.querySelector('canvas'), t.buf ? t.buf.getChannelData(0) : null, COLORS[i * 3]);
+  });
+}
+function drawWave(c, d, col) {
+  const dpr = devicePixelRatio || 1, W = c.clientWidth || 300, H = c.clientHeight || 64; c.width = W * dpr; c.height = H * dpr; const g = c.getContext('2d'); g.scale(dpr, dpr);
+  g.fillStyle = '#f6f1fb'; g.fillRect(0, 0, W, H);
+  if (!d) { g.fillStyle = '#b9adcc'; g.font = '800 18px Segoe UI'; g.fillText('empty', 10, H / 2 + 6); return; }
+  g.fillStyle = col; const step = Math.max(1, Math.floor(d.length / W));
+  for (let x = 0; x < W; x++) { let p = 0; for (let k = x * step; k < (x + 1) * step && k < d.length; k++) p = Math.max(p, Math.abs(d[k])); const h = Math.max(1, p * H * .9); g.fillRect(x, (H - h) / 2, 1, h); }
+}
+// The processed loop: exactly one loop long, with a tiny fade at the seam so it does not click.
+function renderTrackBuffer(i) {
+  const t = tracks[i], a = audio(); if (!t.raw) return;
+  let d = applyFx(t.fx, t.raw, t.rate); const n = Math.round(loopLen * t.rate), out = new Float32Array(n);
+  for (let k = 0; k < Math.min(n, d.length); k++) out[k] = d[k];
+  if (t.fx === 'echo' && d.length > n) for (let k = n; k < d.length; k++) out[k % n] += d[k] * .7;   // echo tail wraps into the loop
+  const f = Math.floor(t.rate * .006); for (let k = 0; k < f; k++) { out[k] *= k / f; out[n - 1 - k] *= k / f; }
+  t.buf = a.createBuffer(1, n, t.rate); t.buf.copyToChannel(out, 0);
+}
+function startTrack(i, when) {
+  const a = audio(), t = tracks[i]; stopTrack(i); if (!t.buf) return;
+  const at = Math.max(when || a.currentTime + .03, a.currentTime + .01), off = ((at - t0) % loopLen + loopLen) % loopLen;
+  t.gain = a.createGain(); t.gain.gain.value = t.muted ? 0 : 1; t.gain.connect(a.destination);
+  t.src = a.createBufferSource(); t.src.buffer = t.buf; t.src.loop = true; t.src.connect(t.gain); t.src.start(at, off);
+}
+function stopTrack(i) { const t = tracks[i]; try { if (t.src) t.src.stop(); } catch (e) {} t.src = null; }
+function scheduler() {
+  const a = audio(); const beat = 60 / bpm;
+  while (nextBeat < a.currentTime + .2) { const n = Math.round((nextBeat - t0) / beat); if (clickOn || nextBeat < t0) click(nextBeat, ((n % 4) + 4) % 4 === 0); nextBeat += beat; }
+}
+function startLoop(countIn) {
+  const a = audio(); if (playing) return; playing = true;
+  t0 = a.currentTime + .15 + (countIn ? 4 * 60 / bpm : 0); nextBeat = t0 - (countIn ? 4 * 60 / bpm : 0);
+  tracks.forEach((t, i) => t.buf && startTrack(i, t0));
+  schedTimer = setInterval(scheduler, 40); scheduler(); $('loopPlay').textContent = '⏹ Stop';
+  const tick = () => { if (!playing) return; const p = ((a.currentTime - t0) % loopLen + loopLen) % loopLen / loopLen; $('playhead').firstChild.style.width = (a.currentTime < t0 ? 0 : p * 100) + '%'; raf = requestAnimationFrame(tick); }; tick();
+}
+function stopLoop() { playing = false; clearInterval(schedTimer); cancelAnimationFrame(raf); tracks.forEach((t, i) => stopTrack(i)); $('loopPlay').textContent = '▶ Play'; $('playhead').firstChild.style.width = 0; armed = -1; if ($('loop').classList.contains('on')) buildTracks(); }
+function setBpm(v, quiet) {
+  bpm = v; loopLen = 8 * 60 / bpm; document.querySelectorAll('[data-bpm]').forEach(b => b.classList.toggle('on', +b.dataset.bpm === bpm));
+  if (!quiet) { const was = playing; stopLoop(); tracks.forEach((t, i) => t.raw && renderTrackBuffer(i)); DB.put('meta', { bpm }); if (was) startLoop(false); }
+}
+document.querySelectorAll('[data-bpm]').forEach(b => b.onclick = () => { if (armed >= 0) return; setBpm(+b.dataset.bpm); });
+$('loopPlay').onclick = () => { audio(); if (playing) stopLoop(); else startLoop(false); };
+$('clickOn').onclick = () => { clickOn = !clickOn; $('clickOn').classList.toggle('on', clickOn); $('clickOn').textContent = clickOn ? '🕺 Beat on' : '🕺 Beat off'; };
+// Records exactly one loop, starting on the next loop start (after a count-in when the band is stopped).
+async function recordTrack(i) {
+  if (armed >= 0) return; const a = audio();
+  try { await openMic(false); } catch (e) { $('loopMsg').textContent = 'No microphone found.'; return; }
+  armed = i; buildTracks();
+  let recStart;
+  if (!playing) { startLoop(true); recStart = t0; }
+  else { const k = Math.ceil((a.currentTime - t0) / loopLen + .05); recStart = t0 + k * loopLen; }
+  const lat = (a.outputLatency || 0) + (a.baseLatency || 0) + .03;   // what she hears is late by the output delay
+  const src = a.createMediaStreamSource(micStream), proc = a.createScriptProcessor(2048, 1, 1), sink = a.createGain(); sink.gain.value = 0;
+  const chunks = []; let firstTime = null;
+  proc.onaudioprocess = e => { if (firstTime === null) firstTime = e.playbackTime; chunks.push(new Float32Array(e.inputBuffer.getChannelData(0))); };
+  src.connect(proc); proc.connect(sink).connect(a.destination);
+  const beat = 60 / bpm;
+  const countDown = async () => { for (let b = 4; b >= 1; b--) { const at = recStart - b * beat; while (a.currentTime < at) await sleep(10); if (armed !== i) return; $('countIn').classList.add('on'); $('countNum').textContent = b; } while (a.currentTime < recStart) await sleep(10); $('countIn').classList.remove('on'); };
+  $('loopMsg').textContent = `Get ready… record ${TRACK_ICONS[i]} when the count ends.`;
+  await countDown(); if (armed !== i) { try { proc.disconnect(); src.disconnect(); } catch (e) {} closeMic(); return; }
+  const row = $('trk' + i); if (row) { row.classList.remove('wait'); row.classList.add('rec'); }
+  $('loopMsg').textContent = `🔴 Recording ${TRACK_ICONS[i]}! Go!`;
+  while (a.currentTime < recStart + loopLen + lat + .25) { await sleep(25); if (armed !== i) break; }
+  try { proc.disconnect(); src.disconnect(); } catch (e) {} closeMic();
+  if (armed !== i) return;
+  const all = concat(chunks), rate = a.sampleRate, from = Math.max(0, Math.round((recStart + lat - firstTime) * rate)), n = Math.round(loopLen * rate);
+  const raw = all.slice(from, from + n);
+  if (rms(raw) < .004) { $('loopMsg').textContent = "That part was very quiet. Try again closer to the tablet."; armed = -1; buildTracks(); return; }
+  const t = tracks[i]; t.raw = normalize(raw, .8); t.rate = rate; renderTrackBuffer(i); saveTrack(i);
+  armed = -1; startTrack(i); buildTracks();
+  $('loopMsg').textContent = `${TRACK_ICONS[i]} is in the band! Record another part, or change its effect.`;
+}
+
+// Testing hook (used by the package's headless checks; harmless on the tablet).
+window.VB = { yin, pitchTrack, segmentNotes, applyFx, FX, autotune, pitchShift, scoreCopy, nearestScale, midiOf, tracks, state: () => ({ playing, armed, loopLen, bpm }) };
+</script>
+</body>
+</html>

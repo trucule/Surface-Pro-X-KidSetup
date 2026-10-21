@@ -144,7 +144,8 @@ const VOICE = (() => {
   // Reached only while the PC is on and sharing; otherwise the Azure or OpenAI key (if any) is used, and
   // after that the Windows voices. Health is rechecked every 20 s so a story recovers when the PC comes back.
   const vs = { ok: null, at: 0, ids: null, active: 0, queue: [] };
-  const vsHeaders = t => (t.pin ? { 'x-omnivoice-pin': t.pin } : {});
+  // The secret is the LAN-share PIN or, with OMNIVOICE_API_KEY set on the PC, that key; send it both ways.
+  const vsHeaders = t => (t.pin ? { 'x-omnivoice-pin': t.pin, 'Authorization': 'Bearer ' + t.pin } : {});
   async function vsAlive(t) {
     if (vs.ok !== null && Date.now() - vs.at < 20000) return vs.ok;
     vs.at = Date.now();
