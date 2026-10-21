@@ -1,5 +1,15 @@
 # Changes
 
+## 2026-10-21
+- Home pill: every tap counts. Touch and pen are read as pointer input in the pill itself; before, Windows turned a
+  tap into mouse events and a mouse-leave arriving mid-tap cancelled the press, so taps were lost at random.
+- Home pill: shows over every app. It is pushed back on top on each check (an app that puts itself on top used to
+  bury it until it closed) and placed on the screen of the app in front each time, so rotation and resolution
+  changes no longer leave it off the edge.
+- Home pill: one tap always leaves the app. Apps that ignore the close request are ended after 1.5 seconds, Store
+  apps included (their process sits behind the ApplicationFrameHost window, and the sweep only ended Edge and
+  desktop apps). The pill stays hidden for 2 seconds after a tap so a second tap cannot land on the closing app.
+
 ## 2026-10-12
 - The repo is public under the MIT license (`LICENSE`, `THIRD-PARTY-NOTICES.md`). The README is written for
   someone setting up their own tablet: what you get, prerequisites, setup steps, making it yours, updating,

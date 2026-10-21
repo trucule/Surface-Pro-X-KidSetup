@@ -523,6 +523,7 @@ static class Native
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern IntPtr RegisterPowerSettingNotification(IntPtr hRecipient, ref Guid powerSettingGuid, int flags);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc cb, IntPtr lParam);
 }
 
 [ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -681,7 +682,7 @@ class HomeForm : Form
                 int state = Marshal.ReadInt32(m.LParam, 20);
                 // Screen off: leave every app and go home. Screen on: finish the job (standby can
                 // freeze apps before they close) and make sure the home screen is in front.
-                if (state == 0 || state == 1) { CloseApps(); sweepTimer.Stop(); sweepTimer.Start(); if (state == 1) ComeToFront(); }
+                if (state == 0 || state == 1) { CloseApps(); sweepTimer.Stop(); sweepTimer.Interval = 3000; sweepTimer.Start(); if (state == 1) ComeToFront(); }
             }
         }
         base.WndProc(ref m);
@@ -712,8 +713,22 @@ class HomeForm : Form
             if (!storeApp && name.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase)) return true;
             Native.PostMessage(h, WM_CLOSE, IntPtr.Zero, IntPtr.Zero);
             if (!storeApp) closing.Add((int)pid);
+            else { int app = HostedAppPid(h, pid); if (app != 0) closing.Add(app); }
             return true;
         }, IntPtr.Zero);
+    }
+
+    // A Store app's frame belongs to ApplicationFrameHost; the app itself owns a child window.
+    static int HostedAppPid(IntPtr frame, uint framePid)
+    {
+        int found = 0;
+        Native.EnumChildWindows(frame, (c, l) =>
+        {
+            uint p; Native.GetWindowThreadProcessId(c, out p);
+            if (p != 0 && p != framePid) { found = (int)p; return false; }
+            return true;
+        }, IntPtr.Zero);
+        return found;
     }
 
     // Anything that didn't close when asked (or was frozen by standby) is ended.
@@ -727,7 +742,7 @@ class HomeForm : Form
         {
             try { var p = Process.GetProcessById(pid); if (p.SessionId == session && !p.HasExited) p.Kill(); } catch (Exception) { }
         }
-        CloseApps();    // Store app windows that are still there
+        CloseApps();    // windows that appeared since (their processes are ended on the next sweep)
         closing.Clear();
     }
 
@@ -735,9 +750,13 @@ class HomeForm : Form
     // screen-off handler does (ask politely, sweep whatever is stuck 3 seconds later).
     public void GoHome()
     {
+        if (DateTime.UtcNow < leavingUntil) return;                       // already on the way out
+        leavingUntil = DateTime.UtcNow.AddSeconds(2);                     // keep the pill away while apps close
         homeButton.Hide();
-        CloseApps(); sweepTimer.Stop(); sweepTimer.Start(); ComeToFront();
+        CloseApps(); sweepTimer.Stop(); sweepTimer.Interval = 1500; sweepTimer.Start(); ComeToFront();
     }
+
+    DateTime leavingUntil = DateTime.MinValue;
 
     // The pill shows while something other than the home screen is in front. Edge's own close
     // button is a small target at tablet DPI and often ignores the first taps after standby.
@@ -753,7 +772,8 @@ class HomeForm : Form
             string c = cls.ToString();
             if (c == "Shell_TrayWnd" || c == "Shell_SecondaryTrayWnd" || c == "Progman" || c == "WorkerW") appInFront = false;
         }
-        if (appInFront) homeButton.ShowPinned(); else if (homeButton.Visible) homeButton.Hide();
+        if (appInFront && DateTime.UtcNow >= leavingUntil) homeButton.Pin(Screen.FromHandle(fg).Bounds);
+        else if (homeButton.Visible) homeButton.Hide();
     }
 
     void ComeToFront()
@@ -1023,10 +1043,7 @@ class HomeButton : Form
         BackColor = Color.FromArgb(36, 36, 56);
         DoubleBuffered = true;
         Cursor = Cursors.Hand;
-        int w = S(176), h = S(56);
-        Rectangle screen = Screen.PrimaryScreen.Bounds;
-        Bounds = new Rectangle(screen.Right - w - S(8), screen.Top + S(6), w, h);
-        using (var path = Rounded(new Rectangle(0, 0, w, h), h / 2)) Region = new Region(path);
+        Place(Screen.PrimaryScreen.Bounds);
     }
 
     int S(int v) { return (int)(v * scale); }
@@ -1043,12 +1060,68 @@ class HomeButton : Form
         }
     }
 
-    public void ShowPinned()
+    // Top-right corner of the given screen. Called again on every check, so turning the tablet
+    // or changing resolution moves it with the screen instead of leaving it off the edge.
+    void Place(Rectangle screen)
     {
-        if (Visible) return;
-        Show();
+        int w = S(176), h = S(56);
+        var want = new Rectangle(screen.Right - w - S(8), screen.Top + S(6), w, h);
+        if (Bounds == want && Region != null) return;
+        Bounds = want;
+        using (var path = Rounded(new Rectangle(0, 0, w, h), h / 2)) Region = new Region(path);
+    }
+
+    // Shown over the app in front. Re-asserted every check: an app that puts itself on top
+    // (full screen, its own always-on-top window) would otherwise bury the pill until it closed.
+    public void Pin(Rectangle screen)
+    {
+        Place(screen);
+        if (!Visible) Show();
         // HWND_TOPMOST, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE
         Native.SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
+    }
+
+    // Touch and pen arrive as pointer messages and are handled here directly. Left to Windows,
+    // a tap is converted to mouse events, and a mouse-leave that lands between down and up
+    // used to cancel the press, so taps were lost at random. Mouse clicks still use OnMouseUp.
+    const int WM_POINTERDOWN = 0x0246, WM_POINTERUP = 0x0247, WM_POINTERCAPTURECHANGED = 0x024C, WM_MOUSEACTIVATE = 0x0021;
+    bool pointerDown;
+
+    protected override void WndProc(ref Message m)
+    {
+        switch (m.Msg)
+        {
+            case WM_MOUSEACTIVATE:
+                m.Result = new IntPtr(3);      // MA_NOACTIVATE: the app underneath keeps focus
+                return;
+            case WM_POINTERDOWN:
+                pointerDown = true; down = true; Invalidate();
+                m.Result = IntPtr.Zero;        // handled: no mouse events are synthesized from it
+                return;
+            case WM_POINTERUP:
+            {
+                bool hit = pointerDown && Hit(m.LParam);
+                pointerDown = false; down = false; Invalidate();
+                m.Result = IntPtr.Zero;
+                if (hit) owner.GoHome();
+                return;
+            }
+            case WM_POINTERCAPTURECHANGED:
+                pointerDown = false; down = false; Invalidate();
+                break;
+        }
+        base.WndProc(ref m);
+    }
+
+    // The lift point in screen coordinates, with a little slack around the pill so a finger
+    // that rolls off the edge still counts.
+    bool Hit(IntPtr lParam)
+    {
+        int v = unchecked((int)lParam.ToInt64());
+        var pt = new Point((short)(v & 0xFFFF), (short)((v >> 16) & 0xFFFF));
+        Rectangle r = Bounds;
+        r.Inflate(S(24), S(24));
+        return r.Contains(pt);
     }
 
     static GraphicsPath Rounded(Rectangle r, int radius)
@@ -1094,8 +1167,6 @@ class HomeButton : Form
         Invalidate();
         if (hit) owner.GoHome();
     }
-
-    protected override void OnMouseLeave(EventArgs e) { down = false; Invalidate(); }
 }
 
 class TileCanvas : Control
