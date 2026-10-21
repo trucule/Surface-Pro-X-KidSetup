@@ -67,9 +67,10 @@ if ($task) { $info = $task | Get-ScheduledTaskInfo; Write-Output ('Task {0}; las
 $jobLog = Join-Path $dataDir 'jobs\update-apps.log'
 if (Test-Path $jobLog) { Get-Content $jobLog -Tail $LogLines | Where-Object { $_ -notmatch '^\*{10}' } | ForEach-Object { Write-Output $_ } }
 
-# The launcher writes launch.log into her own profile; the kiosk log is machine-wide.
-$logs = @(Get-ChildItem 'C:\Users\*\AppData\Local\KidTablet\launch.log' -ErrorAction SilentlyContinue) + @(Get-Item (Join-Path $dataDir 'kiosk-apply.log') -ErrorAction SilentlyContinue)
-foreach ($f in 'launch.log', 'kiosk-apply.log') {
+# The launcher writes launch.log (errors) and home.log (the app in front and the Home pill) into her own profile;
+# the kiosk log is machine-wide.
+$logs = @(Get-ChildItem 'C:\Users\*\AppData\Local\KidTablet\launch.log', 'C:\Users\*\AppData\Local\KidTablet\home.log' -ErrorAction SilentlyContinue) + @(Get-Item (Join-Path $dataDir 'kiosk-apply.log') -ErrorAction SilentlyContinue)
+foreach ($f in 'launch.log', 'home.log', 'kiosk-apply.log') {
     Section $f
     $hit = $logs | Where-Object Name -eq $f
     if ($hit) { foreach ($h in $hit) { Get-Content $h.FullName -Tail $LogLines | ForEach-Object { Write-Output $_ } } } else { Write-Output 'No log.' }

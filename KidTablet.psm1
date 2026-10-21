@@ -464,6 +464,9 @@ static class Native
     [DllImport("user32.dll")] public static extern IntPtr RegisterPowerSettingNotification(IntPtr hRecipient, ref Guid powerSettingGuid, int flags);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc cb, IntPtr lParam);
+    [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
+    [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(POINT p);
+    [DllImport("user32.dll")] public static extern IntPtr GetAncestor(IntPtr hWnd, uint flags);
 }
 
 [ComImport, Guid("2e941141-7f97-4756-ba1d-9decde894a3d"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -645,9 +648,12 @@ class HomeForm : Form
             if (pid == 0 || pid == me) return true;
             var cls = new StringBuilder(256); Native.GetClassName(h, cls, cls.Capacity);
             string c = cls.ToString();
-            if (c == "Shell_TrayWnd" || c == "Shell_SecondaryTrayWnd" || c == "Progman" || c == "WorkerW" || c == "Windows.UI.Core.CoreWindow") return true;
+            if (c == "Shell_TrayWnd" || c == "Shell_SecondaryTrayWnd" || c == "Progman" || c == "WorkerW") return true;
             string name;
             try { var p = Process.GetProcessById((int)pid); if (p.SessionId != session) return true; name = p.ProcessName; } catch (Exception) { return true; }
+            // A Store app with no frame (full screen, or a game) is a bare CoreWindow, which ignores WM_CLOSE.
+            // The shell's own CoreWindows (Start, search, keyboard) are left alone; any other one is ended by the sweep.
+            if (c == "Windows.UI.Core.CoreWindow") { if (!ShellProcesses.Contains(name)) closing.Add((int)pid); return true; }
             bool storeApp = c == "ApplicationFrameWindow";                       // Store apps live in ApplicationFrameHost
             if (!storeApp && ShellProcesses.Contains(name)) return true;
             if (!storeApp && name.Equals("ApplicationFrameHost", StringComparison.OrdinalIgnoreCase)) return true;
@@ -714,6 +720,47 @@ class HomeForm : Form
         }
         if (appInFront && DateTime.UtcNow >= leavingUntil) homeButton.Pin(Screen.FromHandle(fg).Bounds);
         else if (homeButton.Visible) homeButton.Hide();
+        TraceHomeButton(fg, pid, appInFront);
+    }
+
+    // home.log in her profile records each change of the app in front and whether the pill is shown and
+    // actually on top (what is under its centre), so an app the pill does not cover can be identified.
+    string lastTrace;
+    void TraceHomeButton(IntPtr fg, uint pid, bool appInFront)
+    {
+        try
+        {
+            string fgDesc = DescribeWindow(fg, pid);
+            string cover = "";
+            if (homeButton.Visible)
+            {
+                var b = homeButton.Bounds;
+                var p = new Native.POINT { X = b.Left + b.Width / 2, Y = b.Top + b.Height / 2 };
+                IntPtr under = Native.WindowFromPoint(p);
+                IntPtr root = under == IntPtr.Zero ? IntPtr.Zero : Native.GetAncestor(under, 2);   // GA_ROOT
+                if (root != homeButton.Handle) { uint up; Native.GetWindowThreadProcessId(root, out up); cover = " COVERED by " + DescribeWindow(root, up); }
+            }
+            string line = string.Format("front={0} app={1} pill={2}{3}", fgDesc, appInFront, homeButton.Visible ? "shown" : "hidden", cover);
+            if (line == lastTrace) return;
+            lastTrace = line;
+            string dir = DataDir(); Directory.CreateDirectory(dir);
+            string file = Path.Combine(dir, "home.log");
+            var fi = new FileInfo(file);
+            if (fi.Exists && fi.Length > 256 * 1024) File.Copy(file, file + ".old", true);
+            if (fi.Exists && fi.Length > 256 * 1024) File.WriteAllText(file, "");
+            File.AppendAllText(file, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss ") + line + Environment.NewLine);
+        }
+        catch (Exception) { }
+    }
+
+    static string DescribeWindow(IntPtr h, uint pid)
+    {
+        if (h == IntPtr.Zero) return "none";
+        var cls = new StringBuilder(256); Native.GetClassName(h, cls, cls.Capacity);
+        string name = "?";
+        try { name = Process.GetProcessById((int)pid).ProcessName; } catch (Exception) { }
+        int ex = Native.GetWindowLong(h, -20);
+        return string.Format("{0}/{1}{2}{3}", name, cls, (ex & 0x8) != 0 ? " topmost" : "", Native.IsWindowVisible(h) ? "" : " invisible");
     }
 
     void ComeToFront()
