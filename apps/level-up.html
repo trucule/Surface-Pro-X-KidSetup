@@ -1,0 +1,734 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Level Up</title>
+<!--
+  Level Up. One offline file, no API. Six subjects, each a ladder of levels from kindergarten to about 4th grade:
+  Reading, Math, Color Lab, Patterns, Time & Money, Shapes & Fractions. Questions are generated, so they do not
+  repeat in a fixed order.
+
+  Each subject keeps its own level. Four right in a row moves her up a level; two misses in the last four at a level
+  moves her down one, so she stays where it is a little hard. A subject she has not played starts near 2nd grade
+  and climbs fast at first (two in a row moves up during the first eight questions), so it finds her level quickly.
+  Daily Quest mixes ten questions from every subject. Progress is in localStorage under levelup-v1.
+-->
+<style>
+  :root { --ink: #2B2140; --paper: #FFF9F0; --pink: #FF4F8B; --sun: #FFC93C; --sky: #58C7F0; --leaf: #5CD38B; --grape: #9B6BFF; --coral: #FF8A5B; --line: #d9cfe8; }
+  html, body { margin: 0; height: 100%; background: var(--paper); overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); }
+  body { touch-action: manipulation; user-select: none; -webkit-user-select: none; }
+  button { font-family: inherit; color: var(--ink); }
+  .screen { position: fixed; inset: 0; display: none; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  .screen.on { display: flex; flex-direction: column; }
+
+  /* Home */
+  #home header { display: flex; align-items: center; gap: 14px; padding: 16px 210px 6px 24px; } /* right side: room for the tablet's Home pill */
+  #home h1 { margin: 0 auto 0 0; font-size: 38px; font-weight: 900; letter-spacing: .5px; }
+  #home h1 span { color: var(--pink); }
+  #totalStars { font-size: 26px; font-weight: 900; background: #fff; border: 3px solid var(--ink); border-radius: 999px; padding: 6px 18px; }
+  #grid { flex: 1; min-height: 0; overflow-y: auto; padding: 10px 24px 120px; display: grid; gap: 18px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); align-content: start; }
+  .card { position: relative; border: 4px solid var(--ink); border-radius: 26px; background: #fff; padding: 16px 18px 18px; text-align: left; cursor: pointer; box-shadow: 0 8px 0 var(--ink); min-height: 150px; }
+  .card:active { transform: translateY(4px); box-shadow: 0 4px 0 var(--ink); }
+  .card .icon { font-size: 46px; line-height: 1; }
+  .card .name { font-size: 26px; font-weight: 900; margin-top: 6px; }
+  .card .lvl { font-size: 17px; font-weight: 700; opacity: .8; margin-top: 2px; }
+  .card .bar { height: 14px; border-radius: 999px; background: #eee6f5; margin-top: 12px; overflow: hidden; border: 2px solid var(--ink); }
+  .card .bar i { display: block; height: 100%; background: var(--leaf); }
+  .card .badge { position: absolute; right: 14px; top: 14px; font-size: 18px; font-weight: 900; border: 3px solid var(--ink); border-radius: 999px; padding: 2px 12px; background: var(--sun); }
+  .card.quest { grid-column: 1 / -1; background: linear-gradient(120deg, #FFE7F0, #E8F7FF); min-height: 120px; display: flex; align-items: center; gap: 18px; }
+  .card.quest .icon { font-size: 64px; }
+  .card.quest .name { font-size: 32px; margin: 0; }
+
+  /* Play */
+  #play header { display: flex; align-items: center; gap: 12px; padding: 12px 210px 12px 18px; } /* right side: room for the tablet's Home pill */
+  #play .back { border: 4px solid var(--ink); background: #fff; border-radius: 999px; padding: 8px 18px; font-size: 22px; font-weight: 900; cursor: pointer; }
+  #subj { font-size: 24px; font-weight: 900; margin-right: auto; }
+  #lvlBadge { font-size: 18px; font-weight: 900; border: 3px solid var(--ink); border-radius: 999px; padding: 4px 14px; background: var(--sun); }
+  #streak { font-size: 22px; font-weight: 900; min-width: 90px; text-align: right; }
+  #stage { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 4px 20px 10px; overflow-y: auto; }
+  #prompt { font-size: 32px; font-weight: 800; text-align: center; max-width: 1000px; line-height: 1.25; }
+  #passage { display: none; font-size: 25px; line-height: 1.5; max-width: 900px; background: #fff; border: 3px solid var(--ink); border-radius: 20px; padding: 14px 22px; }
+  #passage.on { display: block; }
+  #visual { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; font-size: 64px; min-height: 10px; max-width: 1100px; }
+  #visual svg { display: block; }
+  .swatch { width: 96px; height: 96px; border-radius: 22px; border: 4px solid var(--ink); display: inline-block; }
+  .op { font-size: 54px; font-weight: 900; }
+  #answers { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; max-width: 1100px; }
+  #answers button { border: 4px solid var(--ink); background: #fff; border-radius: 22px; min-width: 120px; min-height: 96px; padding: 10px 22px; font-size: 32px; font-weight: 800; cursor: pointer; box-shadow: 0 6px 0 var(--ink); display: flex; align-items: center; justify-content: center; gap: 8px; }
+  #answers button:active { transform: translateY(3px); box-shadow: 0 3px 0 var(--ink); }
+  #answers button.word { font-size: 30px; }
+  #answers button.right { background: #CFF5DC; }
+  #answers button.wrong { background: #ffd6d6; animation: shake .4s; }
+  #answers button .swatch { width: 70px; height: 70px; border-width: 3px; }
+  @keyframes shake { 25% { transform: translateX(-8px); } 75% { transform: translateX(8px); } }
+  #entry { display: none; flex-direction: column; align-items: center; gap: 12px; }
+  #entry.on { display: flex; }
+  #typed { min-width: 220px; min-height: 76px; border: 4px solid var(--ink); border-radius: 20px; background: #fff; font-size: 52px; font-weight: 900; text-align: center; padding: 0 18px; line-height: 76px; }
+  #pad { display: grid; grid-template-columns: repeat(6, 82px); gap: 10px; }
+  #pad button { height: 74px; border: 4px solid var(--ink); border-radius: 18px; background: #fff; font-size: 34px; font-weight: 900; cursor: pointer; }
+  #pad button.go { background: var(--leaf); }
+  #pad button.del { background: #ffe4cc; }
+  #mixer { display: none; flex-direction: column; align-items: center; gap: 14px; }
+  #mixer.on { display: flex; }
+  #mixer .row { display: flex; align-items: center; gap: 22px; }
+  #mixer .label { font-size: 22px; font-weight: 800; text-align: center; }
+  #bowl { width: 150px; height: 150px; border-radius: 50%; border: 5px solid var(--ink); background: #fff; }
+  #drops { display: flex; gap: 12px; }
+  #drops button { width: 96px; height: 96px; border-radius: 50%; border: 4px solid var(--ink); cursor: pointer; font-size: 26px; font-weight: 900; color: #fff; text-shadow: 0 2px 0 rgba(0,0,0,.4); }
+  #mixer .tools { display: flex; gap: 14px; }
+  #mixer .tools button { border: 4px solid var(--ink); border-radius: 999px; background: #fff; padding: 10px 22px; font-size: 24px; font-weight: 900; cursor: pointer; }
+  #mixer .tools button.go { background: var(--leaf); }
+  #feedback { display: none; position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); max-width: min(900px, 92vw); background: #fff; border: 4px solid var(--ink); border-radius: 26px; padding: 16px 22px; font-size: 24px; font-weight: 700; z-index: 5; box-shadow: 0 10px 0 var(--pink); align-items: center; gap: 18px; }
+  #feedback.on { display: flex; }
+  #feedback.good { box-shadow: 0 10px 0 var(--leaf); }
+  #feedback .msg { flex: 1; line-height: 1.35; }
+  #feedback button { border: 4px solid var(--ink); border-radius: 999px; background: var(--sun); padding: 10px 26px; font-size: 26px; font-weight: 900; cursor: pointer; white-space: nowrap; }
+  footer { display: flex; justify-content: center; gap: 14px; padding: 6px 14px 14px; }
+  footer button { border: 4px solid var(--ink); background: #fff; border-radius: 50%; width: 72px; height: 72px; font-size: 32px; cursor: pointer; }
+  #pop { position: fixed; inset: 0; display: none; place-items: center; z-index: 8; background: rgba(43,33,64,.35); }
+  #pop.on { display: grid; }
+  #pop .box { background: #fff; border: 5px solid var(--ink); border-radius: 30px; padding: 26px 38px; text-align: center; box-shadow: 0 12px 0 var(--pink); animation: pop .45s cubic-bezier(.2,1.6,.4,1); max-width: 80vw; }
+  #pop .big { font-size: 70px; }
+  #pop .title { font-size: 36px; font-weight: 900; margin: 6px 0; }
+  #pop .sub { font-size: 22px; font-weight: 700; opacity: .85; }
+  #pop button { margin-top: 16px; border: 4px solid var(--ink); border-radius: 999px; background: var(--sun); padding: 10px 30px; font-size: 26px; font-weight: 900; cursor: pointer; }
+  @keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .spark { position: fixed; font-size: 40px; pointer-events: none; z-index: 9; transition: transform 1s ease-out, opacity 1s; }
+  @media (max-width: 700px) { #prompt { font-size: 26px; } #pad { grid-template-columns: repeat(4, 74px); } #answers button { min-width: 96px; font-size: 26px; } }
+</style>
+</head>
+<body>
+<section id="home" class="screen on">
+  <header>
+    <h1>Level <span>Up</span></h1>
+    <div id="totalStars">⭐ 0</div>
+  </header>
+  <div id="grid"></div>
+</section>
+
+<section id="play" class="screen">
+  <header>
+    <button class="back" id="back">◀ Menu</button>
+    <div id="subj"></div>
+    <div id="lvlBadge"></div>
+    <div id="streak"></div>
+  </header>
+  <div id="stage">
+    <div id="prompt"></div>
+    <div id="passage"></div>
+    <div id="visual"></div>
+    <div id="answers"></div>
+    <div id="entry"><div id="typed"></div><div id="pad"></div></div>
+    <div id="mixer">
+      <div class="row">
+        <div><div class="label">Make this</div><div class="swatch" id="target" style="width:150px;height:150px;border-radius:50%"></div></div>
+        <div><div class="label">Your bowl</div><div id="bowl"></div></div>
+      </div>
+      <div id="drops"></div>
+      <div class="tools"><button id="mixUndo">↩ Undo</button><button id="mixClear">Empty</button><button class="go" id="mixCheck">✔ Check</button></div>
+    </div>
+  </div>
+  <footer>
+    <button id="hear" title="Hear it">🔈</button>
+    <button id="skip" title="New question">🔁</button>
+  </footer>
+  <div id="feedback"><div class="msg" id="fbMsg"></div><button id="fbNext">Next ▶</button></div>
+</section>
+
+<div id="pop"><div class="box"><div class="big" id="popBig"></div><div class="title" id="popTitle"></div><div class="sub" id="popSub"></div><button id="popOk">OK</button></div></div>
+
+<script id="voicepack">/* voice pack goes here: run voices/make-voices.py */</script>
+<script>
+// ---------------------------------------------------------------------------
+// Voice: a clip from the voice pack when there is one for the phrase, otherwise the Windows voice.
+// ---------------------------------------------------------------------------
+const VOICE = (() => {
+  let actx = null, cur = null; const decoded = new Map();
+  const key = t => String(t).trim().toLowerCase().replace(/\s+/g, ' ');
+  function ctx() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { actx = null; } } if (actx && actx.state === 'suspended') actx.resume(); return actx; }
+  function stop() { if (cur) { try { cur.onended = null; cur.stop(); } catch (e) {} cur = null; } }
+  function play(t) {
+    const p = window.VOICE_PACK, k = key(t); if (!p || !p[k]) return false;
+    const a = ctx(); if (!a) return false;
+    const go = buf => { stop(); const s = a.createBufferSource(); s.buffer = buf; s.connect(a.destination); s.onended = () => { if (cur === s) cur = null; }; cur = s; s.start(); };
+    try {
+      if (decoded.has(k)) { go(decoded.get(k)); return true; }
+      const bin = atob(p[k]), bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      a.decodeAudioData(bytes.buffer.slice(0)).then(buf => { decoded.set(k, buf); go(buf); }).catch(() => {});
+      return true;
+    } catch (e) { return false; }
+  }
+  return { play, stop };
+})();
+function say(t) { if (!t) return; try { speechSynthesis.cancel(); } catch (e) {} VOICE.stop(); if (VOICE.play(t)) return; try { const u = new SpeechSynthesisUtterance(t); u.rate = 0.92; u.pitch = 1.05; speechSynthesis.speak(u); } catch (e) {} }
+
+const $ = id => document.getElementById(id);
+const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+const pick = a => a[Math.floor(Math.random() * a.length)];
+function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function sample(a, n) { return shuffle(a).slice(0, n); }
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const NUMWORD = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve'];
+
+// Question shapes:
+//   { prompt, speak?, passage?, visual? (HTML), type: 'choice', choices: [{ label | html, speak? }], answer: index, explain }
+//   { prompt, speak?, visual?, type: 'number', answer: integer, explain }
+//   { prompt, speak?, type: 'mix', paints: [...], target: { counts }, explain }
+// A choice question's answer is the index of the right choice after shuffling (choice() builds it).
+function choice(prompt, right, wrongs, extra = {}) {
+  const all = shuffle([{ ...asChoice(right), ok: true }, ...wrongs.map(w => ({ ...asChoice(w), ok: false }))]);
+  return { prompt, type: 'choice', choices: all, answer: all.findIndex(c => c.ok), ...extra };
+}
+function asChoice(x) { return typeof x === 'object' ? x : { label: String(x) }; }
+// Distinct, plausible, non-negative distractors near the answer.
+function nearby(ans, n = 3, spread = 3, min = 0) {
+  const out = new Set(); let guard = 0;
+  while (out.size < n && guard++ < 200) { const d = ans + (Math.random() < .5 ? -1 : 1) * rnd(1, spread); if (d !== ans && d >= min) out.add(d); }
+  let k = 1; while (out.size < n) { if (ans + k !== ans) out.add(ans + k); k++; }
+  return [...out];
+}
+function emojiRow(e, n) { return Array.from({ length: n }, () => e).join(''); }
+
+// ---------------------------------------------------------------------------
+// MATH
+// ---------------------------------------------------------------------------
+const OBJ = ['🍎', '🐠', '⭐', '🧁', '🎈', '🐞', '🍓', '🚗', '🌻', '🥕'];
+const OBJN = { '🍎': 'apples', '🐠': 'fish', '⭐': 'stars', '🧁': 'cupcakes', '🎈': 'balloons', '🐞': 'ladybugs', '🍓': 'strawberries', '🚗': 'cars', '🌻': 'sunflowers', '🥕': 'carrots' };
+const NAMES = ['Maya', 'Leo', 'Ava', 'Sam', 'Nora', 'Eli', 'Zoe', 'Max', 'Ruby', 'Finn'];
+const math = [
+  { name: 'Add within 10', grade: 'K', gen() {
+      const a = rnd(1, 6), b = rnd(1, 10 - a), e = pick(OBJ);
+      return choice(`${a} + ${b} = ?`, a + b, nearby(a + b, 2, 2, 1), { visual: `<span>${emojiRow(e, a)}</span><span class="op">+</span><span>${emojiRow(e, b)}</span>`, speak: `${a} plus ${b}`, explain: `Count them all: ${a} and ${b} more makes ${a + b}.` });
+  } },
+  { name: 'Add and subtract within 20', grade: '1', gen() {
+      if (Math.random() < .5) { const a = rnd(3, 12), b = rnd(2, 20 - a); return { prompt: `${a} + ${b} = ?`, speak: `${a} plus ${b}`, type: 'number', answer: a + b, explain: `${a} + ${b} = ${a + b}. Start at ${a} and count up ${b}.` }; }
+      const a = rnd(8, 20), b = rnd(2, a - 1); return { prompt: `${a} − ${b} = ?`, speak: `${a} minus ${b}`, type: 'number', answer: a - b, explain: `${a} − ${b} = ${a - b}. Start at ${a} and count back ${b}.` };
+  } },
+  { name: 'Two-digit adding', grade: '2', gen() {
+      const t1 = rnd(1, 6), t2 = rnd(1, 8 - t1), o1 = rnd(0, 8), o2 = rnd(0, 9 - o1), a = t1 * 10 + o1, b = t2 * 10 + o2;
+      if (Math.random() < .5) return { prompt: `${a} + ${b} = ?`, speak: `${a} plus ${b}`, type: 'number', answer: a + b, explain: `Add the tens: ${t1 * 10} + ${t2 * 10} = ${(t1 + t2) * 10}. Add the ones: ${o1} + ${o2} = ${o1 + o2}. Together ${a + b}.` };
+      const big = a + b; return { prompt: `${big} − ${b} = ?`, speak: `${big} minus ${b}`, type: 'number', answer: a, explain: `Take away the tens, then the ones: ${big} − ${b} = ${a}.` };
+  } },
+  { name: 'Regrouping', grade: '2', gen() {
+      if (Math.random() < .5) { let a, b; do { a = rnd(15, 68); b = rnd(15, 89 - a); } while ((a % 10) + (b % 10) < 10); return { prompt: `${a} + ${b} = ?`, speak: `${a} plus ${b}`, type: 'number', answer: a + b, explain: `The ones make ${(a % 10) + (b % 10)}, that is a new ten. ${a} + ${b} = ${a + b}.` }; }
+      let a, b; do { a = rnd(31, 95); b = rnd(12, a - 10); } while ((a % 10) >= (b % 10)); return { prompt: `${a} − ${b} = ?`, speak: `${a} minus ${b}`, type: 'number', answer: a - b, explain: `There are not enough ones, so trade a ten for ten ones. ${a} − ${b} = ${a - b}.` };
+  } },
+  { name: 'Place value', grade: '2', gen() {
+      const n = rnd(102, 987), d = String(n), r = Math.random();
+      if (r < .45) { const i = rnd(0, 2), digit = +d[i]; if (digit === 0) return math[4].gen(); const place = [100, 10, 1][i], val = digit * place;
+        const wr = [digit * 100, digit * 10, digit].filter(v => v !== val);
+        return choice(`What is the ${digit} in ${n} worth?`, val, wr, { speak: `In ${n}, what is the ${digit} worth?`, visual: `<span style="font-size:80px;font-weight:900">${d.split('').map((c, j) => j === i ? `<u style="color:var(--pink)">${c}</u>` : c).join('')}</span>`, explain: `The ${digit} is in the ${['hundreds', 'tens', 'ones'][i]} place, so it is worth ${val}.` }); }
+      if (r < .75) { const h = +d[0], t = +d[1], o = +d[2]; return { prompt: `${h} hundreds, ${t} tens, ${o} ones = ?`, speak: `${h} hundreds, ${t} tens and ${o} ones make what number?`, type: 'number', answer: n, explain: `${h * 100} + ${t * 10} + ${o} = ${n}.` }; }
+      const m = n + pick([-90, -9, 9, 90, 100, -100].filter(x => n + x > 99 && n + x < 1000)); const big = Math.max(n, m);
+      return choice(`Which number is bigger?`, big, [Math.min(n, m)], { explain: `Look at the hundreds first, then the tens, then the ones. ${big} is bigger.` });
+  } },
+  { name: 'Three-digit math', grade: '3', gen() {
+      if (Math.random() < .5) { const a = rnd(120, 650), b = rnd(105, 999 - a); return { prompt: `${a} + ${b} = ?`, speak: `${a} plus ${b}`, type: 'number', answer: a + b, explain: `Add hundreds, tens, then ones, and carry when a place gets to ten. ${a} + ${b} = ${a + b}.` }; }
+      const a = rnd(300, 999), b = rnd(110, a - 50); return { prompt: `${a} − ${b} = ?`, speak: `${a} minus ${b}`, type: 'number', answer: a - b, explain: `Subtract ones, tens, then hundreds, trading when you need more. ${a} − ${b} = ${a - b}.` };
+  } },
+  { name: 'Times tables: 2, 5, 10', grade: '2', gen() {
+      const a = pick([2, 5, 10]), b = rnd(1, 10), e = pick(OBJ);
+      const vis = b <= 6 && a <= 5 ? Array.from({ length: b }, () => `<span style="font-size:38px;display:inline-block;margin:0 10px">${emojiRow(e, a)}</span>`).join('') : '';
+      return choice(`${b} × ${a} = ?`, a * b, nearby(a * b, 3, a, 0), { visual: vis, speak: `${b} groups of ${a}. ${b} times ${a}`, explain: `${b} groups of ${a}: count by ${a}s ${b} times to get ${a * b}.` });
+  } },
+  { name: 'Times tables to 10', grade: '3', gen() {
+      const a = rnd(2, 10), b = rnd(2, 10);
+      if (Math.random() < .3) return { prompt: `${a * b} ÷ ${a} = ?`, speak: `${a * b} divided by ${a}`, type: 'number', answer: b, explain: `${a} × ${b} = ${a * b}, so ${a * b} ÷ ${a} = ${b}.` };
+      return { prompt: `${a} × ${b} = ?`, speak: `${a} times ${b}`, type: 'number', answer: a * b, explain: `${a} × ${b} = ${a * b}. Tip: ${b} × ${a} is the same.` };
+  } },
+  { name: 'Word problems', grade: '3', gen() {
+      const n = pick(NAMES), e = pick(OBJ), things = OBJN[e], t = rnd(0, 3);
+      if (t === 0) { const a = rnd(12, 40), b = rnd(5, 20), c = rnd(3, Math.min(15, a + b - 1)); return { prompt: `${n} has ${a} ${things}. ${n} gets ${b} more, then gives away ${c}. How many now?`, type: 'number', answer: a + b - c, visual: e, explain: `${a} + ${b} = ${a + b}, then ${a + b} − ${c} = ${a + b - c}.` }; }
+      if (t === 1) { const bags = rnd(3, 8), per = rnd(3, 9); return { prompt: `There are ${bags} bags with ${per} ${things} in each bag. How many ${things} in all?`, type: 'number', answer: bags * per, visual: e, explain: `${bags} groups of ${per}: ${bags} × ${per} = ${bags * per}.` }; }
+      if (t === 2) { const kids = rnd(2, 6), each = rnd(2, 8); return { prompt: `${kids * each} ${things} are shared equally by ${kids} friends. How many does each friend get?`, type: 'number', answer: each, visual: e, explain: `${kids * each} ÷ ${kids} = ${each}, because ${kids} × ${each} = ${kids * each}.` }; }
+      const a = rnd(25, 80), b = rnd(10, a - 5); return { prompt: `${n} read ${a} pages. Her friend read ${b} pages. How many more pages did ${n} read?`, type: 'number', answer: a - b, visual: '📚', explain: `"How many more" means subtract: ${a} − ${b} = ${a - b}.` };
+  } },
+  { name: 'Bigger multiplying', grade: '4', gen() {
+      if (Math.random() < .6) { const a = rnd(12, 49), b = rnd(2, 9); return { prompt: `${a} × ${b} = ?`, speak: `${a} times ${b}`, type: 'number', answer: a * b, explain: `Split it: ${Math.floor(a / 10) * 10} × ${b} = ${Math.floor(a / 10) * 10 * b}, and ${a % 10} × ${b} = ${(a % 10) * b}. Add them: ${a * b}.` }; }
+      const b = rnd(3, 9), q = rnd(11, 30); return { prompt: `${b * q} ÷ ${b} = ?`, speak: `${b * q} divided by ${b}`, type: 'number', answer: q, explain: `${b} × ${q} = ${b * q}, so ${b * q} ÷ ${b} = ${q}.` };
+  } },
+];
+
+// ---------------------------------------------------------------------------
+// READING
+// ---------------------------------------------------------------------------
+const PICWORDS = [['🐱', 'cat', ['cot', 'cap']], ['🐶', 'dog', ['dig', 'dot']], ['☀️', 'sun', ['sub', 'son']], ['🚌', 'bus', ['bug', 'bun']], ['🎩', 'hat', ['hot', 'hit']], ['🐟', 'fish', ['fist', 'dish']], ['🐸', 'frog', ['flog', 'from']], ['🦆', 'duck', ['dock', 'deck']], ['🎂', 'cake', ['cape', 'lake']], ['🚲', 'bike', ['bake', 'like']], ['🐝', 'bee', ['bed', 'see']], ['🌙', 'moon', ['mood', 'noon']], ['🦊', 'fox', ['box', 'fix']], ['🐷', 'pig', ['peg', 'dig']], ['🛏️', 'bed', ['bad', 'red']]];
+const SPELL = [['🐑', 'sheep', ['shep', 'sheap']], ['🚂', 'train', ['trane', 'trian']], ['⛵', 'boat', ['bote', 'boet']], ['🐌', 'snail', ['snale', 'snial']], ['🪑', 'chair', ['chare', 'cheir']], ['🐋', 'whale', ['wale', 'whail']], ['🍑', 'peach', ['peech', 'petch']], ['☁️', 'cloud', ['clowd', 'claud']], ['👑', 'crown', ['croun', 'cron']], ['🌃', 'night', ['nite', 'nihgt']], ['🦉', 'owl', ['oul', 'owel']], ['🍞', 'bread', ['bred', 'braed']], ['🐢', 'turtle', ['turtel', 'tertle']], ['🦋', 'butterfly', ['buterfly', 'butterflie']], ['🧸', 'teddy bear', ['tedy bare', 'teddy bair']], ['🍕', 'pizza', ['piza', 'peetza']], ['🐧', 'penguin', ['pengwin', 'penguen']], ['🌈', 'rainbow', ['ranebow', 'rainbo']]];
+const SENT = [
+  ['The dog wagged its ___ when Mom came home.', 'tail', ['tall', 'tale']],
+  ['I wear a coat when it is ___ outside.', 'cold', ['hot', 'sunny']],
+  ['Birds build ___ in the trees.', 'nests', ['nets', 'nuts']],
+  ['We ___ our teeth before bed.', 'brush', ['bush', 'crush']],
+  ['The baby was sleeping, so we talked ___.', 'quietly', ['loudly', 'quickly']],
+  ['Ice cream melts when it gets too ___.', 'warm', ['cold', 'hard']],
+  ['She planted a seed and watered it every ___.', 'day', ['bay', 'way']],
+  ['The library has shelves full of ___.', 'books', ['boots', 'hooks']],
+  ['My shoes were muddy, so I left them by the ___.', 'door', ['floor', 'moon']],
+  ['Owls hunt at night and ___ during the day.', 'sleep', ['sweep', 'swim']],
+  ['The ___ rang, and everyone went out to recess.', 'bell', ['ball', 'belt']],
+  ['He was thirsty, so he drank a glass of ___.', 'water', ['waiter', 'winter']],
+];
+const OPP = [['hot', 'cold', ['warm', 'wet']], ['up', 'down', ['over', 'top']], ['happy', 'sad', ['glad', 'funny']], ['fast', 'slow', ['quick', 'far']], ['open', 'closed', ['wide', 'empty']], ['loud', 'quiet', ['noisy', 'soft-shell']], ['early', 'late', ['soon', 'first']], ['full', 'empty', ['heavy', 'big']], ['light', 'dark', ['bright', 'thin']], ['float', 'sink', ['swim', 'fly']], ['remember', 'forget', ['think', 'know']], ['ancient', 'new', ['old', 'huge']]];
+const SAME = [['big', 'large', ['tiny', 'tall']], ['small', 'little', ['huge', 'short']], ['quick', 'fast', ['slow', 'late']], ['shout', 'yell', ['whisper', 'sing']], ['gift', 'present', ['party', 'box']], ['tired', 'sleepy', ['awake', 'angry']], ['begin', 'start', ['finish', 'stop']], ['glad', 'happy', ['grumpy', 'scared']], ['smart', 'clever', ['silly', 'lazy']], ['huge', 'enormous', ['tiny', 'round']], ['simple', 'easy', ['hard', 'heavy']], ['scared', 'afraid', ['brave', 'bored']]];
+const PARTS = [
+  ['unhappy', 'not happy', ['very happy', 'happy again']], ['redo', 'do again', ['not do', 'do before']], ['preheat', 'heat before', ['heat again', 'not heat']],
+  ['careless', 'without care', ['full of care', 'care again']], ['helpful', 'full of help', ['without help', 'help before']], ['unlock', 'open the lock', ['lock again', 'lock before']],
+  ['rewrite', 'write again', ['not write', 'write less']], ['fearless', 'without fear', ['full of fear', 'fear again']], ['dishonest', 'not honest', ['very honest', 'honest again']],
+  ['teacher', 'a person who teaches', ['teaching again', 'not teaching']], ['quickly', 'in a quick way', ['not quick', 'quick again']], ['misspell', 'spell wrong', ['spell again', 'spell before']],
+];
+const CONTEXT = [
+  ['After the long hike, the puppy was so exhausted that it fell asleep right away.', 'exhausted', 'very tired', ['very hungry', 'very excited']],
+  ['The giant pumpkin was enormous. It was too big to fit in the car.', 'enormous', 'very big', ['very orange', 'very soft']],
+  ['Leo was famished, so he ate two sandwiches and an apple.', 'famished', 'very hungry', ['very sleepy', 'very cold']],
+  ['The old bridge was fragile, so only one person could cross at a time.', 'fragile', 'easy to break', ['very long', 'very new']],
+  ['The cat was curious about the box and sniffed it all over.', 'curious', 'wanting to know', ['afraid', 'bored']],
+  ['The soup was scalding, so Dad blew on it before he took a sip.', 'scalding', 'very hot', ['very salty', 'very cold']],
+  ['Zoe was reluctant to jump in the cold pool. She waited a long time on the edge.', 'reluctant', 'not wanting to', ['excited', 'in a hurry']],
+  ['The room was so dim that we needed a flashlight to find the door.', 'dim', 'not bright', ['very loud', 'very big']],
+  ['The rabbit darted across the yard and was gone in a second.', 'darted', 'moved fast', ['moved slowly', 'fell asleep']],
+  ['Ruby was delighted when she opened the gift. She smiled and hugged her grandma.', 'delighted', 'very pleased', ['upset', 'confused']],
+];
+// Short stories (2nd grade) and longer ones (3rd grade). [text, [question, right, [wrong, wrong]], ...]
+const STORIES = [
+  ['Max has a red kite. On a windy day he took it to the park. The kite flew high over the trees. Max held the string tight.', ['What color is the kite?', 'red', ['blue', 'yellow']], ['Where did Max fly the kite?', 'at the park', ['at school', 'at the beach']]],
+  ['Nora found a little bird on the ground. Its wing was hurt. She put it in a box with soft grass. Her mom called the animal doctor.', ['What was wrong with the bird?', 'its wing was hurt', ['it was hungry', 'it was lost']], ['What did Nora put in the box?', 'soft grass', ['a toy', 'water']]],
+  ['It rained all morning. Eli could not play outside. He built a fort out of pillows and blankets. Then he read a book inside his fort.', ['Why did Eli stay inside?', 'it was raining', ['he was sick', 'it was dark']], ['What did Eli build?', 'a fort', ['a boat', 'a robot']]],
+  ['Ava planted bean seeds in a cup. She gave them water and put the cup in the sun. After one week, a tiny green sprout poked out of the dirt.', ['What did Ava plant?', 'bean seeds', ['flowers', 'a tree']], ['What happened after one week?', 'a sprout came up', ['the cup broke', 'the seeds were gone']]],
+  ['Sam and his grandpa went fishing at the lake. They waited a long time. At last Sam felt a tug on his line. He pulled up a big silver fish!', ['Who went fishing with Sam?', 'his grandpa', ['his sister', 'his teacher']], ['How did Sam know he caught a fish?', 'he felt a tug', ['he saw a bird', 'it got dark']]],
+  ['Zoe wanted to make lemonade. She squeezed three lemons and added water and sugar. She tasted it. It was too sour, so she added more sugar.', ['Why did Zoe add more sugar?', 'it was too sour', ['it was too sweet', 'it was too cold']], ['How many lemons did she squeeze?', 'three', ['two', 'five']]],
+];
+const LONG = [
+  ['Every fall, many monarch butterflies fly south to Mexico. Some of them travel more than two thousand miles. They fly during the day and rest in trees at night. When spring comes, the butterflies start the trip back north. No single butterfly makes the whole round trip. Their great-grandchildren finish the journey.',
+    ['Why do monarchs fly south in the fall?', 'to stay warm for winter', ['to find snow', 'to go to school']], ['What is the main idea?', 'monarchs make a very long trip', ['butterflies like trees', 'Mexico is hot']], ['Who finishes the trip back north?', 'their great-grandchildren', ['the same butterflies', 'birds']]],
+  ['Finn was nervous about the school play. He had to say six lines in front of everyone. He practiced every night with his dad. On the big night his hands were shaking, but he said every line. When the play ended, the crowd clapped and Finn grinned from ear to ear.',
+    ['How did Finn feel before the play?', 'nervous', ['bored', 'angry']], ['How did Finn get ready?', 'he practiced every night', ['he slept a lot', 'he watched TV']], ['How did Finn feel at the end?', 'proud and happy', ['sad', 'sleepy']]],
+  ['Honeybees live together in a hive. The queen bee lays the eggs. Worker bees collect nectar from flowers and turn it into honey. They also keep the hive clean and cool. When a worker finds good flowers, it does a special dance to show the others where to go.',
+    ['What does the queen bee do?', 'lays the eggs', ['makes all the honey', 'guards the door']], ['Why does a worker bee dance?', 'to show where flowers are', ['to have fun', 'to scare birds']], ['What is this story mostly about?', 'how bees work together', ['how to eat honey', 'why flowers smell nice']]],
+  ['Ruby saved her coins for three months. She wanted a new paint set that cost twelve dollars. Each week she did chores to earn one more dollar. At the store she counted her money and had exactly twelve dollars. She bought the paints and painted a picture for her little brother.',
+    ['What did Ruby want to buy?', 'a paint set', ['a bike', 'a doll']], ['How did Ruby earn money?', 'by doing chores', ['by selling toys', 'her friend gave it']], ['What does this tell you about Ruby?', 'she is patient and hard working', ['she is in a hurry', 'she does not like art']]],
+  ['A volcano is an opening in the ground where hot melted rock comes out. Deep under the earth it is so hot that rock melts. This melted rock is called magma. When it comes out of a volcano, it is called lava. Lava cools down and turns into new rock.',
+    ['What is magma?', 'melted rock under the ground', ['a kind of cloud', 'cold rock']], ['What happens when lava cools?', 'it turns into new rock', ['it turns into water', 'it disappears']], ['Where does magma come from?', 'deep under the earth', ['the sky', 'the ocean']]],
+  ['The town library was going to close because the roof leaked. Maya and her friends had an idea. They held a bake sale every Saturday for a month. Neighbors bought cookies, pies and bread. At the end they gave the money to the library, and the roof was fixed.',
+    ['What was the problem?', 'the library roof leaked', ['the books were lost', 'nobody liked reading']], ['How did the kids help?', 'they held bake sales', ['they fixed the roof', 'they bought new books']], ['What lesson does the story show?', 'working together can fix a problem', ['cookies are healthy', 'libraries are boring']]],
+];
+const reading = [
+  { name: 'Picture words', grade: 'K', gen() { const [e, w, wr] = pick(PICWORDS); return choice('Which word matches the picture?', { label: w, cls: 'word' }, wr.map(x => ({ label: x, cls: 'word' })), { visual: `<span style="font-size:110px">${e}</span>`, explain: `This is a ${w}: ${w.split('').join('-')}.` }); } },
+  { name: 'Tricky spellings', grade: '1', gen() { const [e, w, wr] = pick(SPELL); return choice('Which one is spelled right?', { label: w, cls: 'word' }, wr.map(x => ({ label: x, cls: 'word' })), { visual: `<span style="font-size:110px">${e}</span>`, explain: `It is spelled ${w.toUpperCase().split('').join(' ')}.` }); } },
+  { name: 'Finish the sentence', grade: '2', gen() { const [s, w, wr] = pick(SENT); return choice(s, { label: w, cls: 'word' }, wr.map(x => ({ label: x, cls: 'word' })), { speak: s.replace('___', 'blank'), explain: `"${s.replace('___', w)}" makes sense.` }); } },
+  { name: 'Opposites and same meaning', grade: '2', gen() {
+      if (Math.random() < .5) { const [a, b, wr] = pick(OPP); return choice(`What is the opposite of "${a}"?`, { label: b, cls: 'word' }, wr.map(x => ({ label: x, cls: 'word' })), { speak: `What is the opposite of ${a}?`, explain: `The opposite of ${a} is ${b}.` }); }
+      const [a, b, wr] = pick(SAME); return choice(`Which word means the same as "${a}"?`, { label: b, cls: 'word' }, wr.map(x => ({ label: x, cls: 'word' })), { speak: `Which word means the same as ${a}?`, explain: `${a} and ${b} mean almost the same thing.` });
+  } },
+  { name: 'Short stories', grade: '2', gen() { const st = pick(STORIES), [q, r, wr] = pick(st.slice(1)); return choice(q, { label: r, cls: 'word' }, wr.map(x => ({ label: x, cls: 'word' })), { passage: st[0], explain: `Look back at the story: the answer is "${r}".` }); } },
+  { name: 'Word parts', grade: '3', gen() { const [w, r, wr] = pick(PARTS); return choice(`What does "${w}" mean?`, { label: r, cls: 'word' }, wr.map(x => ({ label: x, cls: 'word' })), { speak: `What does ${w} mean?`, explain: partHint(w, r) }); } },
+  { name: 'Longer stories', grade: '3', gen() { const st = pick(LONG), [q, r, wr] = pick(st.slice(1)); return choice(q, { label: r, cls: 'word' }, wr.map(x => ({ label: x, cls: 'word' })), { passage: st[0], explain: `The story tells us: "${r}".` }); } },
+  { name: 'Clues in the sentence', grade: '3', gen() { const [s, w, r, wr] = pick(CONTEXT); return choice(`What does "${w}" mean?`, { label: r, cls: 'word' }, wr.map(x => ({ label: x, cls: 'word' })), { passage: s.replace(w, `<b><u>${w}</u></b>`), speak: `What does ${w} mean?`, explain: `The other words give the clue: ${w} means ${r}.` }); } },
+];
+function partHint(w, r) {
+  const pre = { un: 'not', re: 'again', pre: 'before', dis: 'not', mis: 'wrong' }, suf = { less: 'without', ful: 'full of', er: 'a person who', ly: 'in a way' };
+  for (const p in pre) if (w.startsWith(p)) return `"${p}-" means ${pre[p]}, so ${w} means ${r}.`;
+  for (const s in suf) if (w.endsWith(s)) return `"-${s}" means ${suf[s]}, so ${w} means ${r}.`;
+  return `${w} means ${r}.`;
+}
+
+// ---------------------------------------------------------------------------
+// COLOR LAB: paint mixes like real paint (red, yellow, blue primaries), light mixes like a screen (red, green, blue).
+// ---------------------------------------------------------------------------
+// Paint: trilinear blend over the RYB cube (Gossett and Chen), which gives the colors kids get with real paint.
+const RYB_CORNERS = { '000': [255, 255, 255], '100': [226, 35, 26], '010': [255, 214, 0], '001': [22, 82, 190], '110': [245, 130, 20], '101': [120, 40, 150], '011': [40, 150, 70], '111': [60, 40, 30] };
+function ryb2rgb(r, y, b) {
+  const out = [0, 0, 0];
+  for (const ri of [0, 1]) for (const yi of [0, 1]) for (const bi of [0, 1]) {
+    const w = (ri ? r : 1 - r) * (yi ? y : 1 - y) * (bi ? b : 1 - b), c = RYB_CORNERS[`${ri}${yi}${bi}`];
+    for (let k = 0; k < 3; k++) out[k] += w * c[k];
+  }
+  return out.map(Math.round);
+}
+const PAINT = { red: [1, 0, 0], yellow: [0, 1, 0], blue: [0, 0, 1] };
+// Mix drops: counts { red, yellow, blue, white, black }. Hue from the RYB proportions, then white lightens and black darkens.
+function mixPaint(c) {
+  const r = c.red || 0, y = c.yellow || 0, b = c.blue || 0, w = c.white || 0, k = c.black || 0, hue = r + y + b, all = hue + w + k;
+  if (!all) return [255, 255, 255];
+  let rgb = hue ? ryb2rgb(r / Math.max(r, y, b), y / Math.max(r, y, b), b / Math.max(r, y, b)) : [255, 255, 255];
+  if (!hue && k) rgb = [30, 30, 30];
+  if (hue) { const tw = w / all, tk = k / all; rgb = rgb.map(v => v + (255 - v) * tw * 1.1); rgb = rgb.map(v => v * (1 - tk * 1.3)); }
+  else if (w && k) { const g = 255 * w / all; rgb = [g, g, g]; }
+  return rgb.map(v => Math.max(0, Math.min(255, Math.round(v))));
+}
+const css = rgb => `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+const sw = (rgb, big) => `<span class="swatch" style="background:${css(rgb)}${big ? ';width:130px;height:130px' : ''}"></span>`;
+const swc = rgb => ({ html: sw(rgb) });
+const NAMED = { red: [226, 35, 26], orange: [245, 130, 20], yellow: [255, 214, 0], green: [40, 150, 70], blue: [22, 82, 190], purple: [120, 40, 150], pink: [255, 160, 185], brown: [120, 72, 40], white: [255, 255, 255], black: [30, 30, 30], gray: [140, 140, 140], cyan: [0, 220, 235], magenta: [235, 30, 200], indigo: [75, 0, 160], violet: [170, 90, 230], 'light blue': [140, 190, 255], 'dark red': [130, 15, 10], 'dark green': [20, 80, 35], 'light green': [150, 220, 150] };
+const MIXES = [['red', 'yellow', 'orange'], ['yellow', 'blue', 'green'], ['red', 'blue', 'purple']];
+const LIGHT = [['red', 'green', 'yellow'], ['red', 'blue', 'magenta'], ['green', 'blue', 'cyan']];
+const RAINBOW = ['red', 'orange', 'yellow', 'green', 'blue', 'indigo', 'violet'];
+const OPPOSITE = { red: 'green', green: 'red', blue: 'orange', orange: 'blue', yellow: 'purple', purple: 'yellow' };
+const color = [
+  { name: 'Mixing paint', grade: 'K', gen() {
+      const [a, b, c] = pick(MIXES), wr = ['orange', 'green', 'purple', 'brown'].filter(x => x !== c);
+      return choice(`What color do ${a} and ${b} paint make?`, swc(NAMED[c]), sample(wr, 2).map(x => swc(NAMED[x])), { visual: `${sw(NAMED[a], 1)}<span class="op">+</span>${sw(NAMED[b], 1)}`, explain: `${cap(a)} and ${b} make ${c}.` });
+  } },
+  { name: 'Which paints make it?', grade: '1', gen() {
+      const [a, b, c] = pick(MIXES), pair = (x, y) => ({ html: `${sw(NAMED[x])}<b style="font-size:30px">+</b>${sw(NAMED[y])}` });
+      const others = MIXES.filter(m => m[2] !== c);
+      return choice(`Which two paints make ${c}?`, pair(a, b), others.map(m => pair(m[0], m[1])), { visual: sw(NAMED[c], 1), explain: `${cap(c)} comes from ${a} and ${b}.` });
+  } },
+  { name: 'Lighter and darker', grade: '1', gen() {
+      const base = pick(['red', 'blue', 'green', 'purple']), light = Math.random() < .5, mixed = mixPaint({ ...cnt(base), [light ? 'white' : 'black']: 1 });
+      const other = mixPaint({ ...cnt(base), [light ? 'black' : 'white']: 1 });
+      return choice(`What happens when you add ${light ? 'white' : 'black'} paint to ${base}?`, swc(mixed), [swc(other), swc(NAMED[pick(['yellow', 'orange'].filter(x => x !== base))])], { visual: `${sw(NAMED[base], 1)}<span class="op">+</span>${sw(NAMED[light ? 'white' : 'black'], 1)}`, explain: light ? `White makes a color lighter. That is called a tint.` : `Black makes a color darker. That is called a shade.` });
+  } },
+  { name: 'Rainbow order', grade: '2', gen() {
+      const i = rnd(0, 5), before = RAINBOW.slice(Math.max(0, i - 2), i + 1), next = RAINBOW[i + 1], wr = sample(RAINBOW.filter(x => x !== next && !before.includes(x)), 2);
+      return choice('In a rainbow, which color comes next?', swc(NAMED[next]), wr.map(x => swc(NAMED[x])), { visual: before.map(x => sw(NAMED[x])).join('') + '<span class="op">?</span>', explain: `A rainbow always goes red, orange, yellow, green, blue, indigo, violet. Some people remember ROY G BIV.` });
+  } },
+  { name: 'Mixing light', grade: '3', gen() {
+      if (Math.random() < .25) return choice('A screen shines red, green and blue light all together. What color do you see?', swc(NAMED.white), [swc(NAMED.black), swc(NAMED.brown)], { visual: ['red', 'green', 'blue'].map(x => `<span class="swatch" style="border-radius:50%;background:${css(NAMED[x])};box-shadow:0 0 30px ${css(NAMED[x])}"></span>`).join(''), explain: 'Light adds up. Red, green and blue light together make white. Paint is different: mixing every paint makes a dark brown.' });
+      const [a, b, c] = pick(LIGHT), wr = ['yellow', 'magenta', 'cyan', 'brown', 'purple'].filter(x => x !== c);
+      return choice(`A flashlight shines ${a} light and another shines ${b} light on the same spot. What color is the spot?`, swc(NAMED[c]), sample(wr, 2).map(x => swc(NAMED[x])), { visual: `<span class="swatch" style="border-radius:50%;background:${css(NAMED[a])};box-shadow:0 0 30px ${css(NAMED[a])}"></span><span class="op">+</span><span class="swatch" style="border-radius:50%;background:${css(NAMED[b])};box-shadow:0 0 30px ${css(NAMED[b])}"></span>`, explain: `Light mixes differently from paint. ${cap(a)} light and ${b} light make ${c}. That is how a screen makes ${c}.` });
+  } },
+  { name: 'The color wheel', grade: '3', gen() {
+      if (Math.random() < .5) { const c = pick(Object.keys(OPPOSITE)), o = OPPOSITE[c], wr = sample(Object.keys(OPPOSITE).filter(x => x !== c && x !== o), 2);
+        return choice(`Which color is opposite ${c} on the color wheel?`, swc(NAMED[o]), wr.map(x => swc(NAMED[x])), { visual: sw(NAMED[c], 1), explain: `${cap(o)} is opposite ${c}. Opposite colors are called complementary colors, and they make each other look bright.` }); }
+      const warm = Math.random() < .5, w = ['red', 'orange', 'yellow'], k = ['blue', 'green', 'purple'];
+      return choice(`Which is a ${warm ? 'warm' : 'cool'} color?`, swc(NAMED[pick(warm ? w : k)]), sample(warm ? k : w, 2).map(x => swc(NAMED[x])), { visual: warm ? '🔥' : '❄️', explain: warm ? 'Red, orange and yellow are warm colors, like fire and the sun.' : 'Blue, green and purple are cool colors, like water and leaves.' });
+  } },
+  { name: 'Mixing lab', grade: '3', gen() {
+      const recipes = [{ red: 1, yellow: 1 }, { red: 2, yellow: 1 }, { red: 1, yellow: 2 }, { yellow: 1, blue: 1 }, { yellow: 2, blue: 1 }, { yellow: 1, blue: 2 }, { red: 1, blue: 1 }, { red: 2, blue: 1 }, { red: 1, white: 1 }, { blue: 1, white: 2 }, { red: 1, yellow: 1, white: 1 }, { blue: 1, yellow: 1, black: 1 }];
+      const t = pick(recipes), paints = ['red', 'yellow', 'blue', 'white', 'black'];
+      return { prompt: 'Add drops of paint to match the color. Then press Check.', type: 'mix', paints, target: t, explain: `This color is ${recipeText(t)}.` };
+  } },
+  { name: 'Light and paint science', grade: '4', gen() {
+      const facts = [
+        ['Why does a leaf look green?', 'it reflects green light', ['it is full of green paint', 'it makes its own light']],
+        ['Why is a red apple red?', 'it reflects red light and soaks up the rest', ['it is hot inside', 'red light comes out of it']],
+        ['What does a prism do to white light?', 'splits it into a rainbow', ['makes it darker', 'turns it into paint']],
+        ['Why do we see a rainbow after rain?', 'sunlight bends through raindrops', ['clouds are painted', 'the rain is colored']],
+        ['A black shirt in the sun gets hot. Why?', 'black soaks up the most light', ['black reflects all light', 'black is heavier']],
+        ['What happens when you mix all the paints?', 'you get a dark brown', ['you get white', 'you get a rainbow']],
+      ];
+      const [q, r, wr] = pick(facts); return choice(q, { label: r, cls: 'word' }, wr.map(x => ({ label: x, cls: 'word' })), { visual: pick(['🌈', '🔦', '🍃', '🍎', '💎']), explain: `${cap(r)}.` });
+  } },
+];
+function cnt(name) { return name === 'purple' ? { red: 1, blue: 1 } : name === 'green' ? { yellow: 1, blue: 1 } : name === 'orange' ? { red: 1, yellow: 1 } : { [name]: 1 }; }
+function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+function recipeText(t) { const parts = Object.entries(t).map(([k, v]) => `${v} ${k}`); return parts.length > 1 ? parts.slice(0, -1).join(', ') + ' and ' + parts[parts.length - 1] : parts[0]; }
+// Same color when the drop counts are in the same proportion (2 red + 2 yellow is the same orange as 1 + 1).
+function sameRecipe(a, b) {
+  const keys = ['red', 'yellow', 'blue', 'white', 'black'], va = keys.map(k => a[k] || 0), vb = keys.map(k => b[k] || 0), sa = va.reduce((x, y) => x + y, 0), sb = vb.reduce((x, y) => x + y, 0);
+  if (!sa || !sb) return false;
+  return keys.every((k, i) => va[i] * sb === vb[i] * sa);
+}
+
+// ---------------------------------------------------------------------------
+// PATTERNS
+// ---------------------------------------------------------------------------
+const PSET = ['🔴', '🔵', '🟡', '🟢', '⭐', '🌙', '🐱', '🐶', '🍎', '🍌', '🔺', '⬛'];
+function seqVisual(items, blankAt) { return items.map((x, i) => i === blankAt ? `<span class="op" style="border:4px dashed var(--ink);border-radius:16px;padding:0 18px">?</span>` : `<span style="font-size:${typeof x === 'number' ? '52px;font-weight:900' : '60px'}">${x}</span>`).join(''); }
+const patterns = [
+  { name: 'What comes next?', grade: 'K', gen() {
+      const unit = sample(PSET, rnd(2, 3)), seq = Array.from({ length: unit.length * 2 + rnd(0, unit.length - 1) }, (_, i) => unit[i % unit.length]), next = unit[seq.length % unit.length];
+      return choice('What comes next?', { label: next }, sample(PSET.filter(x => x !== next), 2).map(x => ({ label: x })), { visual: seqVisual([...seq, '?'], seq.length), explain: `The pattern repeats ${unit.join(' ')}, so ${next} comes next.` });
+  } },
+  { name: 'Tricky patterns', grade: '1', gen() {
+      const [a, b, c] = sample(PSET, 3), unit = pick([[a, a, b], [a, b, b], [a, b, b, c], [a, a, b, c], [a, b, a, c]]), len = unit.length * 2 + rnd(0, unit.length - 1), seq = Array.from({ length: len }, (_, i) => unit[i % unit.length]), next = unit[len % unit.length];
+      return choice('What comes next?', { label: next }, sample([a, b, c, ...PSET].filter((x, i, s) => x !== next && s.indexOf(x) === i), 2).map(x => ({ label: x })), { visual: seqVisual([...seq, '?'], len), explain: `The part that repeats is ${unit.join(' ')}.` });
+  } },
+  { name: 'Skip counting', grade: '1', gen() {
+      const step = pick([2, 5, 10, 3]), start = step * rnd(0, 6), seq = Array.from({ length: 4 }, (_, i) => start + step * i), ans = start + step * 4;
+      return choice('What number comes next?', ans, nearby(ans, 2, step, 0), { visual: seqVisual([...seq, '?'], 4), speak: `${seq.join(', ')}. What comes next?`, explain: `It counts by ${step}s. ${seq[3]} + ${step} = ${ans}.` });
+  } },
+  { name: 'Number rules', grade: '2', gen() {
+      const up = Math.random() < .6, step = rnd(3, 9), start = up ? rnd(1, 30) : rnd(50, 90), seq = Array.from({ length: 4 }, (_, i) => start + (up ? step : -step) * i), ans = seq[3] + (up ? step : -step);
+      return { prompt: 'What number comes next?', speak: `${seq.join(', ')}. What comes next?`, type: 'number', answer: ans, visual: seqVisual([...seq, '?'], 4), explain: `The rule is ${up ? 'add' : 'take away'} ${step}. ${seq[3]} ${up ? '+' : '−'} ${step} = ${ans}.` };
+  } },
+  { name: 'Missing in the middle', grade: '2', gen() {
+      const step = rnd(2, 12), start = rnd(1, 40), seq = Array.from({ length: 5 }, (_, i) => start + step * i), gap = rnd(1, 3), ans = seq[gap];
+      return { prompt: 'Which number is missing?', speak: 'Which number is missing?', type: 'number', answer: ans, visual: seqVisual(seq, gap), explain: `Each number is ${step} more than the one before, so the missing one is ${ans}.` };
+  } },
+  { name: 'Growing patterns', grade: '3', gen() {
+      const kind = rnd(0, 2);
+      if (kind === 0) { const s = rnd(1, 5), seq = [s, s * 2, s * 4, s * 8], ans = s * 16; return { prompt: 'What comes next?', type: 'number', answer: ans, visual: seqVisual([...seq, '?'], 4), speak: `${seq.join(', ')}. What comes next?`, explain: `Each number doubles. ${seq[3]} × 2 = ${ans}.` }; }
+      if (kind === 1) { const s = rnd(1, 10), seq = [s, s + 1, s + 3, s + 6, s + 10], ans = s + 15; return { prompt: 'What comes next?', type: 'number', answer: ans, visual: seqVisual([...seq, '?'], 5), speak: `${seq.join(', ')}. What comes next?`, explain: `Add 1, then 2, then 3, then 4. Next add 5: ${seq[4]} + 5 = ${ans}.` }; }
+      const seq = [1, 4, 9, 16], ans = 25; return { prompt: 'These dots make squares. What comes next?', type: 'number', answer: ans, visual: seqVisual([...seq, '?'], 4), speak: '1, 4, 9, 16. What comes next?', explain: '1×1, 2×2, 3×3, 4×4... next is 5×5 = 25.' };
+  } },
+  { name: 'Two-step rules', grade: '3', gen() {
+      if (Math.random() < .5) { const a = rnd(3, 9), b = rnd(1, 4), s = rnd(10, 30), seq = [s]; for (let i = 0; i < 5; i++) seq.push(seq[i] + (i % 2 ? -b : a)); const ans = seq[5] + (5 % 2 ? -b : a);
+        return { prompt: 'Find the rule. What comes next?', type: 'number', answer: ans, visual: seqVisual([...seq, '?'], 6), speak: `${seq.join(', ')}. What comes next?`, explain: `It goes add ${a}, take away ${b}, add ${a}, take away ${b}... next is ${ans}.` }; }
+      const s = rnd(1, 4), seq = [s]; for (let i = 0; i < 3; i++) seq.push(seq[i] * 2 + 1); const ans = seq[3] * 2 + 1;
+      return { prompt: 'Find the rule. What comes next?', type: 'number', answer: ans, visual: seqVisual([...seq, '?'], 4), speak: `${seq.join(', ')}. What comes next?`, explain: `Double it, then add 1. ${seq[3]} × 2 + 1 = ${ans}.` };
+  } },
+  { name: 'Turning shapes', grade: '4', gen() {
+      const ar = ['⬆️', '↗️', '➡️', '↘️', '⬇️', '↙️', '⬅️', '↖️'], step = pick([1, 2, 6, 7]), s = rnd(0, 7), seq = Array.from({ length: 4 }, (_, i) => ar[(s + step * i) % 8]), ans = ar[(s + step * 4) % 8];
+      return choice('The arrow turns the same way each time. Which comes next?', { label: ans }, sample(ar.filter(x => x !== ans), 2).map(x => ({ label: x })), { visual: seqVisual([...seq, '?'], 4), explain: `Each time it turns ${step === 1 || step === 7 ? 'one eighth' : 'a quarter'} of the way ${step < 4 ? 'clockwise' : 'counterclockwise'}.` });
+  } },
+];
+
+// ---------------------------------------------------------------------------
+// TIME & MONEY
+// ---------------------------------------------------------------------------
+function clockSVG(h, m, size = 220) {
+  // Numbers scale with the clock so a small clock is as readable as a big one.
+  const c = size / 2, r = c - 8, fs = Math.round(size * .095), nr = r - size * .16, ticks = Array.from({ length: 12 }, (_, i) => { const a = i * Math.PI / 6; return `<text x="${c + Math.sin(a) * nr}" y="${c - Math.cos(a) * nr + fs * .36}" font-size="${fs}" font-weight="800" text-anchor="middle" fill="#2B2140">${i || 12}</text>`; }).join('');
+  const mins = Array.from({ length: 60 }, (_, i) => { const a = i * Math.PI / 30, l = i % 5 ? 5 : 10; return `<line x1="${c + Math.sin(a) * r}" y1="${c - Math.cos(a) * r}" x2="${c + Math.sin(a) * (r - l)}" y2="${c - Math.cos(a) * (r - l)}" stroke="#2B2140" stroke-width="${i % 5 ? 2 : 4}"/>`; }).join('');
+  const ha = ((h % 12) + m / 60) * Math.PI / 6, ma = m * Math.PI / 30;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><circle cx="${c}" cy="${c}" r="${r}" fill="#fff" stroke="#2B2140" stroke-width="6"/>${mins}${ticks}<line x1="${c}" y1="${c}" x2="${c + Math.sin(ha) * r * .45}" y2="${c - Math.cos(ha) * r * .45}" stroke="#2B2140" stroke-width="${size * .045}" stroke-linecap="round"/><line x1="${c}" y1="${c}" x2="${c + Math.sin(ma) * r * .72}" y2="${c - Math.cos(ma) * r * .72}" stroke="#FF4F8B" stroke-width="${size * .028}" stroke-linecap="round"/><circle cx="${c}" cy="${c}" r="8" fill="#2B2140"/></svg>`;
+}
+const tstr = (h, m) => `${h}:${String(m).padStart(2, '0')}`;
+function timeSpeak(h, m) { return m === 0 ? `${h} o'clock` : `${h} ${m < 10 ? 'oh ' + m : m}`; }
+function clockQ(minuteChoices, name) {
+  const h = rnd(1, 12), m = pick(minuteChoices), wrong = new Set();
+  while (wrong.size < 2) { const wh = Math.random() < .5 ? h : ((h + rnd(1, 10)) % 12) + 1, wm = Math.random() < .5 ? m : pick(minuteChoices); if (wh !== h || wm !== m) wrong.add(tstr(wh, wm)); }
+  return choice('What time does the clock show?', tstr(h, m), [...wrong], { visual: clockSVG(h, m), explain: `The short hand points to the hour (${h}) and the long pink hand shows the minutes (${m}). It is ${tstr(h, m)}.` });
+}
+const COINS = [{ n: 'penny', v: 1, d: 64, c: '#C8743A' }, { n: 'nickel', v: 5, d: 78, c: '#B9BCC2' }, { n: 'dime', v: 10, d: 58, c: '#D8DADF' }, { n: 'quarter', v: 25, d: 90, c: '#C9CCD2' }];
+const coinSVG = k => `<svg width="${k.d + 8}" height="${k.d + 8}"><circle cx="${k.d / 2 + 4}" cy="${k.d / 2 + 4}" r="${k.d / 2}" fill="${k.c}" stroke="#2B2140" stroke-width="3"/><text x="${k.d / 2 + 4}" y="${k.d / 2 + 12}" font-size="${k.d / 3.2}" font-weight="900" text-anchor="middle" fill="#2B2140">${k.v}¢</text></svg>`;
+const cents = v => v >= 100 ? `$${(v / 100).toFixed(2)}` : `${v}¢`;
+const time = [
+  { name: "O'clock", grade: 'K', gen() { return clockQ([0]); } },
+  { name: 'Half past', grade: '1', gen() { return clockQ([0, 30]); } },
+  { name: 'Coins', grade: '1', gen() {
+      const k = pick(COINS); return choice(`How much is this coin worth?`, cents(k.v), COINS.filter(x => x !== k).slice(0, 2).map(x => cents(x.v)), { visual: coinSVG(k), explain: `A ${k.n} is worth ${k.v} cent${k.v > 1 ? 's' : ''}.` });
+  } },
+  { name: 'Quarter hours', grade: '2', gen() { return clockQ([0, 15, 30, 45]); } },
+  { name: 'Count the coins', grade: '2', gen() {
+      const n = rnd(3, 6), coins = Array.from({ length: n }, () => pick(COINS)).sort((a, b) => b.v - a.v), total = coins.reduce((s, k) => s + k.v, 0);
+      return { prompt: 'How many cents are these coins worth?', type: 'number', answer: total, visual: coins.map(coinSVG).join(''), explain: `Start with the biggest coins: ${coins.map(k => k.v).join(' + ')} = ${total} cents.` };
+  } },
+  { name: 'Five-minute times', grade: '2', gen() { return clockQ([5, 10, 20, 25, 35, 40, 50, 55]); } },
+  { name: 'How much time passed?', grade: '3', gen() {
+      const h = rnd(1, 10), m = pick([0, 15, 30, 45]), add = pick([15, 30, 45, 60, 90, 120]), em = m + add, eh = h + Math.floor(em / 60), endm = em % 60;
+      const label = a => a < 60 ? `${a} minutes` : a % 60 ? `${Math.floor(a / 60)} hour ${a % 60} minutes` : `${a / 60} hour${a > 60 ? 's' : ''}`;
+      return choice(`The movie starts at ${tstr(h, m)} and ends at ${tstr(((eh - 1) % 12) + 1, endm)}. How long is it?`, label(add), sample([15, 30, 45, 60, 90, 120].filter(x => x !== add), 2).map(label), { visual: clockSVG(h, m, 170) + '<span class="op">➜</span>' + clockSVG(((eh - 1) % 12) + 1, endm, 170), speak: `The movie starts at ${timeSpeak(h, m)} and ends at ${timeSpeak(((eh - 1) % 12) + 1, endm)}. How long is it?`, explain: `Count forward from ${tstr(h, m)}: it is ${label(add)}.` });
+  } },
+  { name: 'Making change', grade: '3', gen() {
+      const price = rnd(11, 95), pay = 100; return { prompt: `A toy costs ${price}¢. You pay with $1.00. How many cents do you get back?`, speak: `A toy costs ${price} cents. You pay with one dollar. How many cents do you get back?`, type: 'number', answer: pay - price, visual: '🧸💵', explain: `A dollar is 100 cents. 100 − ${price} = ${pay - price} cents back.` };
+  } },
+];
+
+// ---------------------------------------------------------------------------
+// SHAPES & FRACTIONS
+// ---------------------------------------------------------------------------
+function polySVG(n, size = 200, fill = '#9B6BFF') { const c = size / 2, r = c - 10, pts = Array.from({ length: n }, (_, i) => { const a = -Math.PI / 2 + i * 2 * Math.PI / n; return `${c + r * Math.cos(a)},${c + r * Math.sin(a)}`; }).join(' '); return `<svg width="${size}" height="${size}"><polygon points="${pts}" fill="${fill}" stroke="#2B2140" stroke-width="6"/></svg>`; }
+const SHAPES = [['triangle', 3], ['square', 4], ['pentagon', 5], ['hexagon', 6], ['octagon', 8]];
+function shapeSVG(name) {
+  if (name === 'circle') return `<svg width="200" height="200"><circle cx="100" cy="100" r="88" fill="#58C7F0" stroke="#2B2140" stroke-width="6"/></svg>`;
+  if (name === 'rectangle') return `<svg width="260" height="170"><rect x="8" y="8" width="244" height="150" fill="#5CD38B" stroke="#2B2140" stroke-width="6"/></svg>`;
+  if (name === 'square') return `<svg width="190" height="190"><rect x="8" y="8" width="174" height="174" fill="#FFC93C" stroke="#2B2140" stroke-width="6"/></svg>`;
+  const s = SHAPES.find(x => x[0] === name); return polySVG(s[1], 200, pick(['#9B6BFF', '#FF8A5B', '#FF4F8B']));
+}
+function fracSVG(num, den, kind = pick(['circle', 'bar'])) {
+  if (kind === 'circle') { const c = 100, r = 88; let out = '';
+    for (let i = 0; i < den; i++) { const a0 = -Math.PI / 2 + i * 2 * Math.PI / den, a1 = a0 + 2 * Math.PI / den, big = 2 * Math.PI / den > Math.PI ? 1 : 0;
+      out += den === 1 ? `<circle cx="${c}" cy="${c}" r="${r}" fill="${i < num ? '#FF4F8B' : '#fff'}" stroke="#2B2140" stroke-width="5"/>` : `<path d="M${c},${c} L${c + r * Math.cos(a0)},${c + r * Math.sin(a0)} A${r},${r} 0 ${big} 1 ${c + r * Math.cos(a1)},${c + r * Math.sin(a1)} Z" fill="${i < num ? '#FF4F8B' : '#fff'}" stroke="#2B2140" stroke-width="5"/>`; }
+    return `<svg width="200" height="200">${out}</svg>`; }
+  const w = 300, h = 90, sw2 = w / den; let out = ''; for (let i = 0; i < den; i++) out += `<rect x="${6 + i * sw2}" y="6" width="${sw2}" height="${h}" fill="${i < num ? '#FF4F8B' : '#fff'}" stroke="#2B2140" stroke-width="5"/>`;
+  return `<svg width="${w + 12}" height="${h + 12}">${out}</svg>`;
+}
+function gridSVG(wc, hc, cell = 34) { let out = ''; for (let y = 0; y < hc; y++) for (let x = 0; x < wc; x++) out += `<rect x="${6 + x * cell}" y="${6 + y * cell}" width="${cell}" height="${cell}" fill="#CFF5DC" stroke="#2B2140" stroke-width="3"/>`; return `<svg width="${wc * cell + 12}" height="${hc * cell + 12}">${out}</svg>`; }
+const shapes = [
+  { name: 'Shape names', grade: 'K', gen() {
+      const all = ['circle', 'triangle', 'square', 'rectangle', 'pentagon', 'hexagon'], s = pick(all);
+      return choice('What shape is this?', { label: s, cls: 'word' }, sample(all.filter(x => x !== s), 2).map(x => ({ label: x, cls: 'word' })), { visual: shapeSVG(s), explain: `This is a ${s}.` });
+  } },
+  { name: 'Sides and corners', grade: '1', gen() {
+      const [n, k] = pick(SHAPES), corners = Math.random() < .5;
+      return choice(`How many ${corners ? 'corners' : 'sides'} does a ${n} have?`, k, nearby(k, 2, 2, 3), { visual: shapeSVG(n), explain: `A ${n} has ${k} sides and ${k} corners.` });
+  } },
+  { name: 'Halves, thirds, fourths', grade: '2', gen() {
+      const den = pick([2, 3, 4, 6, 8]), num = rnd(1, den - 1), ans = `${num}/${den}`, wr = new Set();
+      while (wr.size < 2) { const d = pick([2, 3, 4, 6, 8]), n = rnd(1, d - 1); if (`${n}/${d}` !== ans) wr.add(`${n}/${d}`); }
+      return choice('What fraction is colored pink?', ans, [...wr], { visual: fracSVG(num, den), speak: 'What fraction is colored pink?', explain: `There are ${den} equal parts and ${num} ${num > 1 ? 'are' : 'is'} pink, so it is ${num} out of ${den}: ${ans}.` });
+  } },
+  { name: 'Fraction of a group', grade: '3', gen() {
+      const den = pick([2, 3, 4, 5]), per = rnd(2, 5), total = den * per, e = pick(OBJ);
+      return { prompt: `What is 1/${den} of ${total} ${OBJN[e]}?`, speak: `What is one ${['', '', 'half', 'third', 'fourth', 'fifth'][den]} of ${total} ${OBJN[e]}?`, type: 'number', answer: per, visual: `<span style="font-size:40px;line-height:1.2;max-width:700px;display:block;text-align:center">${emojiRow(e, total)}</span>`, explain: `Share ${total} into ${den} equal groups: each group has ${per}.` };
+  } },
+  { name: 'Compare fractions', grade: '3', gen() {
+      const same = Math.random() < .5; let a, b;
+      if (same) { const n = rnd(1, 3); const d1 = rnd(n + 1, 8); let d2; do { d2 = rnd(n + 1, 8); } while (d2 === d1); a = [n, d1]; b = [n, d2]; } else { const d = rnd(3, 8); const n1 = rnd(1, d - 1); let n2; do { n2 = rnd(1, d - 1); } while (n2 === n1); a = [n1, d]; b = [n2, d]; }
+      const big = a[0] / a[1] > b[0] / b[1] ? a : b, small = big === a ? b : a;
+      return choice('Which fraction is bigger?', { html: `<span style="display:flex;flex-direction:column;align-items:center">${fracSVG(big[0], big[1], 'bar')}<b>${big[0]}/${big[1]}</b></span>` }, [{ html: `<span style="display:flex;flex-direction:column;align-items:center">${fracSVG(small[0], small[1], 'bar')}<b>${small[0]}/${small[1]}</b></span>` }], { explain: same ? `When the tops are the same, fewer parts means bigger parts. ${big[0]}/${big[1]} is bigger.` : `When the bottoms are the same, more parts colored is bigger. ${big[0]}/${big[1]} is bigger.` });
+  } },
+  { name: 'Perimeter', grade: '3', gen() {
+      const w = rnd(2, 12), h = rnd(2, 9);
+      return { prompt: `How far is it all the way around this rectangle?`, type: 'number', answer: 2 * (w + h), visual: `<svg width="320" height="220"><rect x="40" y="30" width="240" height="150" fill="#E8F7FF" stroke="#2B2140" stroke-width="6"/><text x="160" y="22" font-size="26" font-weight="900" text-anchor="middle">${w} cm</text><text x="160" y="212" font-size="26" font-weight="900" text-anchor="middle">${w} cm</text><text x="20" y="112" font-size="26" font-weight="900" text-anchor="middle">${h}</text><text x="302" y="112" font-size="26" font-weight="900" text-anchor="middle">${h}</text></svg>`, speak: `A rectangle is ${w} centimeters long and ${h} centimeters wide. How far is it all the way around?`, explain: `Add all four sides: ${w} + ${h} + ${w} + ${h} = ${2 * (w + h)} cm. That is the perimeter.` };
+  } },
+  { name: 'Area', grade: '3', gen() {
+      const w = rnd(2, 9), h = rnd(2, 6);
+      return { prompt: 'How many squares cover this rectangle?', type: 'number', answer: w * h, visual: gridSVG(w, h), explain: `${h} rows of ${w} squares: ${h} × ${w} = ${w * h}. That is the area.` };
+  } },
+  { name: 'Equal fractions', grade: '4', gen() {
+      const [n, d] = pick([[1, 2], [1, 3], [2, 3], [1, 4], [3, 4], [2, 5]]), k = rnd(2, 4);
+      return { prompt: `${n}/${d} = ?/${d * k}`, speak: `${n} over ${d} is the same as what over ${d * k}?`, type: 'number', answer: n * k, visual: fracSVG(n, d, 'bar') + '<span class="op">=</span>' + fracSVG(n * k, d * k, 'bar').replace(/fill="#FF4F8B"/g, 'fill="#fff"'), explain: `The bottom was multiplied by ${k}, so multiply the top by ${k}: ${n} × ${k} = ${n * k}.` };
+  } },
+];
+
+const SUBJECTS = [
+  { id: 'reading', name: 'Reading', icon: '📖', color: '#FFE7F0', levels: reading, start: 3 },
+  { id: 'math', name: 'Math', icon: '➗', color: '#E8F7FF', levels: math, start: 3 },
+  { id: 'color', name: 'Color Lab', icon: '🎨', color: '#FFF4D6', levels: color, start: 2 },
+  { id: 'patterns', name: 'Patterns', icon: '🔁', color: '#EAFBEF', levels: patterns, start: 3 },
+  { id: 'time', name: 'Time & Money', icon: '⏰', color: '#F1EAFF', levels: time, start: 3 },
+  { id: 'shapes', name: 'Shapes & Fractions', icon: '🔺', color: '#FFEDE4', levels: shapes, start: 2 },
+];
+const UP_STREAK = 4, WARMUP = 8;
+
+// ---------------------------------------------------------------------------
+// Progress
+// ---------------------------------------------------------------------------
+const STORE = 'levelup-v1';
+let prog = {};
+try { prog = JSON.parse(localStorage.getItem(STORE) || '{}') || {}; } catch (e) { prog = {}; }
+function P(id) { const s = SUBJECTS.find(x => x.id === id); if (!prog[id]) prog[id] = { level: s.start, streak: 0, recent: [], played: 0, stars: 0, best: s.start }; return prog[id]; }
+function save() { try { localStorage.setItem(STORE, JSON.stringify(prog)); } catch (e) {} }
+function totalStars() { return SUBJECTS.reduce((s, x) => s + (prog[x.id] ? prog[x.id].stars : 0), 0); }
+
+// Returns 'up', 'down' or null after recording one answer.
+function record(id, ok) {
+  const p = P(id), s = SUBJECTS.find(x => x.id === id), max = s.levels.length - 1;
+  p.played++; if (ok) { p.stars++; p.streak++; } else p.streak = 0;
+  p.recent.push(ok ? 1 : 0); if (p.recent.length > 4) p.recent.shift();
+  let move = null;
+  const need = p.played <= WARMUP ? 2 : UP_STREAK;
+  if (ok && p.streak >= need && p.level < max) { p.level++; p.streak = 0; p.recent = []; move = 'up'; }
+  else if (!ok && p.recent.length >= 2 && p.recent.filter(x => !x).length >= 2 && p.level > 0) { p.level--; p.streak = 0; p.recent = []; move = 'down'; }
+  p.best = Math.max(p.best, p.level);
+  save(); return move;
+}
+
+// ---------------------------------------------------------------------------
+// Screens
+// ---------------------------------------------------------------------------
+function show(id) { document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === id)); }
+function gradeLabel(g) { return g === 'K' ? 'Kindergarten' : `Grade ${g}`; }
+function renderHome() {
+  const g = $('grid'); g.innerHTML = '';
+  const q = document.createElement('button'); q.className = 'card quest';
+  q.innerHTML = `<div class="icon">🗺️</div><div><div class="name">Daily Quest</div><div class="lvl">Ten questions from every subject</div></div>`;
+  q.onclick = () => startQuest(); g.appendChild(q);
+  for (const s of SUBJECTS) {
+    const p = P(s.id), lv = s.levels[p.level], pct = Math.round(100 * Math.min(p.streak, UP_STREAK) / UP_STREAK);
+    const b = document.createElement('button'); b.className = 'card'; b.style.background = s.color;
+    b.innerHTML = `<span class="badge">Level ${p.level + 1}</span><div class="icon">${s.icon}</div><div class="name">${s.name}</div><div class="lvl">${esc(lv.name)} · ${gradeLabel(lv.grade)}</div><div class="bar"><i style="width:${pct}%"></i></div>`;
+    b.onclick = () => startSubject(s.id); g.appendChild(b);
+  }
+  $('totalStars').textContent = '⭐ ' + totalStars();
+  show('home');
+}
+
+let mode = null, cur = null, curSubj = null, questLeft = 0, questRight = 0, questSeq = [], locked = false, typed = '', mixCounts = {}, mixHistory = [];
+function startSubject(id) { mode = 'subject'; curSubj = id; next(); show('play'); }
+function startQuest() { mode = 'quest'; questLeft = 10; questRight = 0; questSeq = shuffle([...SUBJECTS.map(s => s.id), ...sample(SUBJECTS.map(s => s.id), 4)]); next(); show('play'); }
+
+function next() {
+  hideFeedback();
+  if (mode === 'quest') { if (questLeft <= 0) return endQuest(); curSubj = questSeq[10 - questLeft]; }
+  const s = SUBJECTS.find(x => x.id === curSubj), p = P(curSubj), lv = s.levels[p.level];
+  let q = null, tries = 0; while (!q && tries++ < 5) { try { q = lv.gen(); } catch (e) { q = null; } }
+  cur = q; locked = false;
+  $('subj').textContent = (mode === 'quest' ? `🗺️ ${11 - questLeft}/10 · ` : '') + s.icon + ' ' + s.name;
+  $('lvlBadge').textContent = `Level ${p.level + 1}: ${lv.name}`;
+  $('streak').textContent = p.streak ? '🔥 ' + p.streak : '';
+  renderQuestion(q);
+}
+
+function renderQuestion(q) {
+  $('prompt').textContent = q.prompt;
+  const pass = $('passage'); pass.classList.toggle('on', !!q.passage); pass.innerHTML = q.passage || '';
+  $('visual').innerHTML = q.visual || '';
+  const ans = $('answers'); ans.innerHTML = '';
+  $('entry').classList.toggle('on', q.type === 'number');
+  $('mixer').classList.toggle('on', q.type === 'mix');
+  if (q.type === 'choice') q.choices.forEach((c, i) => {
+    const b = document.createElement('button'); if (c.cls) b.className = c.cls;
+    if (c.html) b.innerHTML = c.html; else b.textContent = c.label;
+    b.onclick = () => answer(i === q.answer, b); ans.appendChild(b);
+  });
+  if (q.type === 'number') { typed = ''; $('typed').textContent = ''; }
+  if (q.type === 'mix') setupMix(q);
+  speakQuestion();
+}
+// Reads the passage (if any) and then the question.
+function speakQuestion() { if (!cur) return; const passage = cur.passage ? cur.passage.replace(/<[^>]+>/g, '') + ' ' : ''; say(passage + (cur.speak || cur.prompt)); }
+
+function buildPad() {
+  const pad = $('pad'); pad.innerHTML = '';
+  for (const k of ['1', '2', '3', '4', '5', '⌫', '6', '7', '8', '9', '0', '✔']) {
+    const b = document.createElement('button'); b.textContent = k; if (k === '✔') b.className = 'go'; if (k === '⌫') b.className = 'del';
+    b.onclick = () => {
+      if (locked) return;
+      if (k === '⌫') typed = typed.slice(0, -1);
+      else if (k === '✔') { if (typed) answer(+typed === cur.answer, null); return; }
+      else if (typed.length < 5) typed = (typed === '0' ? '' : typed) + k;
+      $('typed').textContent = typed;
+    };
+    pad.appendChild(b);
+  }
+}
+addEventListener('keydown', e => { if (!cur || cur.type !== 'number' || locked) return; if (/^[0-9]$/.test(e.key) && typed.length < 5) typed += e.key; else if (e.key === 'Backspace') typed = typed.slice(0, -1); else if (e.key === 'Enter' && typed) return answer(+typed === cur.answer, null); $('typed').textContent = typed; });
+
+function setupMix(q) {
+  mixCounts = {}; mixHistory = [];
+  $('target').style.background = css(mixPaint(q.target));
+  const d = $('drops'); d.innerHTML = '';
+  for (const p of q.paints) { const b = document.createElement('button'); b.style.background = css(NAMED[p]); b.dataset.paint = p; if (p === 'white') b.style.color = '#2B2140'; b.onclick = () => { if (locked) return; mixCounts[p] = (mixCounts[p] || 0) + 1; mixHistory.push(p); paintBowl(); }; d.appendChild(b); }
+  paintBowl();
+}
+function paintBowl() {
+  $('bowl').style.background = Object.keys(mixCounts).length ? css(mixPaint(mixCounts)) : '#fff';
+  document.querySelectorAll('#drops button').forEach(b => b.textContent = mixCounts[b.dataset.paint] || '');
+}
+$('mixUndo').onclick = () => { if (locked) return; const p = mixHistory.pop(); if (p) { mixCounts[p]--; if (!mixCounts[p]) delete mixCounts[p]; } paintBowl(); };
+$('mixClear').onclick = () => { if (locked) return; mixCounts = {}; mixHistory = []; paintBowl(); };
+$('mixCheck').onclick = () => { if (locked || !Object.keys(mixCounts).length) return; answer(sameRecipe(mixCounts, cur.target), null); };
+
+const PRAISE = ['Yes!', 'Great job!', 'You got it!', 'Super!', 'Nice thinking!', 'Awesome!', 'Correct!'];
+function answer(ok, btn) {
+  if (locked) return; locked = true;
+  const q = cur;
+  if (q.type === 'choice') { const bs = [...$('answers').children]; if (btn && !ok) btn.classList.add('wrong'); bs[q.answer].classList.add('right'); }
+  const move = record(curSubj, ok);
+  if (mode === 'quest') { questLeft--; if (ok) questRight++; }
+  if (ok) { sparkle(); const w = pick(PRAISE); say(w); showFeedback(true, w + (q.type === 'number' ? ` ${q.answer} is right.` : ''), move); }
+  else { const right = q.type === 'number' ? `The answer is ${q.answer}. ` : ''; say('Not quite. ' + right + q.explain); showFeedback(false, right + q.explain, move); }
+}
+function showFeedback(good, msg, move) {
+  const f = $('feedback'); f.classList.add('on'); f.classList.toggle('good', good); $('fbMsg').textContent = msg;
+  $('streak').textContent = P(curSubj).streak ? '🔥 ' + P(curSubj).streak : '';
+  if (move) setTimeout(() => levelPop(move), 900);
+  else if (good) setTimeout(() => { if (locked && $('feedback').classList.contains('on') && !$('pop').classList.contains('on')) next(); }, 1800);
+}
+function hideFeedback() { $('feedback').classList.remove('on'); }
+$('fbNext').onclick = () => next();
+
+function levelPop(move) {
+  const s = SUBJECTS.find(x => x.id === curSubj), p = P(curSubj), lv = s.levels[p.level];
+  $('popBig').textContent = move === 'up' ? '🚀' : '🪜';
+  $('popTitle').textContent = move === 'up' ? `Level ${p.level + 1}!` : `Let's practice Level ${p.level + 1}`;
+  $('popSub').textContent = move === 'up' ? `${s.name}: ${lv.name} (${gradeLabel(lv.grade)})` : `${lv.name} again for a bit. You've got this.`;
+  $('pop').classList.add('on'); say(move === 'up' ? `Level up! Now: ${lv.name}.` : `Let's practice ${lv.name} a little more.`);
+  if (move === 'up') for (let i = 0; i < 3; i++) setTimeout(sparkle, i * 250);
+}
+$('popOk').onclick = () => { $('pop').classList.remove('on'); if (mode === 'quest' && questLeft <= 0) return endQuest(); if ($('play').classList.contains('on')) next(); };
+function endQuest() {
+  hideFeedback(); $('popBig').textContent = questRight >= 8 ? '🏆' : questRight >= 5 ? '🌟' : '👍';
+  $('popTitle').textContent = `Quest done! ${questRight} out of 10`; $('popSub').textContent = 'Come back tomorrow for a new quest.';
+  $('pop').classList.add('on'); say(`Quest done! You got ${questRight} out of 10.`); mode = 'done';
+  $('popOk').onclick = () => { $('pop').classList.remove('on'); $('popOk').onclick = popOkDefault; renderHome(); };
+}
+const popOkDefault = $('popOk').onclick;
+
+function sparkle() { for (let i = 0; i < 10; i++) { const s = document.createElement('div'); s.className = 'spark'; s.textContent = pick(['⭐', '✨', '🌟', '🎉']); s.style.left = rnd(10, 90) + 'vw'; s.style.top = rnd(30, 80) + 'vh'; document.body.appendChild(s); requestAnimationFrame(() => { s.style.transform = `translateY(-${rnd(80, 200)}px) rotate(${rnd(-90, 90)}deg)`; s.style.opacity = 0; }); setTimeout(() => s.remove(), 1100); } }
+
+$('back').onclick = () => { try { speechSynthesis.cancel(); } catch (e) {} VOICE.stop(); hideFeedback(); renderHome(); };
+$('hear').onclick = () => speakQuestion();
+$('skip').onclick = () => { if (mode === 'quest') return; next(); };
+buildPad();
+renderHome();
+// Testing hook (used by the package's headless checks; harmless on the tablet).
+window.LEVELUP = { SUBJECTS, record, P, prog: () => prog, mixPaint, sameRecipe, current: () => cur };
+</script>
+</body>
+</html>

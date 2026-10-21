@@ -1,6 +1,10 @@
 # Changes
 
 ## 2026-10-21
+- New app: **Level Up**, replacing the Kindergarten Kids Learning tile. Six subjects (Reading, Math, Color Lab,
+  Patterns, Time & Money, Shapes & Fractions), 50 levels from kindergarten to about 4th grade, generated questions,
+  a level per subject that moves up after four right in a row and down after two misses in four, and a Daily Quest
+  across subjects. `Reset-KidTablet.ps1` no longer re-adds Kindergarten Kids Learning.
 - Home pill: every tap counts. Touch and pen are read as pointer input in the pill itself; before, Windows turned a
   tap into mouse events and a mouse-leave arriving mid-tap cancelled the press, so taps were lost at random.
 - Home pill: shows over every app. It is pushed back on top on each check (an app that puts itself on top used to

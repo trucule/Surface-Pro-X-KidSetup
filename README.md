@@ -12,9 +12,10 @@ Built for a Surface Pro X. Any Windows 11 Pro device with a touch screen works t
 - Edge locked to an allowlist of domains. Everything else is blocked.
 - A touch-first home screen (`KidHome.exe`, built on the tablet from source in the module) with large tiles, a
   wallpaper, and a Home button that closes any app.
-- Eight offline HTML apps: Draw With Me (step-by-step drawing lessons), Trace With Me (letters, numbers, shapes),
-  Count With Me, Music Box, Story Maker (a read-aloud branching story app), Kitchen Lab, Chemistry Lab, and
-  Playground Lab (3D physics). Each one is described below.
+- Nine offline HTML apps: Level Up (reading, math, color science, patterns, time and money, shapes and fractions,
+  each climbing from kindergarten to about 4th grade), Draw With Me (step-by-step drawing lessons), Trace With Me
+  (letters, numbers, shapes), Count With Me, Music Box, Story Maker (a read-aloud branching story app), Kitchen Lab,
+  Chemistry Lab, and Playground Lab (3D physics). Each one is described below.
 - Optional AI: with an Anthropic API key, Draw With Me learns new drawings on request and Story Maker writes each
   scene live, with a daily cap.
 - Optional natural voices: pre-rendered neural voice clips for every spoken line, or live voices from Azure Speech,
@@ -61,7 +62,7 @@ kiosk tablet.
 
 ## Leaving an app
 While an app is in front, the launcher pins a large **Home** pill over the top-right corner of the screen, on top
-of the app window's own caption buttons. One tap closes every open app (politely first, then force after 3 seconds)
+of the app window's own caption buttons. One tap closes every open app (politely first, then force after 1.5 seconds, Store apps included)
 and brings the tiles back. Turning the screen off and on does the same thing.
 
 ## Make it yours
@@ -121,6 +122,28 @@ Maker section below.
 
 ## The apps
 These notes were written for one child, so they say "she". Everything applies to any child.
+
+### Level Up
+`apps/level-up.html` has six subjects, each a ladder of levels from kindergarten to about 4th grade:
+- **Reading**: picture words, tricky spellings, finishing sentences, opposites and synonyms, short and longer stories
+  with comprehension questions, prefixes and suffixes, meaning from context.
+- **Math**: adding and subtracting, regrouping, place value, three-digit math, times tables, division facts, word
+  problems, two-digit by one-digit multiplying. Number answers are typed on a big keypad.
+- **Color Lab**: paint mixing (red, yellow, blue), tints and shades, rainbow order, mixing light (red, green, blue),
+  the color wheel, a mixing lab where she adds drops to match a color in the right proportion, and why things look
+  the color they do.
+- **Patterns**: repeating patterns, skip counting, number rules, missing numbers, growing and two-step patterns,
+  turning shapes.
+- **Time & Money**: analog clocks from o'clock to five-minute times, elapsed time, coin values, counting coins, making
+  change.
+- **Shapes & Fractions**: shape names, sides and corners, fractions of shapes and groups, comparing fractions,
+  perimeter, area, equivalent fractions.
+
+Each subject keeps its own level. Four right in a row moves up; two misses in the last four moves down one. A new
+subject starts near 2nd grade and moves up after two in a row for its first eight questions, so it finds her level
+quickly. A wrong answer shows the right one and why. **Daily Quest** mixes ten questions across subjects. Questions
+are generated, so they do not come in a fixed order, and they are read aloud with the Windows voice (the 🔈 button
+repeats). Progress is in `localStorage` under `levelup-v1`.
 
 ### Trace With Me
 `apps/trace-with-me.html` is a finger-tracing app: capital letters, small letters, numbers 0-9 and six shapes. A big

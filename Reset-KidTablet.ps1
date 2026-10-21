@@ -34,7 +34,6 @@ $FullName = ''             # her name on the home screen greeting
 $ExtraStoreApps = @(
     @{ Name = 'Kids Games Learning Science'; Pfn = 'greysprings.KidsLearningScienceGames_p4xj81aw0mjbg';             Id = '9NBLGGH68DHJ' }
     @{ Name = 'Learn to Write';              Pfn = 'greysprings.KidsLearntoWrite_p4xj81aw0mjbg';                     Id = '9NL4MGG11RB6' }
-    @{ Name = 'Kindergarten Kids Learning';  Pfn = 'greysprings.kindergarten8lite_p4xj81aw0mjbg';                    Id = '9WZDNCRFJ1CG' }
     @{ Name = 'Master of Typing';            Pfn = 'ImprovisionLLC.MasterofTypingforKids-Learntotype_6ab774x3x8cty'; Id = '9P34VVTST1JM' }
     @{ Name = 'Scratch 3';                   Pfn = 'ScratchFoundation.ScratchDesktop_wmbdy4q6dbx4t';                 Id = '' }
 )
