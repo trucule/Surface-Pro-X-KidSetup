@@ -193,9 +193,22 @@ wind, look from the other side, sound, reset. Everything with mass is draggable 
 
 ### Count With Me, Music Box, Story Maker
 Three more apps (`apps/count-with-me.html`, `apps/music-box.html`, `apps/story-maker/`).
-- **Count With Me**: "How many?" (tap each thing to count it aloud, then pick the number) and "Give me" (drag that many
-  into the basket). Starts at 1-5 and moves up to 10, then 20, after streaks of five; level and stars are kept in
-  `localStorage` under `count-level`.
+- **Count With Me**: four hands-on math games, each with its own ladder of levels (tested by
+  `tools/test-count-with-me.py`).
+  - How many?: tap to count (to 5, 10, 20), ten frames (tens and ones, up to 120; a full frame counts as ten), arrays
+    ("4 rows of 6", rows tap to skip count; on the times tables level the rows only count after the hint).
+  - Give me: drag that many into the basket, make equal groups on plates, share on plates (division), share with
+    leftovers.
+  - Build it: place value blocks (hundreds, tens, ones with + and -): build 2- and 3-digit numbers, number puzzles
+    (expanded form, number words, 10 or 100 more or less, scrambled places), add with trading (10 ones for a ten) and
+    take away with trading (a ten into 10 ones), up to 3 digits. A build only counts in standard form.
+  - Story: word problems read aloud with a number pad: add and subtract to 10, 20 and 100 (compare and missing
+    addend too), times, sharing and teams, two steps, coins and change. The light bulb shows the equation and, for
+    small numbers, a picture.
+  Four right first try in a row moves a game up; two missed questions in a row moves it down. A new player starts
+  around 2nd grade (ten frames, equal groups, building tens and ones, stories to 100). Progress and stars are kept in
+  `localStorage` under `count-v2` (stars carry over from the old `count-level`). Phrases outside the voice pack
+  (most of the new levels) use the Windows voice.
 - **Music Box**: two pages. Song: a 16-step tone matrix with eight scale notes (three scales: happy, spooky, dreamy,
   all consonant), drum, clap and shaker rows, five synthesized instruments plus "Me" (her recorded voice pitched up
   and down the scale), speed, swing, a surprise dice and three song slots (kept under `musicbox-v2`; an old

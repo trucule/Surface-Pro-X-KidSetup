@@ -5,42 +5,96 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Count With Me</title>
 <!--
-  Count With Me. Two counting games for a five-year-old, one file, offline, no API.
-  "How many?": things appear, she taps them to count out loud (each tap says the next number), then taps the answer.
-  "Give me": it asks for a number and she drags that many things into the basket.
-  Numbers grow with her: starts at 1-5, moves up to 10 after a streak, then up to 20. Progress is kept in
-  localStorage (key count-level) so it picks up where she left off.
+  Count With Me. Hands-on math from counting to times tables, one file, offline, no API.
+  Four games, each with its own ladder of levels:
+    How many?  tap to count (1-5, 1-10, 1-20), ten frames (tens and ones up to 120), arrays (rows of, times tables).
+    Give me    drag things into the basket, then equal groups, sharing on plates (division), sharing with leftovers.
+    Build it   place value blocks: build 2- and 3-digit numbers, number puzzles, add and subtract with trading.
+    Story      word problems read aloud: add and subtract to 100, times, sharing, two steps, coins.
+  Four right first try in a row moves a game up a level; two missed questions in a row moves it down.
+  Progress is kept in localStorage (key count-v2). New players start at a 2nd grade level; the young levels stay at
+  the bottom of each ladder.
 -->
 <style>
   :root { --ink: #2B2140; --paper: #FFF9F0; --pink: #FF4F8B; --sun: #FFC93C; --sky: #58C7F0; --leaf: #5CD38B; --grape: #9B6BFF; }
   html, body { margin: 0; height: 100%; background: var(--paper); overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); }
   body { touch-action: none; user-select: none; -webkit-user-select: none; }
+  button { font-family: inherit; color: var(--ink); }
   #app { position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr auto; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
-  header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
-  header h1 { font-size: 26px; margin: 0 auto 0 0; font-weight: 900; }
-  .pill { border: 3px solid var(--ink); background: #fff; border-radius: 999px; padding: 8px 16px; font-size: 20px; font-weight: 800; cursor: pointer; }
+  /* The right 210px of the header stays clear: the Home pill sits there. */
+  header { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 10px 210px 10px 14px; }
+  header h1 { font-size: 26px; margin: 0; font-weight: 900; }
+  #badge { font-size: 17px; font-weight: 800; background: #fff; border: 3px solid var(--ink); border-radius: 999px; padding: 5px 12px; margin-right: auto; white-space: nowrap; }
+  .pill { border: 3px solid var(--ink); background: #fff; border-radius: 999px; padding: 8px 14px; font-size: 19px; font-weight: 800; cursor: pointer; }
   .pill.on { background: var(--sun); }
   #stars { font-size: 22px; font-weight: 900; }
   main { position: relative; min-height: 0; }
-  #ask { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); font-size: 30px; font-weight: 900; background: #fff; border: 3px solid var(--ink); border-radius: 999px; padding: 6px 22px; white-space: nowrap; z-index: 2; }
-  #field { position: absolute; inset: 70px 20px 20px; border: 4px dashed #d9cfe8; border-radius: 28px; }
+  #ask { position: absolute; left: 50%; top: 10px; transform: translateX(-50%); font-size: 28px; font-weight: 900; background: #fff; border: 3px solid var(--ink); border-radius: 999px; padding: 6px 22px; white-space: nowrap; z-index: 2; max-width: 92%; overflow: hidden; text-overflow: ellipsis; }
+  #field { position: absolute; inset: 70px 20px 20px; border: 4px dashed #d9cfe8; border-radius: 28px; overflow: hidden; }
+  main.pad #field { right: 340px; }
+  main.low #field { bottom: 136px; }
   .thing { position: absolute; width: 96px; height: 96px; display: grid; place-items: center; font-size: 68px; cursor: pointer; transition: transform .15s; touch-action: none; }
+  .thing.small { width: 70px; height: 70px; font-size: 50px; }
   .thing.counted { transform: scale(1.18); filter: drop-shadow(0 0 10px var(--sun)); }
   .thing .n { position: absolute; top: -4px; right: -4px; width: 34px; height: 34px; border-radius: 50%; background: var(--sun); border: 3px solid var(--ink); font-size: 18px; font-weight: 900; display: grid; place-items: center; }
   #basket { position: absolute; right: 24px; bottom: 24px; width: 300px; height: 190px; border: 4px solid var(--ink); border-radius: 24px 24px 40px 40px; background: #FFE4B5; display: none; z-index: 1; }
   #basket::before { content: "🧺"; position: absolute; left: 10px; top: -30px; font-size: 44px; }
   #basket.on { display: block; }
-  #basket .count { position: absolute; right: 12px; top: -22px; background: #fff; border: 3px solid var(--ink); border-radius: 999px; padding: 2px 14px; font-size: 24px; font-weight: 900; }
+  .count { position: absolute; right: 12px; top: -22px; background: #fff; border: 3px solid var(--ink); border-radius: 999px; padding: 2px 14px; font-size: 24px; font-weight: 900; }
+  .plate { position: absolute; bottom: 14px; height: 160px; border: 4px solid var(--ink); border-radius: 50%; background: radial-gradient(circle, #fff 55%, #e9e2f5 56%); z-index: 0; }
+  .plate .count { right: 50%; transform: translateX(50%); top: -24px; }
   #answers { position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); display: flex; gap: 14px; z-index: 2; }
   #answers button, #check { border: 4px solid var(--ink); background: #fff; border-radius: 22px; width: 96px; height: 96px; font-size: 44px; font-weight: 900; cursor: pointer; }
-  #answers button:active, #check:active { transform: scale(.94); }
-  #answers button.no { background: #ffd6d6; animation: shake .4s; }
+  #answers button:active, #check:active, #pad button:active, .ctl button:active, #trades button:active { transform: scale(.94); }
+  #answers button.no, #padShow.no { background: #ffd6d6; animation: shake .4s; }
   #check { display: none; position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--leaf); width: 150px; z-index: 2; }
   #check.on { display: block; }
   @keyframes shake { 25% { transform: translateX(-8px); } 75% { transform: translateX(8px); } }
+  /* Number pad for answers bigger than a few choices. */
+  #pad { position: absolute; right: 20px; top: 70px; bottom: 20px; width: 300px; display: none; flex-direction: column; gap: 10px; z-index: 2; }
+  #pad.on { display: flex; }
+  #padShow { height: 84px; flex: none; font-size: 54px; font-weight: 900; border: 4px solid var(--ink); border-radius: 20px; background: #fff; display: grid; place-items: center; }
+  #padKeys { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); grid-auto-rows: 1fr; gap: 10px; min-height: 0; }
+  #padKeys button { border: 4px solid var(--ink); background: #fff; border-radius: 18px; font-size: 38px; font-weight: 900; cursor: pointer; }
+  #padKeys button.ok { background: var(--leaf); }
+  /* Ten frames and arrays. */
+  .wrap { position: absolute; inset: 44px 10px 10px; display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; align-content: center; }
+  .frame { display: grid; grid-template-columns: repeat(5, auto); gap: 3px; padding: 6px; border: 3px solid var(--ink); border-radius: 10px; background: #fff; cursor: pointer; }
+  .frame.counted { background: #FFF1B8; box-shadow: 0 0 0 4px var(--sun); }
+  .cell { display: grid; place-items: center; border: 2px solid #e3dbef; border-radius: 6px; }
+  .cell.counted { background: #FFF1B8; }
+  .array { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; }
+  .arow { display: flex; gap: 4px; align-items: center; border-radius: 12px; padding: 2px 6px; cursor: pointer; }
+  .arow.counted { background: #FFF1B8; }
+  .arow .sum { font-size: 22px; font-weight: 900; margin-left: 10px; min-width: 40px; }
+  #tally { position: absolute; left: 14px; top: 8px; font-size: 22px; font-weight: 900; background: var(--sun); border: 3px solid var(--ink); border-radius: 999px; padding: 2px 14px; display: none; }
+  #tally.on { display: block; }
+  /* Place value blocks. */
+  .cols { position: absolute; inset: 50px 10px 10px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .col { display: flex; flex-direction: column; border: 3px solid var(--ink); border-radius: 18px; background: #fff; min-height: 0; }
+  .col h3 { margin: 0; text-align: center; font-size: 22px; padding: 6px; border-bottom: 3px solid var(--ink); }
+  .col.h h3 { background: #FFD3E2; } .col.t h3 { background: #D6F1FF; } .col.o h3 { background: #DFF7E8; }
+  .blocks { flex: 1; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 5px; padding: 8px; overflow: hidden; min-height: 0; }
+  .flat { width: 80px; height: 80px; background-color: #FF8FB5; background-image: linear-gradient(#0003 1px, transparent 1px), linear-gradient(90deg, #0003 1px, transparent 1px); background-size: 8px 8px; border: 2px solid var(--ink); }
+  .rod { width: 18px; height: 170px; background-color: #58C7F0; background-image: linear-gradient(#0004 1px, transparent 1px); background-size: 18px 17px; border: 2px solid var(--ink); }
+  .cube { width: 30px; height: 30px; background: var(--leaf); border: 2px solid var(--ink); border-radius: 4px; }
+  .ctl { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 8px; border-top: 3px solid var(--ink); }
+  .ctl button { width: 64px; height: 64px; border: 4px solid var(--ink); border-radius: 50%; background: #fff; font-size: 34px; font-weight: 900; cursor: pointer; }
+  .ctl .digit { font-size: 46px; font-weight: 900; min-width: 56px; text-align: center; }
+  #trades { position: absolute; left: 24px; bottom: 24px; display: flex; gap: 10px; z-index: 2; max-width: calc(50% - 110px); flex-wrap: wrap; }
+  #trades button { border: 4px solid var(--ink); background: #EDE4FF; border-radius: 18px; padding: 8px 14px; font-size: 19px; font-weight: 800; cursor: pointer; }
+  /* Story problems. */
+  .story { position: absolute; inset: 50px 30px 20px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px; }
+  .story p { margin: 0; font-size: 34px; line-height: 1.4; font-weight: 700; background: #fff; border: 3px solid var(--ink); border-radius: 24px; padding: 18px 26px; max-width: 900px; }
+  .pic { font-size: 40px; line-height: 1.25; text-align: center; max-width: 900px; display: none; }
+  .pic.on { display: block; }
+  .coins { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+  .coin { border-radius: 50%; border: 3px solid var(--ink); display: grid; place-items: center; font-weight: 900; }
+  .coin.q { width: 82px; height: 82px; background: #E3E3E3; font-size: 22px; } .coin.d { width: 58px; height: 58px; background: #EDEDED; font-size: 17px; }
+  .coin.n { width: 70px; height: 70px; background: #D8D8D8; font-size: 19px; } .coin.p { width: 62px; height: 62px; background: #E8A66B; font-size: 17px; }
   #win { position: absolute; inset: 0; display: none; place-items: center; pointer-events: none; z-index: 5; }
   #win.on { display: grid; }
-  #win .card { background: #fff; border: 4px solid var(--ink); border-radius: 28px; padding: 22px 36px; font-size: 44px; font-weight: 900; text-align: center; box-shadow: 0 12px 0 var(--pink); animation: pop .4s cubic-bezier(.2,1.6,.4,1); }
+  #win .card { background: #fff; border: 4px solid var(--ink); border-radius: 28px; padding: 22px 36px; font-size: 40px; font-weight: 900; text-align: center; box-shadow: 0 12px 0 var(--pink); animation: pop .4s cubic-bezier(.2,1.6,.4,1); max-width: 80%; }
   @keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
   footer { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 10px 14px 16px; }
   footer button { border: 4px solid var(--ink); background: #fff; border-radius: 50%; width: 76px; height: 76px; font-size: 34px; cursor: pointer; }
@@ -50,20 +104,26 @@
 <div id="app">
   <header>
     <h1>Count With Me</h1>
+    <span id="badge"></span>
     <span id="stars">⭐ 0</span>
     <button class="pill on" data-mode="howmany">How many?</button>
     <button class="pill" data-mode="giveme">Give me</button>
+    <button class="pill" data-mode="build">Build it</button>
+    <button class="pill" data-mode="story">Story</button>
   </header>
   <main>
     <div id="ask"></div>
     <div id="field"></div>
     <div id="basket"><span class="count">0</span></div>
     <div id="answers"></div>
-    <button id="check">✔</button>
+    <div id="trades"></div>
+      <button id="check">✔</button>
+    <div id="pad"><div id="padShow"></div><div id="padKeys"></div></div>
     <div id="win"><div class="card"><span id="winText"></span></div></div>
   </main>
   <footer>
     <button id="hear" title="Hear it">🔈</button>
+    <button id="hint" title="Help">💡</button>
     <button id="again" title="New one">🔁</button>
   </footer>
 </div>
@@ -96,44 +156,225 @@ const VOICE = (() => {
 
 const THINGS = ['🍎', '🐥', '⭐', '🐸', '🎈', '🐟', '🍓', '🦋', '🐢', '🌼', '🚗', '🍪'];
 const NAMES = { '🍎': 'apples', '🐥': 'chicks', '⭐': 'stars', '🐸': 'frogs', '🎈': 'balloons', '🐟': 'fish', '🍓': 'strawberries', '🦋': 'butterflies', '🐢': 'turtles', '🌼': 'flowers', '🚗': 'cars', '🍪': 'cookies' };
-const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty'];
-const LEVELS = [[1, 5], [1, 10], [5, 20]];
-let mode = 'howmany', level = 0, streak = 0, stars = 0, target = 0, emoji = '🍎', counted = 0, inBasket = 0, busy = false, pending = null;
-try { const p = JSON.parse(localStorage.getItem('count-level') || '{}'); level = p.level || 0; stars = p.stars || 0; } catch (e) {}
-function persist() { try { localStorage.setItem('count-level', JSON.stringify({ level, stars })); } catch (e) {} }
-function say(t) { try { speechSynthesis.cancel(); } catch (e) {} VOICE.stop(); if (VOICE.play(t)) return; try { const u = new SpeechSynthesisUtterance(t); u.rate = 0.9; u.pitch = 1.1; speechSynthesis.speak(u); } catch (e) {} }
-const $ = id => document.getElementById(id);
+const WORDS = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
+const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
+function numWords(n) {
+  if (n < 20) return WORDS[n];
+  if (n < 100) return TENS[Math.floor(n / 10)] + (n % 10 ? ' ' + WORDS[n % 10] : '');
+  if (n < 1000) return WORDS[Math.floor(n / 100)] + ' hundred' + (n % 100 ? ' ' + numWords(n % 100) : '');
+  return numWords(Math.floor(n / 1000)) + ' thousand' + (n % 1000 ? ' ' + numWords(n % 1000) : '');
+}
+const one = nm => nm === 'fish' ? 'fish' : nm.replace(/ies$/, 'y').replace(/s$/, '');
+const noun = (n, nm) => n === 1 ? one(nm) : nm;
+const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
 const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const $ = id => document.getElementById(id);
+
+// ---------------------------------------------------------------------------
+// Levels. Each level makes one task; render() shows it and the checks below grade it.
+// ---------------------------------------------------------------------------
+const LEVELS = {
+  howmany: [
+    { name: 'Count to 5', gen: () => tapTask(1, 5) },
+    { name: 'Count to 10', gen: () => tapTask(1, 10) },
+    { name: 'Count to 20', gen: () => tapTask(5, 20) },
+    { name: 'Tens and ones', gen: () => ({ kind: 'frames', answer: rnd(21, 59) }) },
+    { name: 'Big numbers', gen: () => ({ kind: 'frames', answer: rnd(60, 120) }) },
+    { name: 'Rows of', gen: () => arrayTask(2, 5, 2, 5, true) },
+    { name: 'Times tables', gen: () => arrayTask(2, 9, 2, 10, false) },
+  ],
+  giveme: [
+    { name: 'Give me 5', gen: () => basketTask(1, 5) },
+    { name: 'Give me 10', gen: () => basketTask(1, 10) },
+    { name: 'Give me 12', gen: () => basketTask(5, 12) },
+    { name: 'Equal groups', gen: () => { const R = rnd(2, 4), N = rnd(2, 5); return { kind: 'groups', R, N, total: R * N + rnd(1, 3), answer: R * N }; } },
+    { name: 'Share it', gen: () => { const R = rnd(2, 5), each = rnd(2, 6); return { kind: 'share', R, total: R * each, each, left: 0, answer: each }; } },
+    { name: 'Leftovers', gen: () => { const R = rnd(2, 5), each = rnd(2, 5), left = rnd(1, R - 1); return { kind: 'share', R, total: R * each + left, each, left, answer: each }; } },
+  ],
+  build: [
+    { name: 'Build tens and ones', gen: () => { const n = rnd(11, 99); return buildTask(n, [0, 0, 0], 'Build ' + n, 'Build ' + numWords(n) + '.'); } },
+    { name: 'Build hundreds', gen: () => { const n = rnd(101, 999); return buildTask(n, [0, 0, 0], 'Build ' + n, 'Build ' + numWords(n) + '.'); } },
+    { name: 'Number puzzles', gen: puzzleTask },
+    { name: 'Add and trade', gen: () => { let a, b; do { a = rnd(15, 69); b = rnd(12, 39); } while ((a % 10) + (b % 10) < 10 || a + b > 99); return addTask(a, b); } },
+    { name: 'Take away and trade', gen: () => { let a, b; do { a = rnd(31, 95); b = rnd(12, a - 5); } while ((b % 10) <= (a % 10)); return subTask(a, b); } },
+    { name: 'Big add and take away', gen: () => { if (Math.random() < .5) { let a, b; do { a = rnd(120, 680); b = rnd(110, 299); } while (a + b > 999 || ((a % 10) + (b % 10) < 10 && (Math.floor(a / 10) % 10) + (Math.floor(b / 10) % 10) < 10)); return addTask(a, b); }
+                                                    let a, b; do { a = rnd(300, 950); b = rnd(110, a - 50); } while ((b % 10) <= (a % 10) && (Math.floor(b / 10) % 10) <= (Math.floor(a / 10) % 10)); return subTask(a, b); } },
+  ],
+  story: [
+    { name: 'Stories to 10', gen: () => storyAddSub(10, false) },
+    { name: 'Stories to 20', gen: () => storyAddSub(20, true) },
+    { name: 'Stories to 100', gen: () => storyAddSub(100, true) },
+    { name: 'Times stories', gen: storyTimes },
+    { name: 'Sharing stories', gen: storyShare },
+    { name: 'Two steps', gen: storyTwoStep },
+    { name: 'Coins', gen: storyCoins },
+  ],
+};
+// Where a new player starts: about 2nd grade.
+const START = { howmany: 3, giveme: 3, build: 0, story: 2 };
+
+function tapTask(lo, hi) {
+  const n = rnd(lo, hi), opts = new Set([n]);
+  while (opts.size < 3) opts.add(Math.max(1, Math.min(hi, n + rnd(-3, 3))));
+  return { kind: 'tap', answer: n, choices: [...opts].sort((a, b) => a - b), emoji: pick(THINGS) };
+}
+function arrayTask(r1, r2, c1, c2, tapRows) { const r = rnd(r1, r2), c = rnd(c1, c2); return { kind: 'array', r, c, answer: r * c, tapRows }; }
+function basketTask(lo, hi) { const n = rnd(lo, hi); return { kind: 'basket', answer: n, total: Math.min(hi, 12) < n + 3 ? n + rnd(1, 2) : n + rnd(2, 4) }; }
+function buildTask(target, start, prompt, speak, extra) { return Object.assign({ kind: 'build', answer: target, start, prompt, speak, breakable: false }, extra || {}); }
+const digits = n => [Math.floor(n / 100), Math.floor(n / 10) % 10, n % 10];
+function puzzleTask() {
+  const n = rnd(102, 989), [h, t, o] = digits(n), k = rnd(0, 4);
+  if (k === 0) { const parts = [h * 100, t * 10, o].filter(x => x); return buildTask(n, [0, 0, 0], 'Build ' + parts.join(' + '), 'Build ' + parts.map(numWords).join(' plus ') + '.'); }
+  if (k === 1) return buildTask(n, [0, 0, 0], 'Build ' + numWords(n), 'Build ' + numWords(n) + '.');
+  if (k === 2) { const m = rnd(11, 89); const up = Math.random() < .5 || m < 20; return up ? buildTask(m + 10, [0, 0, 0], 'Build 10 more than ' + m, 'Build ten more than ' + numWords(m) + '.') : buildTask(m - 10, [0, 0, 0], 'Build 10 less than ' + m, 'Build ten less than ' + numWords(m) + '.'); }
+  if (k === 3) { const m = rnd(150, 899), up = Math.random() < .5; const v = up ? m + 100 : m - 100; return buildTask(v, [0, 0, 0], (up ? 'Build 100 more than ' : 'Build 100 less than ') + m, 'Build one hundred ' + (up ? 'more' : 'less') + ' than ' + numWords(m) + '.'); }
+  const order = [['ones', o], ['hundreds', h], ['tens', t]].sort(() => Math.random() - .5);
+  const text = order.map(([w, d]) => d + ' ' + w).join(', ');
+  return buildTask(n, [0, 0, 0], 'Build ' + text, 'Build a number with ' + order.map(([w, d]) => numWords(d) + ' ' + w).join(', ') + '.');
+}
+function addTask(a, b) { return buildTask(a + b, digits(a), a + ' + ' + b + ' = ?', 'You have ' + numWords(a) + '. Add ' + numWords(b) + '. Trade ten ones for a ten when you can.', { eq: a + ' + ' + b, breakable: false }); }
+function subTask(a, b) { return buildTask(a - b, digits(a), a + ' - ' + b + ' = ?', 'You have ' + numWords(a) + '. Take away ' + numWords(b) + '. Break a ten into ones if you need more.', { eq: a + ' - ' + b, breakable: true }); }
+
+// Story problems. Each returns the text, the answer, an equation for the hint, and pictures when the numbers are small.
+const KIDS = ['Mia', 'Leo', 'Ava', 'Sam', 'Zoe', 'Max', 'Ivy', 'Ben', 'Nora', 'Eli', 'Ruby', 'Omar'];
+const STUFF = [['🍎', 'apples'], ['🎈', 'balloons'], ['🐚', 'shells'], ['⭐', 'stickers'], ['🍪', 'cookies'], ['🪨', 'rocks'], ['🌼', 'flowers'], ['🖍️', 'crayons'], ['🔵', 'beads'], ['🃏', 'cards']];
+const she = name => ['Mia', 'Ava', 'Zoe', 'Ivy', 'Nora', 'Ruby'].includes(name) ? 'She' : 'He';
+const pics = (emoji, ...groups) => groups.map(g => emoji.repeat(g)).join('   ');
+function storyAddSub(max, compare) {
+  const name = pick(KIDS), other = pick(KIDS.filter(k => k !== name)), [e, thing] = pick(STUFF), k = rnd(0, compare ? 3 : 1);
+  const regroup = max > 20;
+  let a, b;
+  if (k === 0) { do { a = rnd(regroup ? 12 : 1, max - (regroup ? 12 : 1)); b = rnd(regroup ? 11 : 1, max - a); } while (regroup && (a % 10) + (b % 10) < 10 && Math.random() < .7);
+    return { kind: 'story', text: `${name} has ${a} ${thing}. ${she(name)} finds ${b} more. How many ${thing} does ${name} have now?`, answer: a + b, eq: `${a} + ${b} = ?`, pic: max <= 20 ? pics(e, a, b) : '' }; }
+  if (k === 1) { do { a = rnd(regroup ? 30 : 3, max); b = rnd(regroup ? 11 : 1, a - 1); } while (regroup && (b % 10) <= (a % 10) && Math.random() < .7);
+    return { kind: 'story', text: `${name} had ${a} ${thing}. ${she(name)} gave ${b} to ${other}. How many ${thing} are left?`, answer: a - b, eq: `${a} - ${b} = ?`, pic: max <= 20 ? pics(e, a) : '' }; }
+  if (k === 2) { a = rnd(Math.ceil(max / 2), max); b = rnd(1, a - 1);
+    return { kind: 'story', text: `${name} has ${a} ${thing}. ${other} has ${b}. How many more ${thing} does ${name} have than ${other}?`, answer: a - b, eq: `${a} - ${b} = ?`, pic: max <= 20 ? pics(e, a) + '\n' + pics(e, b) : '' }; }
+  a = rnd(Math.ceil(max / 2), max); b = rnd(1, a - 1);
+  return { kind: 'story', text: `${name} wants ${a} ${thing}. ${she(name)} has ${b} so far. How many more does ${name} need?`, answer: a - b, eq: `${b} + ? = ${a}`, pic: max <= 20 ? pics(e, b) : '' };
+}
+function storyTimes() {
+  const name = pick(KIDS), [e, thing] = pick(STUFF), g = rnd(2, 9), n = rnd(2, 10), k = rnd(0, 2);
+  const box = pick(['bags', 'boxes', 'jars', 'cups', 'baskets']);
+  if (k === 0) return { kind: 'story', text: `${name} has ${g} ${box}. Each one has ${n} ${thing} inside. How many ${thing} in all?`, answer: g * n, eq: `${g} × ${n} = ?`, pic: g * n <= 40 ? Array.from({ length: g }, () => e.repeat(n)).join('   ') : '' };
+  if (k === 1) return { kind: 'story', text: `The class puts chairs in ${g} rows. There are ${n} chairs in each row. How many chairs?`, answer: g * n, eq: `${g} × ${n} = ?`, pic: g * n <= 40 ? Array.from({ length: g }, () => '🪑'.repeat(n)).join('\n') : '' };
+  const legs = pick([[2, 'birds', '🐦'], [4, 'dogs', '🐶'], [6, 'bugs', '🐞'], [8, 'spiders', '🕷️']]);
+  return { kind: 'story', text: `There are ${g} ${legs[1]} in the yard. Each one has ${legs[0]} legs. How many legs in all?`, answer: g * legs[0], eq: `${g} × ${legs[0]} = ?`, pic: legs[2].repeat(g) };
+}
+function storyShare() {
+  const name = pick(KIDS), [e, thing] = pick(STUFF), g = rnd(2, 6), each = rnd(2, 9), k = rnd(0, 1);
+  if (k === 0) return { kind: 'story', text: `${name} has ${g * each} ${thing} to share with ${g} friends. Each friend gets the same number. How many does each friend get?`, answer: each, eq: `${g * each} ÷ ${g} = ?`, pic: g * each <= 40 ? e.repeat(g * each) : '' };
+  return { kind: 'story', text: `There are ${g * each} kids at the park. They make teams of ${each}. How many teams are there?`, answer: g, eq: `${g * each} ÷ ${each} = ?`, pic: '' };
+}
+function storyTwoStep() {
+  const name = pick(KIDS), [e, thing] = pick(STUFF), k = rnd(0, 2);
+  if (k === 0) { const a = rnd(10, 40), p = rnd(2, 5), n = rnd(2, 6); return { kind: 'story', text: `${name} had ${a} ${thing}. Then ${she(name).toLowerCase()} got ${p} packs with ${n} in each pack. How many ${thing} now?`, answer: a + p * n, eq: `${a} + ${p} × ${n} = ?`, pic: '' }; }
+  if (k === 1) { const a = rnd(40, 90), n = rnd(2, 4), c = rnd(5, Math.floor((a - 5) / n)); return { kind: 'story', text: `${name} has ${a} cents. ${she(name)} buys ${n} pencils that cost ${c} cents each. How many cents are left?`, answer: a - n * c, eq: `${a} - ${n} × ${c} = ?`, pic: '' }; }
+  const a = rnd(20, 50), b = rnd(5, 20), c = rnd(3, Math.min(25, a + b - 1)); return { kind: 'story', text: `${name} picked ${a} ${thing} in the morning and ${b} in the afternoon. ${she(name)} gave away ${c}. How many ${thing} does ${name} have?`, answer: a + b - c, eq: `${a} + ${b} - ${c} = ?`, pic: '' };
+}
+const COINS = { q: 25, d: 10, n: 5, p: 1 }, COIN_NAMES = { q: ['quarter', 'quarters'], d: ['dime', 'dimes'], n: ['nickel', 'nickels'], p: ['penny', 'pennies'] };
+function storyCoins() {
+  const name = pick(KIDS);
+  if (Math.random() < .6) {
+    let have; do { have = { q: rnd(0, 3), d: rnd(0, 4), n: rnd(0, 3), p: rnd(0, 4) }; } while (Object.values(have).filter(x => x).length < 2);
+    const total = Object.entries(have).reduce((s, [c, k]) => s + COINS[c] * k, 0);
+    const list = Object.entries(have).filter(([, k]) => k).map(([c, k]) => `${k} ${COIN_NAMES[c][k === 1 ? 0 : 1]}`);
+    const text = `${name} has ${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}. How many cents is that?`;
+    return { kind: 'story', text, answer: total, eq: Object.entries(have).filter(([, k]) => k).map(([c, k]) => `${k} × ${COINS[c]}`).join(' + ') + ' = ?', coins: have, pic: '' };
+  }
+  const q = rnd(2, 4), price = rnd(Math.max(10, q * 25 - 60), q * 25 - 5);
+  return { kind: 'story', text: `A toy costs ${price} cents. ${name} pays with ${q} quarters. How many cents of change does ${name} get back?`, answer: q * 25 - price, eq: `${q * 25} - ${price} = ?`, coins: { q, d: 0, n: 0, p: 0 }, pic: '' };
+}
+
+// ---------------------------------------------------------------------------
+// Progress
+// ---------------------------------------------------------------------------
+let P = { stars: 0, lv: Object.assign({}, START), st: {} };
+try {
+  const saved = JSON.parse(localStorage.getItem('count-v2') || 'null');
+  if (saved) P = Object.assign(P, saved, { lv: Object.assign({}, START, saved.lv || {}), st: saved.st || {} });
+  else { const old = JSON.parse(localStorage.getItem('count-level') || '{}'); P.stars = old.stars || 0; }
+} catch (e) {}
+for (const m in LEVELS) P.lv[m] = Math.max(0, Math.min(LEVELS[m].length - 1, P.lv[m] | 0));
+function persist() { try { localStorage.setItem('count-v2', JSON.stringify(P)); } catch (e) {} }
+
+// One result per question: right first try, or missed. Returns +1, -1 or 0 for a level change.
+function record(m, right) {
+  const s = P.st[m] || (P.st[m] = { streak: 0, miss: 0 }); let change = 0;
+  if (right) { s.miss = 0; s.streak++; if (s.streak >= 4 && P.lv[m] < LEVELS[m].length - 1) { P.lv[m]++; s.streak = 0; change = 1; } }
+  else { s.streak = 0; s.miss++; if (s.miss >= 2 && P.lv[m] > 0) { P.lv[m]--; s.miss = 0; change = -1; } }
+  persist(); return change;
+}
+
+function say(t) { try { speechSynthesis.cancel(); } catch (e) {} VOICE.stop(); if (VOICE.play(t)) return; try { const u = new SpeechSynthesisUtterance(String(t).replace(/×/g, ' times ').replace(/÷/g, ' divided by ').replace(/ - /g, ' minus ')); u.rate = 0.9; u.pitch = 1.1; speechSynthesis.speak(u); } catch (e) {} }
+
+// ---------------------------------------------------------------------------
+// Round state and rendering
+// ---------------------------------------------------------------------------
+let mode = 'howmany', task = null, busy = false, missed = false, pending = null, counted = 0, typed = '', blocks = [0, 0, 0], hinted = false;
+const emojiOf = () => task.emoji || '🍎';
 
 function newRound(speak = true) {
   clearTimeout(pending); pending = null;
-  busy = false; counted = 0; inBasket = 0;
-  const [lo, hi] = LEVELS[level]; emoji = THINGS[rnd(0, THINGS.length - 1)];
-  const field = $('field'); field.innerHTML = ''; $('answers').innerHTML = ''; $('win').classList.remove('on');
-  $('basket').classList.toggle('on', mode === 'giveme'); $('check').classList.toggle('on', mode === 'giveme');
-  $('basket').querySelector('.count').textContent = '0';
-  if (mode === 'howmany') {
-    target = rnd(lo, hi); scatter(target);
-    $('ask').textContent = 'How many ' + NAMES[emoji] + '?';
-    const opts = new Set([target]); while (opts.size < 3) opts.add(Math.max(lo === 1 ? 1 : 1, Math.min(hi, target + rnd(-3, 3))));
-    for (const n of [...opts].sort((a, b) => a - b)) { const b = document.createElement('button'); b.textContent = n; b.onclick = () => answer(n, b); $('answers').appendChild(b); }
-    if (speak) say('How many ' + NAMES[emoji] + '? Tap each one to count.');
-  } else {
-    target = rnd(lo, Math.min(hi, 12)); scatter(Math.min(hi, 12) < target + 3 ? target + rnd(1, 2) : target + rnd(2, 4), true);
-    $('ask').textContent = 'Put ' + target + ' ' + NAMES[emoji] + ' in the basket';
-    if (speak) say('Put ' + WORDS[target] + ' ' + NAMES[emoji] + ' in the basket. Then tap the check.');
+  busy = false; missed = false; counted = 0; typed = ''; hinted = false;
+  task = LEVELS[mode][P.lv[mode]].gen();
+  if (!task.emoji) task.emoji = pick(THINGS);
+  render(speak);
+}
+function render(speak) {
+  const main = document.querySelector('main'), field = $('field');
+  field.innerHTML = ''; $('answers').innerHTML = ''; $('trades').innerHTML = ''; $('win').classList.remove('on');
+  const usesPad = ['frames', 'array', 'story'].includes(task.kind);
+  main.classList.toggle('pad', usesPad);
+  main.classList.toggle('low', ['build', 'groups', 'share'].includes(task.kind));
+  $('pad').classList.toggle('on', usesPad); showTyped();
+  $('basket').classList.toggle('on', task.kind === 'basket'); $('basket').querySelector('.count').textContent = '0';
+  $('check').classList.toggle('on', ['basket', 'groups', 'share', 'build'].includes(task.kind));
+  const lvl = LEVELS[mode][P.lv[mode]];
+  $('badge').textContent = 'Level ' + (P.lv[mode] + 1) + ': ' + lvl.name;
+  const e = emojiOf(), nm = NAMES[e];
+  const talk = t => { if (speak) say(t); };
+  switch (task.kind) {
+    case 'tap':
+      scatter(task.answer, false);
+      $('ask').textContent = 'How many ' + nm + '?';
+      for (const n of task.choices) { const b = document.createElement('button'); b.textContent = n; b.onclick = () => choose(n, b); $('answers').appendChild(b); }
+      talk('How many ' + nm + '? Tap each one to count.');
+      break;
+    case 'frames': renderFrames(); $('ask').textContent = 'How many ' + nm + '?'; talk('How many ' + nm + '? Tap a full ten frame to count ten.'); break;
+    case 'array': renderArray(); $('ask').textContent = task.r + ' rows of ' + task.c + '. How many?'; talk(numWords(task.r) + ' rows of ' + numWords(task.c) + '. How many ' + nm + '?' + (task.tapRows ? ' Tap each row to count.' : '')); break;
+    case 'basket':
+      scatter(task.total, true);
+      $('ask').textContent = 'Put ' + task.answer + ' ' + noun(task.answer, nm) + ' in the basket';
+      talk('Put ' + WORDS[task.answer] + ' ' + noun(task.answer, nm) + ' in the basket. Then tap the check.');
+      break;
+    case 'groups': renderPlates(task.R); scatter(task.total, true, true); $('ask').textContent = 'Make ' + task.R + ' groups of ' + task.N; talk('Make ' + numWords(task.R) + ' groups of ' + numWords(task.N) + '. Put ' + numWords(task.N) + ' ' + nm + ' on each plate.'); break;
+    case 'share':
+      renderPlates(task.R); scatter(task.total, true, true);
+      $('ask').textContent = 'Share ' + task.total + ' ' + nm + ' on ' + task.R + ' plates';
+      talk('Share ' + numWords(task.total) + ' ' + nm + ' on ' + numWords(task.R) + ' plates. Every plate gets the same.' + (task.left ? ' Some may be left over.' : ''));
+      break;
+    case 'build':
+      blocks = task.start.slice(); renderBuild();
+      $('ask').textContent = task.prompt;
+      talk(task.speak);
+      break;
+    case 'story': renderStory(); $('ask').textContent = 'Story ' + (P.lv[mode] + 1); talk(task.text); break;
   }
 }
-// Place things so they do not overlap much, away from the basket and the answer buttons.
-function scatter(n, draggable) {
+
+// Place things so they do not overlap much, away from the basket, plates and the answer buttons.
+function scatter(n, draggable, plates) {
   const field = $('field'), W = field.clientWidth, H = field.clientHeight, pts = [];
-  const avoid = (x, y) => (draggable && x > W - 340 && y > H - 240) || (!draggable && y > H - 130 && x > W / 2 - 220 && x < W / 2 + 220);
+  const small = n > 14, size = small ? 70 : 96;
+  const avoid = (x, y) => (draggable && !plates && x > W - 340 && y > H - 240) || (plates && y > H - 190 - size) || (!draggable && y > H - 130 && x > W / 2 - 220 && x < W / 2 + 220);
   for (let i = 0; i < n; i++) {
     let x, y, tries = 0;
-    do { x = rnd(10, Math.max(20, W - 110)); y = rnd(10, Math.max(20, H - 110)); tries++; }
-    while (tries < 200 && (avoid(x, y) || pts.some(p => Math.hypot(p[0] - x, p[1] - y) < 100)));
+    do { x = rnd(10, Math.max(20, W - size - 14)); y = rnd(10, Math.max(20, H - size - 14)); tries++; }
+    while (tries < 300 && (avoid(x, y) || pts.some(p => Math.hypot(p[0] - x, p[1] - y) < size + 2)));
     pts.push([x, y]);
-    const t = document.createElement('div'); t.className = 'thing'; t.textContent = emoji; t.style.left = x + 'px'; t.style.top = y + 'px';
+    const t = document.createElement('div'); t.className = 'thing' + (small ? ' small' : ''); t.textContent = emojiOf(); t.style.left = x + 'px'; t.style.top = y + 'px';
     if (draggable) makeDraggable(t); else t.addEventListener('pointerdown', () => countTap(t));
     field.appendChild(t);
   }
@@ -142,41 +383,217 @@ function countTap(t) {
   if (busy || t.classList.contains('counted')) return;
   counted++; t.classList.add('counted');
   const n = document.createElement('span'); n.className = 'n'; n.textContent = counted; t.appendChild(n);
-  say(WORDS[counted]);
+  say(numWords(counted));
 }
-function answer(n, btn) {
+function tally(text) { let t = $('tally'); if (!t) { t = document.createElement('div'); t.id = 'tally'; $('field').appendChild(t); } t.textContent = text; t.classList.add('on'); }
+
+function renderFrames() {
+  const field = $('field'), W = field.clientWidth, H = field.clientHeight - 54, n = task.answer;
+  const full = Math.floor(n / 10), ones = n % 10, frames = full + (ones ? 1 : 0);
+  const perRow = Math.min(frames, 4), rows = Math.ceil(frames / perRow);
+  const c = Math.floor(Math.max(24, Math.min(64, (W - 40 - perRow * 30) / (perRow * 5.4), (H - 20 - rows * 30) / (rows * 2.3))));
+  const wrap = document.createElement('div'); wrap.className = 'wrap'; field.appendChild(wrap);
+  for (let f = 0; f < frames; f++) {
+    const fr = document.createElement('div'); fr.className = 'frame'; const inFrame = f < full ? 10 : ones;
+    for (let i = 0; i < 10; i++) {
+      const cell = document.createElement('div'); cell.className = 'cell'; cell.style.width = cell.style.height = c + 'px'; cell.style.fontSize = Math.round(c * .72) + 'px';
+      if (i < inFrame) cell.textContent = emojiOf();
+      if (f >= full && i < inFrame) cell.addEventListener('pointerdown', ev => { ev.stopPropagation(); if (busy || cell.classList.contains('counted')) return; cell.classList.add('counted'); counted++; tally(counted); say(numWords(counted)); });
+      fr.appendChild(cell);
+    }
+    if (f < full) fr.addEventListener('pointerdown', () => { if (busy || fr.classList.contains('counted')) return; fr.classList.add('counted'); counted += 10; tally(counted); say(numWords(counted)); });
+    wrap.appendChild(fr);
+  }
+}
+function renderArray() {
+  const field = $('field'), W = field.clientWidth - 120, H = field.clientHeight - 70, { r, c } = task;
+  const s = Math.floor(Math.max(26, Math.min(70, W / c - 4, H / r - 4)));
+  const wrap = document.createElement('div'); wrap.className = 'wrap'; field.appendChild(wrap);
+  const arr = document.createElement('div'); arr.className = 'array'; wrap.appendChild(arr);
+  let rowsDone = 0;
+  for (let i = 0; i < r; i++) {
+    const row = document.createElement('div'); row.className = 'arow';
+    for (let j = 0; j < c; j++) { const cell = document.createElement('div'); cell.className = 'cell'; cell.style.width = cell.style.height = s + 'px'; cell.style.fontSize = Math.round(s * .72) + 'px'; cell.textContent = emojiOf(); row.appendChild(cell); }
+    const sum = document.createElement('span'); sum.className = 'sum'; row.appendChild(sum);
+    row.addEventListener('pointerdown', () => {
+      if (busy || row.classList.contains('counted')) return;
+      if (!task.tapRows && !hinted) { say('Can you work it out? Tap the light bulb for help.'); return; }
+      row.classList.add('counted'); rowsDone++; counted += c; sum.textContent = counted; say(numWords(counted));
+    });
+    arr.appendChild(row);
+  }
+}
+function renderPlates(R) {
+  const field = $('field'), W = field.clientWidth, gap = 16, w = Math.min(230, Math.floor((W - 30 - gap * (R - 1)) / R));
+  const left0 = Math.floor((W - (w * R + gap * (R - 1))) / 2);
+  for (let i = 0; i < R; i++) { const p = document.createElement('div'); p.className = 'plate'; p.dataset.zone = 'p' + i; p.style.width = w + 'px'; p.style.left = (left0 + i * (w + gap)) + 'px'; p.innerHTML = '<span class="count">0</span>'; field.appendChild(p); }
+}
+function renderBuild() {
+  const field = $('field');
+  const cols = document.createElement('div'); cols.className = 'cols'; field.appendChild(cols);
+  const info = [['h', 'Hundreds', 9], ['t', 'Tens', 19], ['o', 'Ones', 19]];
+  info.forEach(([k, label, max], i) => {
+    const col = document.createElement('div'); col.className = 'col ' + k;
+    col.innerHTML = `<h3>${label}</h3><div class="blocks"></div><div class="ctl"><button data-d="-1">−</button><span class="digit">0</span><button data-d="1">+</button></div>`;
+    col.querySelectorAll('.ctl button').forEach(b => b.onclick = () => { if (busy) return; const d = +b.dataset.d; const v = blocks[i] + d; if (v < 0 || v > max) { say(v < 0 ? 'There are none to take away.' : 'That is a lot! Try trading.'); return; } blocks[i] = v; drawBlocks(); say(numWords(v) + ' ' + (v === 1 ? label.toLowerCase().slice(0, -1) : label.toLowerCase())); });
+    cols.appendChild(col);
+  });
+  drawBlocks();
+}
+const valueOf = b => b[0] * 100 + b[1] * 10 + b[2];
+function drawBlocks() {
+  const cls = ['flat', 'rod', 'cube'];
+  document.querySelectorAll('.col').forEach((col, i) => {
+    const area = col.querySelector('.blocks'); area.innerHTML = '';
+    for (let k = 0; k < blocks[i]; k++) { const d = document.createElement('div'); d.className = cls[i]; area.appendChild(d); }
+    col.querySelector('.digit').textContent = blocks[i];
+  });
+  const tr = $('trades'); tr.innerHTML = '';
+  const add = (text, fn) => { const b = document.createElement('button'); b.textContent = text; b.onclick = () => { if (!busy) fn(); }; tr.appendChild(b); };
+  if (blocks[2] >= 10) add('10 ones → 1 ten', () => { blocks[2] -= 10; blocks[1]++; drawBlocks(); say('Ten ones make one ten.'); });
+  if (blocks[1] >= 10) add('10 tens → 1 hundred', () => { blocks[1] -= 10; blocks[0]++; drawBlocks(); say('Ten tens make one hundred.'); });
+  if (task.breakable && blocks[1] > 0 && blocks[2] <= 9) add('1 ten → 10 ones', () => { blocks[1]--; blocks[2] += 10; drawBlocks(); say('One ten is ten ones.'); });
+  if (task.breakable && blocks[0] > 0 && blocks[1] <= 9) add('1 hundred → 10 tens', () => { blocks[0]--; blocks[1] += 10; drawBlocks(); say('One hundred is ten tens.'); });
+}
+function renderStory() {
+  const wrap = document.createElement('div'); wrap.className = 'story';
+  const p = document.createElement('p'); p.textContent = task.text; p.onclick = () => say(task.text); wrap.appendChild(p);
+  if (task.coins) {
+    const row = document.createElement('div'); row.className = 'coins';
+    for (const c of ['q', 'd', 'n', 'p']) for (let i = 0; i < task.coins[c]; i++) { const d = document.createElement('div'); d.className = 'coin ' + c; d.textContent = COINS[c] + '¢'; row.appendChild(d); }
+    wrap.appendChild(row);
+  }
+  const pic = document.createElement('div'); pic.className = 'pic'; pic.id = 'pic'; pic.style.whiteSpace = 'pre-line'; wrap.appendChild(pic);
+  $('field').appendChild(wrap);
+}
+
+// ---------------------------------------------------------------------------
+// Answers
+// ---------------------------------------------------------------------------
+function miss(text) {
+  if (!missed) { missed = true; const ch = record(mode, false); if (ch < 0) setTimeout(() => { say('Let us try some easier ones.'); }, 1800); }
+  say(text);
+}
+function win(text, spoken) {
+  busy = true; P.stars++; persist(); $('stars').textContent = '⭐ ' + P.stars;
+  const ch = missed ? 0 : record(mode, true);
+  $('winText').textContent = text; $('win').classList.add('on'); say('Yes! ' + (spoken || text));
+  for (let i = 0; i < 12; i++) { const s = document.createElement('div'); s.className = 'thing'; s.style.pointerEvents = 'none'; s.textContent = ['⭐', '✨', '🌟'][i % 3]; s.style.left = rnd(0, 90) + '%'; s.style.top = rnd(0, 90) + '%'; s.style.transition = 'opacity 1.2s'; $('field').appendChild(s); setTimeout(() => s.style.opacity = 0, 50); setTimeout(() => s.remove(), 1300); }
+  let wait = 2800 + Math.min(2500, (spoken || text).length * 25);
+  if (ch > 0) { const name = LEVELS[mode][P.lv[mode]].name; setTimeout(() => { $('winText').textContent = 'Level up! ' + name; say('Level up! ' + name + '!'); }, wait - 400); wait += 2200; }
+  pending = setTimeout(newRound, wait);
+}
+function choose(n, btn) {
   if (busy) return;
-  if (n === target) { busy = true; streak++; stars++; persist(); $('stars').textContent = '⭐ ' + stars; cheer(WORDS[target].charAt(0).toUpperCase() + WORDS[target].slice(1) + ' ' + NAMES[emoji] + '!'); levelUp(); pending = setTimeout(newRound, 2600); }
-  else { streak = 0; btn.classList.add('no'); setTimeout(() => btn.classList.remove('no'), 500); say('Not ' + WORDS[n] + '. Count them again!'); }
+  if (n === task.answer) win(cap(numWords(n)) + ' ' + noun(n, NAMES[emojiOf()]) + '!');
+  else { btn.classList.add('no'); setTimeout(() => btn.classList.remove('no'), 500); miss('Not ' + numWords(n) + '. Count them again!'); }
 }
+function submitTyped() {
+  if (busy || typed === '') return;
+  const n = +typed, a = task.answer, nm = NAMES[emojiOf()];
+  if (n === a) {
+    if (task.kind === 'array') win(`${task.r} × ${task.c} = ${a}`, `${numWords(task.r)} rows of ${numWords(task.c)} is ${numWords(a)}.`);
+    else if (task.kind === 'frames') { const t = Math.floor(a / 10), o = a % 10; win(`${t} tens and ${o} ones = ${a}`, `${numWords(t)} tens and ${numWords(o)} ones is ${numWords(a)} ${nm}.`); }
+    else win(task.eq.replace('?', a), cap(numWords(a)) + '. That is right!');
+    return;
+  }
+  $('padShow').classList.add('no'); setTimeout(() => $('padShow').classList.remove('no'), 500);
+  typed = ''; showTyped();
+  const wasMissed = missed;
+  miss('Not ' + numWords(n) + '. Try again!');
+  if (wasMissed) showHint();
+}
+function showTyped() { $('padShow').textContent = typed || ' '; }
+function buildPad() {
+  const keys = ['7', '8', '9', '4', '5', '6', '1', '2', '3', '⌫', '0', '✔'];
+  for (const k of keys) {
+    const b = document.createElement('button'); b.textContent = k; if (k === '✔') b.className = 'ok';
+    b.onclick = () => { if (busy) return; if (k === '⌫') typed = typed.slice(0, -1); else if (k === '✔') return submitTyped(); else if (typed.length < 4) { typed = (typed + k).replace(/^0+(?=\d)/, ''); say(k); } showTyped(); };
+    $('padKeys').appendChild(b);
+  }
+}
+
+// Drag into the basket or onto plates.
 function makeDraggable(t) {
   let dx = 0, dy = 0, drag = false;
   t.addEventListener('pointerdown', e => { if (busy) return; drag = true; t.setPointerCapture(e.pointerId); dx = e.clientX - t.offsetLeft; dy = e.clientY - t.offsetTop; t.style.zIndex = 3; });
   t.addEventListener('pointermove', e => { if (!drag) return; t.style.left = (e.clientX - dx) + 'px'; t.style.top = (e.clientY - dy) + 'px'; });
   t.addEventListener('pointerup', () => { if (!drag) return; drag = false; t.style.zIndex = ''; settle(t); });
 }
+function zones() { const z = []; if ($('basket').classList.contains('on')) z.push($('basket')); document.querySelectorAll('.plate').forEach(p => z.push(p)); return z; }
+function zoneCount(z) { return [...document.querySelectorAll('.thing')].filter(t => t.dataset.in === (z.dataset.zone || 'basket')).length; }
 function settle(t) {
-  const b = $('basket').getBoundingClientRect(), r = t.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
-  const inside = cx > b.left && cx < b.right && cy > b.top - 30 && cy < b.bottom;
-  if (inside !== t.classList.contains('in')) { t.classList.toggle('in', inside); inBasket += inside ? 1 : -1; $('basket').querySelector('.count').textContent = inBasket; say(inside ? WORDS[inBasket] : 'Oops, ' + WORDS[inBasket]); }
+  const r = t.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+  let hit = null;
+  for (const z of zones()) { const b = z.getBoundingClientRect(); if (cx > b.left && cx < b.right && cy > b.top - 30 && cy < b.bottom) { hit = z; break; } }
+  const was = t.dataset.in || '', now = hit ? (hit.dataset.zone || 'basket') : '';
+  if (was === now) return;
+  t.dataset.in = now;
+  for (const z of zones()) z.querySelector('.count').textContent = zoneCount(z);
+  if (hit) say(numWords(zoneCount(hit)));
+  else { const from = zones().find(z => (z.dataset.zone || 'basket') === was); if (from) say('Oops, ' + numWords(zoneCount(from))); }
 }
-$('check').onclick = () => {
+function checkPlaced() {
   if (busy) return;
-  if (inBasket === target) { busy = true; streak++; stars++; persist(); $('stars').textContent = '⭐ ' + stars; cheer(WORDS[target].charAt(0).toUpperCase() + WORDS[target].slice(1) + ' ' + NAMES[emoji] + '. Perfect!'); levelUp(); pending = setTimeout(newRound, 2600); }
-  else { streak = 0; say(inBasket < target ? 'Only ' + WORDS[inBasket] + '. We need ' + WORDS[target] + '. Add some more!' : 'That is ' + WORDS[inBasket] + '. Too many! Take some out.'); }
-};
-function levelUp() { if (streak >= 5 && level < LEVELS.length - 1) { level++; streak = 0; persist(); setTimeout(() => say('Wow! Bigger numbers now!'), 2000); } }
-function cheer(text) {
-  $('winText').textContent = text; $('win').classList.add('on'); say('Yes! ' + text);
-  for (let i = 0; i < 12; i++) { const s = document.createElement('div'); s.className = 'thing'; s.style.pointerEvents = 'none'; s.textContent = ['⭐', '✨', '🌟'][i % 3]; s.style.left = rnd(0, 90) + '%'; s.style.top = rnd(0, 90) + '%'; s.style.transition = 'opacity 1.2s'; $('field').appendChild(s); setTimeout(() => s.style.opacity = 0, 50); setTimeout(() => s.remove(), 1300); }
+  const nm = NAMES[emojiOf()];
+  if (task.kind === 'basket') {
+    const n = zoneCount($('basket')), want = task.answer;
+    if (n === want) win(cap(numWords(want)) + ' ' + noun(want, nm) + '. Perfect!');
+    else miss(n < want ? 'Only ' + numWords(n) + '. We need ' + numWords(want) + '. Add some more!' : 'That is ' + numWords(n) + '. Too many! Take some out.');
+    return;
+  }
+  const counts = [...document.querySelectorAll('.plate')].map(zoneCount);
+  const loose = [...document.querySelectorAll('.thing')].filter(t => !t.dataset.in).length;
+  if (task.kind === 'groups') {
+    const bad = counts.findIndex(c => c !== task.N);
+    if (bad < 0) return win(`${task.R} groups of ${task.N} = ${task.R * task.N}`, `${numWords(task.R)} groups of ${numWords(task.N)} is ${numWords(task.R * task.N)} ${nm}.`);
+    return miss(`Plate ${bad + 1} has ${numWords(counts[bad])}. Every plate needs ${numWords(task.N)}.`);
+  }
+  // share
+  const fair = counts.every(c => c === counts[0]);
+  if (!fair) return miss('The plates are not fair yet. Every plate needs the same number.');
+  if (loose >= task.R) return miss(counts[0] === 0 ? 'Put some on the plates.' : 'You can still give every plate one more.');
+  if (task.left === 0 && loose) return miss('Share all of them.');
+  const each = counts[0];
+  if (task.left) win(`${task.total} ÷ ${task.R} = ${each}, ${task.left} left over`, `${numWords(task.total)} shared by ${numWords(task.R)} is ${numWords(each)} each, with ${numWords(task.left)} left over.`);
+  else win(`${task.total} ÷ ${task.R} = ${each}`, `${numWords(task.total)} shared by ${numWords(task.R)} is ${numWords(each)} each.`);
 }
+function checkBuild() {
+  if (busy) return;
+  const v = valueOf(blocks), a = task.answer;
+  if (v === a && blocks[1] <= 9 && blocks[2] <= 9) return win(task.eq ? task.eq + ' = ' + a : String(a), cap(numWords(a)) + '!');
+  if (v === a) return miss(blocks[2] > 9 ? 'That is ' + numWords(a) + ', but you have ' + numWords(blocks[2]) + ' ones. Trade ten ones for a ten.' : 'That is ' + numWords(a) + '. Trade ten tens for a hundred.');
+  miss('That is ' + numWords(v) + '. ' + (v < a ? 'We need more.' : 'That is too many.'));
+}
+$('check').onclick = () => (task.kind === 'build' ? checkBuild() : checkPlaced());
+
+function showHint() {
+  hinted = true;
+  switch (task.kind) {
+    case 'tap': say('Tap each ' + one(NAMES[emojiOf()]) + ' once. Say the numbers with me.'); break;
+    case 'frames': say('A full ten frame is ten. Count the tens: ten, twenty, thirty. Then count the ones.'); break;
+    case 'array': say(task.tapRows ? 'Tap each row. Count by ' + numWords(task.c) + 's.' : 'Now you can tap the rows. Count by ' + numWords(task.c) + 's.'); break;
+    case 'basket': say('Drag them in one at a time and count.'); break;
+    case 'groups': say('Put ' + numWords(task.N) + ' on the first plate. Then do the next plate.'); break;
+    case 'share': say('Give one to each plate, then go around again. Keep going until you cannot give every plate one more.'); break;
+    case 'build': say(task.eq ? (task.breakable ? 'Take away the ones first. If there are not enough, break a ten.' : 'Add the ones, then the tens. Trade ten ones for a ten.') : 'Look at each digit. Hundreds first, then tens, then ones.'); break;
+    case 'story': { const pic = $('pic'); if (pic) { pic.textContent = (task.pic ? task.pic + '\n' : '') + task.eq; pic.classList.add('on'); } say('Here is a hint. ' + task.eq.replace('?', 'what')); break; }
+  }
+}
+
 document.querySelectorAll('.pill[data-mode]').forEach(b => b.onclick = () => { document.querySelectorAll('.pill[data-mode]').forEach(x => x.classList.toggle('on', x === b)); mode = b.dataset.mode; newRound(); });
 $('again').onclick = () => newRound();
-$('hear').onclick = () => say($('ask').textContent);
-$('stars').textContent = '⭐ ' + stars;
-addEventListener('resize', () => newRound(false));
+$('hint').onclick = () => { if (!busy) showHint(); };
+$('hear').onclick = () => say(task.kind === 'story' ? task.text : task.speak || $('ask').textContent);
+$('stars').textContent = '⭐ ' + P.stars;
+buildPad();
+let resizeTimer = null;
+addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { if (!busy) { counted = 0; render(false); } }, 200); });
 newRound(false);
-addEventListener('pointerdown', () => say('Count With Me! ' + $('ask').textContent), { once: true });
+addEventListener('pointerdown', () => say('Count With Me! ' + (task.kind === 'story' ? task.text : task.speak || $('ask').textContent)), { once: true });
+
+// Test hook.
+window.CWM = { LEVELS, START, numWords, record, P: () => P, current: () => task, mode: () => mode, setMode: m => document.querySelector(`.pill[data-mode="${m}"]`).click(), blocks: () => blocks, valueOf };
 </script>
 </body>
 </html>
