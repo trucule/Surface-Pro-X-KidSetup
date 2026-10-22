@@ -18,13 +18,18 @@
       (designed voices, see voices.js), else Azure Speech or OpenAI; the Windows voices are the last fallback.
     - Otherwise the Windows voices are used, a different one (and pitch) per character. Static prompts can also
       come from a voice pack (voices/make-voices.py), like the other apps.
+  Reading level (Little, 2nd grade, 3rd grade; kept in localStorage story-level): Little is the read-aloud for a
+  five-year-old. 2nd and 3rd grade use longer sentences and richer words, highlight each word as it is read, explain
+  story words when tapped, offer "I read it myself", and end with questions about the story (stars in story-stars).
 -->
 <style>
   :root { --ink: #2B2140; --paper: #FFF9F0; --pink: #FF4F8B; --sun: #FFC93C; --sky: #58C7F0; --leaf: #5CD38B; --grape: #9B6BFF; }
   html, body { margin: 0; height: 100%; background: var(--paper); overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); }
   body { user-select: none; -webkit-user-select: none; }
   #app { position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
-  header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
+  /* The right 210px of the header stays clear: the Home pill sits there. */
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 210px 10px 14px; }
+  #stars { font-size: 22px; font-weight: 900; }
   header h1 { font-size: 26px; margin: 0 auto 0 0; font-weight: 900; }
   .round { border: 4px solid var(--ink); background: #fff; border-radius: 50%; width: 64px; height: 64px; font-size: 30px; cursor: pointer; }
   .round:active { transform: scale(.93); }
@@ -58,11 +63,22 @@
   #thinking { display: none; text-align: center; font-size: 24px; font-weight: 800; color: #6A5A86; padding: 20px; } #thinking.on { display: block; }
   #thinking .dots::after { content: "…"; animation: dots 1.2s steps(3) infinite; } @keyframes dots { to { content: ""; } }
   #end { display: none; text-align: center; font-size: 40px; font-weight: 900; margin: 10px 0; } #end.on { display: block; }
+  #text.grown { font-size: 29px; line-height: 1.6; font-weight: 600; }
+  #text .w.hl { background: var(--sun); box-shadow: 0 0 0 2px var(--sun); }
+  #text .w.gw { text-decoration: underline dotted #9B6BFF 3px; text-underline-offset: 5px; }
+  #pop { position: fixed; left: 50%; top: 90px; transform: translateX(-50%) scale(.6); opacity: 0; pointer-events: none; transition: .2s; background: #fff; border: 4px solid var(--ink); border-radius: 26px; padding: 14px 28px; text-align: center; z-index: 9; max-width: 70%; box-shadow: 0 8px 0 var(--grape); }
+  #pop.on { opacity: 1; transform: translateX(-50%) scale(1); }
+  #popWord { font-size: 52px; font-weight: 900; } #popMeaning { font-size: 24px; font-weight: 700; color: #4A3C66; }
+  #quiz { display: none; background: #fff; border: 4px solid var(--ink); border-radius: 28px; padding: 16px 20px 20px; margin: 10px auto; max-width: 900px; text-align: center; } #quiz.on { display: block; }
+  #qNum { font-size: 18px; font-weight: 800; color: #6A5A86; } #qText { font-size: 30px; font-weight: 900; margin: 6px 0 14px; }
+  #qChoices { display: grid; gap: 12px; }
+  #qChoices button { border: 4px solid var(--ink); border-radius: 20px; background: #F3EEFF; font: 800 24px system-ui, sans-serif; padding: 14px 18px; cursor: pointer; text-align: left; }
+  #qChoices button.right { background: var(--leaf); } #qChoices button.wrong { background: #ffd6d6; opacity: .7; }
 </style>
 </head>
 <body>
 <div id="app">
-  <header><h1>Story Maker</h1><button class="round" id="back" title="Make another" hidden>⬅️</button></header>
+  <header><h1>Story Maker</h1><span id="stars">⭐ 0</span><button class="round" id="back" title="Make another" hidden>⬅️</button></header>
   <section>
     <div id="setup">
       <div class="q">Who is in the story? <small>pick one, two or three friends</small></div><div class="picks" id="cast"></div>
@@ -70,6 +86,7 @@
       <div class="q">What kind of story?</div><div class="row" id="kinds"></div>
       <div class="q">How much trouble?</div><div class="row" id="dramas"></div>
       <div class="q">How long?</div><div class="row" id="lengths"></div>
+      <div class="q">Reading level</div><div class="row" id="levels"></div>
       <button id="go" disabled>Tell the story! 📖</button>
     </div>
     <div id="story">
@@ -79,9 +96,11 @@
       <div id="thinking">The story is being written<span class="dots"></span></div>
       <div id="choices"></div>
       <div id="end">The End ⭐</div>
-      <div class="bar"><button class="round" id="read" title="Read this part again">🔈</button><button class="round" id="another" title="New story, same friends">🎲</button></div>
+      <div id="quiz"><div id="qNum"></div><div id="qText"></div><div id="qChoices"></div></div>
+      <div class="bar"><button class="round" id="read" title="Read this part again">🔈</button><button class="round" id="mode" title="Read to me">👂</button><button class="round" id="another" title="New story, same friends">🎲</button></div>
     </div>
   </section>
+  <div id="pop"><div id="popWord"></div><div id="popMeaning"></div></div>
 </div>
 <script src="config.js"></script>
 <script src="voices.js"></script>
@@ -115,15 +134,26 @@ let picked = [], place = null, kind = null, drama = null, length = null;
 let story = null;   // { scenes: [...], history: [...], reading }
 const $ = id => document.getElementById(id);
 const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+const pick = a => a[Math.floor(Math.random() * a.length)];
 
 // ---------------------------------------------------------------------------
 // Voices
 // ---------------------------------------------------------------------------
 const VOICE = (() => {
-  let actx = null, cur = null; const cache = new Map();
+  let actx = null, cur = null, seq = 0, timers = []; const cache = new Map();
   const key = t => String(t).trim().toLowerCase().replace(/\s+/g, ' ');
   function ctx() { if (!actx) { try { actx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} } if (actx && actx.state === 'suspended') actx.resume(); return actx; }
-  function stop() { if (cur) { try { cur.onended = null; cur.stop(); } catch (e) {} cur = null; } try { speechSynthesis.cancel(); } catch (e) {} }
+  // Every line gets a number; stopping (or starting another line) retires it, so a late "done" from a line that was
+  // cut off never moves the story on.
+  function clearTimers() { timers.forEach(clearTimeout); timers = []; }
+  function stop() { seq++; clearTimers(); if (cur) { try { cur.onended = null; cur.stop(); } catch (e) {} cur = null; } try { speechSynthesis.cancel(); } catch (e) {} }
+  // Read-along: with a clip the words are timed across its length by their size; the Windows voice reports each word.
+  function wordStarts(text) { const s = []; let pos = 0; for (const w of text.split(' ')) { s.push(pos); pos += w.length + 1; } return s; }
+  function scheduleWords(text, seconds, onWord) {
+    if (!onWord) return;
+    const words = text.split(' '), total = words.reduce((n, w) => n + w.length + 1, 0); let t = 0;
+    words.forEach((w, i) => { timers.push(setTimeout(() => onWord(i), t * 1000)); t += seconds * (w.length + 1) / total; });
+  }
   // Effects applied to a character's audio: "robot" is a ring modulator plus a touch of bit crushing.
   function chain(a, fx) {
     const out = a.createGain(); out.gain.value = 1;
@@ -135,7 +165,7 @@ const VOICE = (() => {
     out.connect(ring); ring.connect(wet); out.connect(dry); wet.connect(crush); dry.connect(crush); crush.connect(hp).connect(lp).connect(a.destination);
     return out;
   }
-  function playBuffer(buf, done, fx) { const a = ctx(); const s = a.createBufferSource(); s.buffer = buf; s.connect(chain(a, fx)); s.onended = () => { if (cur === s) { cur = null; if (done) done(); } }; cur = s; s.start(); }
+  function playBuffer(buf, done, fx, text, onWord) { const a = ctx(); const s = a.createBufferSource(); s.buffer = buf; s.connect(chain(a, fx)); s.onended = () => { if (cur === s) { cur = null; if (done) done(); } }; cur = s; s.start(); if (text) scheduleWords(text, buf.duration, onWord); }
   async function decode(bytes) { const a = ctx(); return a.decodeAudioData(bytes.slice(0)); }
   const vsCfg = () => (window.VS_VOICES || {});
   function fxFor(who) { const v = vsCfg()[who.id]; return v && v.fx; }
@@ -225,25 +255,43 @@ const VOICE = (() => {
       const i = CAST.findIndex(c => c.id === who.id); return sysVoices[(i + 1) % sysVoices.length];
     } catch (e) { return null; }
   }
-  function systemSay(text, who, done) {
+  function systemSay(text, who, done, onWord) {
     try {
       const u = new SpeechSynthesisUtterance(text); const v = systemVoice(who); if (v) u.voice = v;
       u.pitch = who.pitch || 1; u.rate = (who.rate || 1) * 0.95; u.onend = () => done && done(); u.onerror = () => done && done();
+      if (onWord) {
+        let heard = false; const starts = wordStarts(text);
+        u.onboundary = e => { if (e.name && e.name !== 'word') return; if (!heard) { heard = true; clearTimers(); } let k = 0; for (let j = 0; j < starts.length; j++) if (starts[j] <= e.charIndex) k = j; onWord(k); };
+        u.onstart = () => { if (!heard) scheduleWords(text, text.split(' ').length * 0.42 / u.rate, onWord); };
+      }
       speechSynthesis.speak(u);
     } catch (e) { if (done) done(); }
   }
   // A line: pack clip (static prompts) > live TTS > Windows voice.
-  async function say(text, who, mood, done) {
-    stop(); who = who || NARRATOR; const p = window.VOICE_PACK, k = key(text);
-    if (p && p[k] && who === NARRATOR) { try { const bin = atob(p[k]), bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); playBuffer(await decode(bytes.buffer), done); return; } catch (e) {} }
-    const buf = await synth(text, who, mood); if (buf) { playBuffer(buf, done, fxFor(who)); return; }
-    systemSay(text, who, done);
+  async function say(text, who, mood, done, onWord) {
+    stop(); who = who || NARRATOR; const p = window.VOICE_PACK, k = key(text), my = seq;
+    const fin = () => { if (my === seq && done) done(); }, ow = onWord ? (i => { if (my === seq) onWord(i); }) : null;
+    if (p && p[k] && who === NARRATOR) { try { const bin = atob(p[k]), bytes = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i); const b = await decode(bytes.buffer); if (my !== seq) return; playBuffer(b, fin, null, text, ow); return; } catch (e) {} }
+    const buf = await synth(text, who, mood); if (my !== seq) return;
+    if (buf) { playBuffer(buf, fin, fxFor(who), text, ow); return; }
+    systemSay(text, who, fin, ow);
   }
   function prefetch(text, who, mood) { synth(text, who, mood); }
   function prefetchAll(lines) { for (const l of lines) synth(l.text, l.who, l.mood); }
   return { say, stop, prefetch, prefetchAll, live: () => !!(CFG.tts && (CFG.tts.key || (CFG.tts.provider === 'voicestudio' && CFG.tts.url))), vs };
 })();
 function say(t, done) { VOICE.say(t, NARRATOR, null, done); }
+
+// ---------------------------------------------------------------------------
+// Reading level. Little is the original read-aloud for a five-year-old; 2nd and 3rd grade use longer sentences,
+// richer words (tap one to hear it and see what it means), a read-along highlight and questions at the end.
+// ---------------------------------------------------------------------------
+const LEVELS = [['🐣', 'little', 'Little', 'age 5'], ['📗', 'second', '2nd grade', 'age 7 to 8'], ['📘', 'third', '3rd grade', 'age 8 to 9']];
+const store = { get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
+let level = LEVELS.find(l => l[1] === store.get('story-level', 'second')) || LEVELS[1];
+let selfRead = !!store.get('story-self-read', false);   // "I read": no automatic reading, she taps lines and words
+let stars = store.get('story-stars', 0) | 0;
+const grown = () => level[1] !== 'little';
 
 // ---------------------------------------------------------------------------
 // Setup screen
@@ -266,6 +314,8 @@ for (const c of CAST) tile(c, $('cast'), (c, b) => {
 }, c.kind);
 const single = (list, box, set, extra) => list.forEach(item => tile(item, box, (it, b) => { [...box.children].forEach(x => x.classList.toggle('on', x === b)); set(it); say(it[2] || it[1]); ready(); }, extra && extra(item)));
 single(PLACES, $('places'), v => place = v); single(KINDS, $('kinds'), v => kind = v); single(DRAMAS, $('dramas'), v => drama = v); single(LENGTHS, $('lengths'), v => length = v, l => l[1] + ' parts');
+single(LEVELS, $('levels'), v => { level = v; store.set('story-level', v[1]); }, l => l[3]);
+[...$('levels').children][LEVELS.indexOf(level)].classList.add('on');
 function ready() { $('go').disabled = !(picked.length && place && kind && drama && length); }
 
 // ---------------------------------------------------------------------------
@@ -274,24 +324,37 @@ function ready() { $('go').disabled = !(picked.length && place && kind && drama 
 function storiesToday() { try { const d = JSON.parse(localStorage.getItem('story-count') || '{}'); return d.day === new Date().toDateString() ? d.n : 0; } catch (e) { return 0; } }
 function countStory() { try { localStorage.setItem('story-count', JSON.stringify({ day: new Date().toDateString(), n: storiesToday() + 1 })); } catch (e) {} }
 function canUseAI() { return !!CFG.apiKey && storiesToday() < CFG.dailyLimit; }
-const SYSTEM = `You write interactive stories for a five-year-old, told aloud. Rules: warm, funny, concrete, short sentences, simple words. Nothing scary beyond the requested drama level, never violence, death, weapons, or real danger; any "monster" turns out friendly. Every character in the cast speaks in every scene, in their own personality. Include one playful sound word per scene (like SPLASH or boing). Reply with JSON only, no prose and no code fences.`;
+const SAFE = `Nothing scary beyond the requested drama level, never violence, death, weapons, or real danger; any "monster" turns out friendly. Every character in the cast speaks in every scene, in their own personality.`;
+const SYSTEMS = {
+  little: `You write interactive stories for a five-year-old, told aloud. Rules: warm, funny, concrete, short sentences, simple words. ${SAFE} Include one playful sound word per scene (like SPLASH or boing). Reply with JSON only, no prose and no code fences.`,
+  second: `You write interactive read-along stories for a 2nd grader (age 7 or 8). Each line is read aloud while she follows the highlighted words. Rules: warm, funny and concrete. Sentences of about 8 to 14 words, with a few short ones for punch. Use describing words and name feelings. Each scene uses one or two interesting new words (like "curious" or "wobbly") whose meaning is clear from the sentence around them. Show cause and effect: the friends notice clues, say why, and solve the problem with a plan. ${SAFE} Reply with JSON only, no prose and no code fences.`,
+  third: `You write interactive read-along stories for a 3rd grader (age 8 or 9) who reads well. Rules: warm, funny and vivid. Mix short sentences with longer ones of up to about 20 words joined by words like because, although, while and until. Use rich, exact vocabulary: two new words per scene whose meaning is clear from context, and now and then a simile (as quiet as snow). Characters have feelings that change, explain their reasons, disagree kindly and work out a plan; include a clue or a small twist. ${SAFE} Reply with JSON only, no prose and no code fences.`
+};
+const LINES = { little: '6 to 9 lines', second: '7 to 10 lines', third: '8 to 12 lines; narrator lines may be two or three sentences' };
 async function writeScene() {
-  const s = story, isLast = s.scenes.length + 1 >= length[1];
+  const s = story, isLast = s.scenes.length + 1 >= length[1], lv = s.level;
   const castDesc = picked.map(c => `${c.id}: ${c.name}, a ${c.kind}, ${c.trait}`).join('; ');
   const history = s.history.map((h, i) => `Scene ${i + 1} "${h.title}": ${h.summary} She chose: ${h.choice}.`).join('\n') || '(none yet)';
-  const user = `Cast: ${castDesc}.\nPlace: ${place[1]}. Kind: ${kind[1]}. Drama level: ${drama[1]} (${drama[3]}). Total scenes: ${length[1]}.\nSo far:\n${history}\n\nWrite scene ${s.scenes.length + 1}${isLast ? ', the LAST scene: resolve everything happily and end with a warm closing line' : ''}.\nJSON shape: {"title": "short scene title", "emoji": ["one", "two", "three emoji for the scene"], "lines": [{"who": "narrator" or a cast id, "text": "one or two sentences", "mood": one of "neutral","cheerful","excited","sad","whispering","shouting","friendly"}], "summary": "one sentence of what happened", "choices": [{"label": "3-6 words, what happens next", "emoji": "one emoji"}, ...2 or 3 choices]}. 6 to 9 lines. ${isLast ? 'For the last scene: "choices": [] and "end": true.' : ''}`;
+  const words = lv === 'little' ? '' : ` "words": [{"word": "a new word used in this scene, spelled exactly as in the text", "meaning": "a short meaning a child understands"}], 1 or 2 items.`;
+  const questions = isLast && lv !== 'little' ? ` Also "questions": 4 questions about the WHOLE story to check she understood it, covering who, what happened, why something happened, and the order of events${lv === 'third' ? ', plus one about the meaning of a word from the story' : ''}: [{"q": "the question", "choices": ["three short answers"], "answer": index of the one right choice}]. Exactly one choice is right; the other two are clearly wrong for this story.` : '';
+  const user = `Cast: ${castDesc}.\nPlace: ${place[1]}. Kind: ${kind[1]}. Drama level: ${drama[1]} (${drama[3]}). Total scenes: ${length[1]}.\nSo far:\n${history}\n\nWrite scene ${s.scenes.length + 1}${isLast ? ', the LAST scene: resolve everything happily and end with a warm closing line' : ''}.\nJSON shape: {"title": "short scene title", "emoji": ["one", "two", "three emoji for the scene"], "lines": [{"who": "narrator" or a cast id, "text": "${lv === 'little' ? 'one or two sentences' : 'one to three sentences'}", "mood": one of "neutral","cheerful","excited","sad","whispering","shouting","friendly"}], "summary": "one sentence of what happened", "choices": [{"label": "3-6 words, what happens next", "emoji": "one emoji"}, ...2 or 3 choices]}.${words} ${LINES[lv]}. ${isLast ? 'For the last scene: "choices": [] and "end": true.' : ''}${questions}`;
   const r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': CFG.apiKey, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-    body: JSON.stringify({ model: CFG.storyModel, max_tokens: 1200, system: SYSTEM, messages: [{ role: 'user', content: user }] }) });
+    body: JSON.stringify({ model: CFG.storyModel, max_tokens: lv === 'little' ? 1200 : 2200, system: SYSTEMS[lv], messages: [{ role: 'user', content: user }] }) });
   if (!r.ok) throw new Error('api ' + r.status);
   const data = await r.json(); const text = (data.content || []).map(c => c.text || '').join('');
   const json = JSON.parse(text.replace(/```json|```/g, '').trim());
   json.lines = (json.lines || []).filter(l => l && l.text).map(l => ({ who: picked.find(c => c.id === l.who) || NARRATOR, text: String(l.text), mood: l.mood || 'neutral' }));
-  json.choices = isLast ? [] : (json.choices || []).slice(0, 3);
+  if (!json.lines.length) throw new Error('empty scene');
+  json.choices = isLast ? [] : (json.choices || []).filter(c => c && c.label).slice(0, 3);
+  if (!isLast && json.choices.length < 2) throw new Error('no choices');
   json.end = isLast || !!json.end;
+  json.words = (json.words || []).filter(w => w && w.word && w.meaning).map(w => ({ word: String(w.word), meaning: String(w.meaning) }));
+  json.questions = cleanQuestions(json.questions);
   return json;
 }
-// Built-in story for when there is no key or the writer fails: three scenes, two choices each, all friends speak.
-function builtinScene() {
+
+// Built-in story for Little (no key, or the writer failed): three scenes, two choices each, all friends speak.
+function littleScene() {
   const s = story, n = s.scenes.length, names = picked.map(c => c.name), who = i => picked[i % picked.length];
   const list = names.length === 1 ? names[0] : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
   const lastChoice = s.history.length ? s.history[s.history.length - 1].choice : '';
@@ -303,14 +366,207 @@ function builtinScene() {
   return { title: 'A new friend', emoji: ['🐣', ...picked.slice(0, 2).map(c => c.emoji)], end: true, choices: [], lines: [L(NARRATOR, tickled ? `${who(0).name} tickled the balloon. It giggled, wobbled, and POP! Out tumbled a tiny chick.` : `${who(0).name} sang a soft song. The balloon hummed along, wobbled, and POP! Out tumbled a tiny chick.`), L(who(0), 'Hello! Are you all right?', 'friendly'), L(NARRATOR, `"I was blown all the way from the farm!" peeped the chick.`), ...picked.slice(1).map(c => L(c, 'Then we will take you home!', 'cheerful')), L(NARRATOR, `So they did, all together, and the chick became the ${names.length + 1 === 2 ? 'second' : 'newest'} member of the gang. The end.`)], summary: 'The chick was freed and taken home.' };
 }
 
+// Built-in stories for 2nd and 3rd grade, one per kind of story. Narrator lines are written twice: [2nd, 3rd].
+// A speaker number is a friend (0 = the first picked; it wraps when fewer are picked). Branch lines come first,
+// then the lines both branches share. {A} {B} {C} are the friends' names, {list} all of them, {place} the place.
+const N = 'n';
+const PLOTS = {
+  mystery: {
+    emoji: ['🗺️', '👣', '🪺'],
+    words: { clue: 'something that helps you solve a mystery', vanished: 'disappeared all at once', hollow: 'empty inside', guilty: 'feeling like you did something wrong', kind: 'gentle and nice to others' },
+    questions: [['Why did the bird take the map?', 'To keep her eggs warm', ['To find a treasure', 'Because she was lost']],
+                ['What clue did the friends find in the basket?', 'Tiny muddy footprints', ['A golden key', 'A wet sock']]],
+    scenes: [
+      { title: 'The missing map', lines: [
+        [N, '{list} came to {place} with a picnic basket and a big paper map.', '{list} arrived at {place} carrying a picnic basket and a treasure map that {A} had drawn with great care.'],
+        [N, 'But when they opened the basket, the map was gone! Only tiny muddy footprints were left behind, and a shiny blue feather.', 'When they opened the basket, the map had vanished. All that was left was a trail of tiny muddy footprints and one shiny blue feather, which was a clue.'],
+        [0, 'Our map! Who would take it?', 'sad'], [1, 'Look at these footprints. They are very small.', 'whispering'], [2, 'This is a real mystery. Let us solve it!', 'excited']],
+        summary: 'The map was missing, and the friends found footprints and a feather.',
+        choices: [{ label: 'Follow the footprints', emoji: '👣', key: 'follow' }, { label: 'Look at the feather', emoji: '🪶', key: 'feather' }] },
+      { title: { follow: 'The trail', feather: 'The blue feather' }, lines: {
+        follow: [[N, 'They followed the footprints past a log and around a big rock. The prints stopped at a tree with a hole in it.', 'They followed the footprints past a fallen log and around a mossy boulder, until the trail ended at a hollow tree.']],
+        feather: [[N, '{B} held up the feather. It was blue and shiny, just like the feather of a blue jay. High in a tree, a blue jay was watching them.', '{B} studied the feather closely. It was bright blue with a white tip, exactly like a blue jay\'s. Above them, a blue jay sat on a branch, looking very guilty.']],
+        common: [[N, 'Then they saw it. A corner of their map was poking out of a nest!', 'Then they noticed something familiar: a corner of their map was tucked into a nest, as if it were a blanket.'],
+          [0, 'Mystery solved! But why would a bird want a map?', 'cheerful'], [1, 'Maybe she needs it for something. Let us find out.', 'friendly']] },
+        summary: 'The friends found the map in a blue jay\'s nest.',
+        choices: [{ label: 'Ask the bird kindly', emoji: '💬', key: 'ask' }, { label: 'Leave her a gift', emoji: '🎁', key: 'gift' }] },
+      { title: 'A warm nest', end: true, lines: {
+        ask: [[N, '{A} asked the bird kindly. The bird chirped that her eggs were cold at night, and the paper kept them warm.', '{A} asked the bird kindly why she needed the map. She explained that the nights were chilly, and the thick paper kept her eggs warm.']],
+        gift: [[N, '{A} left a soft scarf by the nest. The bird tucked the scarf around her eggs to keep them warm, and she pushed the map back down to them.', '{A} left a soft, fuzzy scarf beside the nest. The bird tucked it around her eggs, because it was even warmer than paper, and she nudged the map back down to them.']],
+        common: [[2, 'Now everyone has what they need!', 'cheerful'],
+          [N, 'The friends were glad they had been kind instead of angry. They ate their picnic, and the bird sang them a thank you song. The end.', 'The friends were glad they had chosen to be kind instead of angry. They followed the map to a sunny meadow for their picnic, while the blue jay sang a thank you song above them. The end.']] },
+        summary: 'The friends were kind to the bird and got their map back.' } ] },
+  adventure: {
+    emoji: ['🌉', '🛶', '⛰️'],
+    words: { sagged: 'bent down in the middle', sturdy: 'strong and hard to break', teamwork: 'working together to get something done', sinking: 'going down slowly', glowed: 'shined with a soft light' },
+    questions: [['What problem did the friends have on the way?', 'The bridge was broken', ['They lost their shoes', 'It started to snow']],
+                ['Why did the friends want to reach the top of the hill?', 'To see the sunset', ['To find a dragon', 'To build a house']]],
+    scenes: [
+      { title: 'The broken bridge', lines: [
+        [N, '{list} set out to explore {place}. They wanted to reach the top of Rainbow Hill to see the sunset.', '{list} set out to explore {place}, hoping to reach the top of Rainbow Hill, where people said you could watch the whole land glow at sunset.'],
+        [N, 'Halfway there, they came to a wide river. The old bridge was broken in the middle!', 'Halfway there, a wide, rushing river blocked the path. The old wooden bridge sagged in the middle, with a gap far too big to jump.'],
+        [0, 'Oh no! How will we get across?', 'sad'], [1, 'Do not try to jump. That gap is too big.', 'neutral'], [2, 'We can figure this out together.', 'friendly']],
+        summary: 'The bridge over the river was broken.',
+        choices: [{ label: 'Build a raft', emoji: '🛶', key: 'raft' }, { label: 'Look for another way', emoji: '🗺️', key: 'walk' }] },
+      { title: { raft: 'The raft', walk: 'Stepping stones' }, lines: {
+        raft: [[N, 'They tied logs together with long vines to make a raft. {B} pushed, {A} steered, and the raft floated across.', 'They collected sturdy logs and tied them together with long vines. It took teamwork: {B} pushed off from the shore while {A} steered with a branch, and the raft bobbed safely across.']],
+        walk: [[N, 'They walked along the river until they found big flat stones. They hopped from stone to stone, very carefully, and made it across.', 'They hiked along the riverbank until they discovered a row of flat stepping stones. They crossed one careful step at a time, holding hands so no one would slip.']],
+        common: [[N, 'On the other side, the path was steep and rocky. The sun was getting low.', 'On the far side, the trail grew steep and rocky, and the sun was sinking lower and lower.'],
+          [0, 'My legs are so tired.', 'sad'], [1, 'We are almost there. Do not give up!', 'excited']] },
+        summary: 'The friends crossed the river and started up the steep hill.',
+        choices: [{ label: 'Rest for a minute', emoji: '🍎', key: 'rest' }, { label: 'Keep climbing', emoji: '⛰️', key: 'climb' }] },
+      { title: 'The top of the hill', end: true, lines: {
+        rest: [[N, 'They rested on a rock and shared some apples. With fresh energy, they climbed the last part fast.', 'They rested on a flat rock and shared crunchy apples. Although the break was short, it gave them fresh energy for the last part of the climb.']],
+        climb: [[N, 'They kept climbing and sang a marching song so their feet would keep going.', 'They kept climbing, singing a marching song so loudly that their tired feet had no choice but to keep going.']],
+        common: [[N, 'They reached the top just in time. The sky turned pink, orange and gold.', 'They reached the top just in time. The sky turned pink, orange and gold, and the whole land glowed below them like a giant painting.'],
+          [0, 'We did it together!', 'excited'], [N, 'And it was the best sunset they had ever seen. The end.', 'It was the best sunset any of them had ever seen, and they agreed it was even better because they had made it there as a team. The end.']] },
+        summary: 'The friends reached the top and saw the sunset.' } ] },
+  friendship: {
+    emoji: ['🦔', '🍎', '💛'],
+    words: { nervous: 'a little scared and worried', embarrassed: 'feeling shy because others noticed something', clever: 'smart and full of good ideas', special: 'different in a good way', kindness: 'being caring and nice to others' },
+    questions: [['Why was Prickles playing alone at first?', 'Others said her spikes were too poky', ['She was asleep', 'She did not like games']],
+                ['What did the friends learn?', 'Kindness makes room for everyone', ['Tag is the best game', 'Hedgehogs cannot play']]],
+    scenes: [
+      { title: 'Someone new', lines: [
+        [N, '{list} were playing at {place} when they saw someone new. A little hedgehog named Prickles was sitting all alone.', '{list} were playing at {place} when they noticed someone new: a little hedgehog named Prickles, sitting by herself and drawing circles in the dirt with a stick.'],
+        [N, '"Hello," said Prickles quietly. "Nobody wants to play with me because my spikes are poky."', '"Hello," said Prickles in a small, nervous voice. "Nobody wants to play with me. They say my spikes are too poky."'],
+        [0, 'That is not fair. Everyone should get to play.', 'sad'], [1, 'Do you want to play with us?', 'friendly']],
+        summary: 'The friends met Prickles, a hedgehog nobody would play with.',
+        choices: [{ label: 'Play tag', emoji: '🏃', key: 'tag' }, { label: 'Make up a new game', emoji: '🧩', key: 'game' }] },
+      { title: { tag: 'A game of tag', game: 'Apple catch' }, lines: {
+        tag: [[N, 'They played tag. But every time someone tagged Prickles, they said "Ouch!" and Prickles looked sad again.', 'They started a game of tag, but each time someone tagged Prickles, they yelped, "Ouch!" Prickles curled into a ball, embarrassed.']],
+        game: [[N, '{B} had an idea. "Let us play apple catch! Prickles can catch the apples on her spikes!"', '{B} thought hard and came up with a clever idea. "Let us play apple catch! Prickles can catch apples right on her spikes!"']],
+        common: [[N, 'Prickles looked at her new friends. "Do you really want me here?" she asked.', 'Prickles looked at her new friends for a long moment. "Do you really want me here?" she asked softly.'],
+          [0, 'Of course we do!', 'cheerful']] },
+        summary: 'The friends tried to find a game Prickles could play.',
+        choices: [{ label: 'Tell her something kind', emoji: '💛', key: 'kind' }, { label: 'Invite everyone to play', emoji: '🎉', key: 'invite' }] },
+      { title: 'More friends than ever', end: true, lines: {
+        kind: [[N, '{A} said, "Your spikes are not a problem. They make you special." Prickles smiled a big smile.', '{A} said, "Your spikes are not a problem at all. They make you special." Prickles slowly uncurled, and a huge grin spread across her face.']],
+        invite: [[N, 'They invited all the other kids to come and play a new game that Prickles picked. Soon everyone wanted a turn.', 'They invited all the other kids to join a brand new game that Prickles invented. Before long, everyone was lining up for a turn.']],
+        common: [[1, 'You are a great friend, Prickles.', 'friendly'],
+          [N, 'By the end of the day, Prickles had lots of friends. Everyone learned that kindness makes room for everyone. The end.', 'By the end of the day, Prickles had more friends than she could count. She learned that being different can be wonderful, and everyone learned that kindness makes room for everyone. The end.']] },
+        summary: 'Prickles made lots of friends.' } ] },
+  silly: {
+    emoji: ['🎂', '🤧', '🍬'],
+    words: { towering: 'very, very tall', disaster: 'something that goes very wrong', enormous: 'huge', exciting: 'making you feel happy and full of energy', frosting: 'the sweet, creamy topping on a cake' },
+    questions: [['What made the cake sneeze?', 'Pepper fell into the bowl', ['It caught a cold', 'It ate a flower']],
+                ['Where do the friends keep the pepper now?', 'Far away from the cake bowl', ['In every cake', 'In their pockets']]],
+    scenes: [
+      { title: 'The sneezing cake', lines: [
+        [N, '{list} were baking a giant cake at {place} for the big party.', '{list} were baking a towering cake at {place} for the Great Party that evening.'],
+        [N, 'But the pepper jar fell into the bowl! When the cake came out of the oven, it went AH-CHOO and bounced off the table!', 'Disaster! The pepper jar tipped into the batter. When the cake came out of the oven, it let out an enormous AH-CHOO and bounced right off the table!'],
+        [0, 'The cake is sneezing!', 'shouting'], [1, 'Catch it before it gets away!', 'excited']],
+        summary: 'Pepper fell into the cake, and it started sneezing and bouncing.',
+        choices: [{ label: 'Chase the cake', emoji: '🏃', key: 'chase' }, { label: 'Make it laugh', emoji: '😂', key: 'laugh' }] },
+      { title: { chase: 'The great cake chase', laugh: 'A very silly joke' }, lines: {
+        chase: [[N, 'They chased the cake around and around. It sneezed, it hopped, and it rolled down the path. Boing! Achoo! Boing!', 'They chased the cake in circles. It sneezed, hopped and rolled down the path, leaving a trail of pink frosting behind it. Boing! Achoo! Boing!']],
+        laugh: [[N, '{B} told the cake a silly joke. The cake giggled so hard that it stopped bouncing. But it still had the sneezes.', '{B} told the cake the silliest joke ever. The cake giggled so hard that it stopped bouncing, although it still could not stop sneezing.']],
+        common: [[0, 'We need to stop the sneezes. What stops sneezes?', 'neutral'], [2, 'I know! Something to make it feel better!', 'excited']] },
+        summary: 'The friends caught the cake, but it kept sneezing.',
+        choices: [{ label: 'Give it a tissue', emoji: '🤧', key: 'tissue' }, { label: 'Add some sugar', emoji: '🍬', key: 'sugar' }] },
+      { title: 'Party time', end: true, lines: {
+        tissue: [[N, 'They gave the cake a giant tissue. It blew its nose with a big HONK, and the sneezes stopped.', 'They handed the cake a gigantic tissue. It blew its nose with a HONK as loud as a goose, and the sneezes finally stopped.']],
+        sugar: [[N, 'They sprinkled sugar on top. The cake said "Mmm!" and the sneezes stopped.', 'They sprinkled sparkly sugar over the top. The cake said "Mmm!" because sugar is the opposite of pepper, and the sneezes finally stopped.']],
+        common: [[1, 'Now that is a party cake!', 'cheerful'],
+          [N, 'At the party, everyone said it was the most exciting cake ever. And from then on, the friends kept the pepper far away from the cake bowl. The end.', 'At the party, everyone agreed it was the most exciting cake in history. From then on, the friends kept the pepper far, far away from the cake bowl. The end.']] },
+        summary: 'The sneezes stopped and the party was a hit.' } ] },
+  bedtime: {
+    emoji: ['⭐', '🌙', '🎵'],
+    words: { dim: 'not very bright', flickering: 'going bright and dark again and again', lullaby: 'a soft song that helps you fall asleep', politely: 'in a nice, kind way', drifting: 'moving slowly and gently' },
+    questions: [['Why could the little star not shine?', 'It was too tired', ['It was too cold', 'Someone took its light']],
+                ['What did the friends do at the very end?', 'Fell asleep', ['Went swimming', 'Baked a cake']]],
+    scenes: [
+      { title: 'The sleepy star', lines: [
+        [N, 'Night came to {place}. {list} looked up and saw that one little star was not shining.', 'Evening settled over {place}, and the sky filled with stars. But {list} noticed that one little star was dim and flickering.'],
+        [N, '"I am too tired to glow," the star sighed, and it floated down toward them.', '"I am far too tired to glow," the star sighed, drifting down toward them like a falling leaf.'],
+        [0, 'Poor little star. Can we help you?', 'whispering'], [1, 'Maybe you just need some rest.', 'friendly']],
+        summary: 'A tired little star floated down to the friends.',
+        choices: [{ label: 'Sing a lullaby', emoji: '🎵', key: 'sing' }, { label: 'Tell a story', emoji: '📖', key: 'story' }] },
+      { title: { sing: 'A soft song', story: 'A story for a star' }, lines: {
+        sing: [[N, 'They sang a soft, slow lullaby. The star yawned and began to glow a little brighter.', 'They sang a soft, slow lullaby, as gentle as a breeze. The star gave a tiny yawn and began to glow a little brighter.']],
+        story: [[N, '{B} told a gentle story about the moon. The star listened and began to glow a little brighter.', '{B} told a gentle story about the moon and her silver boat. The star listened closely, and with every word it glowed a little brighter.']],
+        common: [[N, '"I feel better," said the star. "But it is a long way back up to the sky."', '"I feel much better," said the star. "But it is such a long way back up to the sky."'],
+          [2, 'Do not worry. We will help you get home.', 'friendly']] },
+        summary: 'The star felt better but needed to get back to the sky.',
+        choices: [{ label: 'Build a pillow tower', emoji: '🛏️', key: 'tower' }, { label: 'Ask the wind for help', emoji: '🌬️', key: 'wind' }] },
+      { title: 'Back in the sky', end: true, lines: {
+        tower: [[N, 'They stacked pillows and blankets into a tall, soft tower. The star climbed to the top and floated home.', 'They stacked pillows and blankets into a tall, wobbly tower. The star climbed carefully to the top and floated home.']],
+        wind: [[N, 'The friends asked the wind politely. A warm breeze lifted the star high into the sky.', 'The friends asked the wind politely for help. A warm breeze swirled around the star and carried it high into the sky.']],
+        common: [[0, 'Good night, little star.', 'whispering'],
+          [N, 'The little star shone brighter than ever. The friends snuggled under their blankets and fell fast asleep. The end.', 'The little star shone brighter than ever. The friends yawned, snuggled under their blankets and fell fast asleep, while their star twinkled above them all night long. The end.']] },
+        summary: 'The star went home and the friends fell asleep.' } ] },
+};
+function fill(t) {
+  const names = picked.map(c => c.name), at = i => names[Math.min(i, names.length - 1)];
+  const list = names.length === 1 ? names[0] : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+  const where = place[1];
+  return t.replace(/\{A\}/g, at(0)).replace(/\{B\}/g, at(1)).replace(/\{C\}/g, at(2)).replace(/\{list\}/g, list)
+          .replace(/^\{place\}/, cap(where)).replace(/\{place\}/g, where);
+}
+function plotScene() {
+  const plot = PLOTS[kind[1]], n = Math.min(story.scenes.length, plot.scenes.length - 1), sc = plot.scenes[n];
+  const key = n ? story.history[n - 1].key : null, g3 = story.level === 'third';
+  const defs = Array.isArray(sc.lines) ? sc.lines : [...(sc.lines[key] || []), ...sc.lines.common];
+  const lines = defs.map(d => d[0] === N ? { who: NARRATOR, text: fill(g3 ? d[2] : d[1]), mood: 'neutral' } : { who: picked[d[0] % picked.length], text: fill(d[1]), mood: d[2] || 'neutral' });
+  const emoji = [...picked.slice(0, 2).map(c => c.emoji), plot.emoji[n]];
+  const all = lines.map(l => l.text).join(' ').toLowerCase();
+  const words = Object.entries(plot.words).filter(([w]) => new RegExp('\\b' + w + '\\b').test(all)).map(([word, meaning]) => ({ word, meaning }));
+  return { title: typeof sc.title === 'string' ? sc.title : sc.title[key], emoji, lines, summary: sc.summary, choices: sc.choices || [], end: !!sc.end, words };
+}
+function builtinScene() { return story.level === 'little' ? littleScene() : plotScene(); }
+
+// ---------------------------------------------------------------------------
+// Questions after the story. Each has exactly one right answer among three.
+// ---------------------------------------------------------------------------
+function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function mkQ(q, right, wrong) {
+  const choices = shuffle([right, ...wrong.filter(w => w && w.toLowerCase() !== right.toLowerCase()).slice(0, 2)]);
+  return { q, choices, answer: choices.indexOf(right) };
+}
+function cleanQuestions(qs) {
+  if (!Array.isArray(qs)) return [];
+  const out = [];
+  for (const x of qs) {
+    if (!x || typeof x.q !== 'string' || !Array.isArray(x.choices)) continue;
+    const choices = x.choices.map(c => String(c || '').trim()).filter(Boolean);
+    const a = Number(x.answer);
+    if (choices.length < 2 || choices.length > 4 || !Number.isInteger(a) || a < 0 || a >= choices.length) continue;
+    if (new Set(choices.map(c => c.toLowerCase())).size !== choices.length) continue;
+    out.push(mkQ(x.q.trim(), choices[a], choices.filter((c, i) => i !== a)));
+  }
+  return out;
+}
+function storyQuestions() {
+  const s = story, qs = [];
+  const others = CAST.filter(c => !picked.includes(c) && c.id !== 'scarlett');   // never offer her own name as a wrong answer
+  qs.push(mkQ('Who was in the story?', pick(picked).name, shuffle(others).slice(0, 2).map(c => c.name)));
+  qs.push(mkQ('Where did the story happen?', cap(place[1]), shuffle(PLACES.filter(p => p !== place)).slice(0, 2).map(p => cap(p[1]))));
+  if (s.history.length && s.history[0].others.length) {
+    const elsewhere = Object.values(PLOTS).flatMap(p => p.scenes.flatMap(sc => (sc.choices || []).map(c => c.label))).filter(l => !s.history.some(h => h.choice === l || h.others.includes(l)));
+    qs.push(mkQ('What did you choose to do first?', s.history[0].choice, [s.history[0].others[0], pick(elsewhere)]));
+  }
+  if (s.level === 'little') return qs;
+  if (s.ai) { const ai = s.scenes.flatMap(sc => sc.questions || []); return ai.length >= 4 ? ai.slice(0, 5) : ai.concat(qs).slice(0, 4); }   // topped up from the story itself
+  const plot = PLOTS[kind[1]];
+  for (const [q, a, w] of plot.questions) qs.push(mkQ(q, a, w));
+  const used = s.scenes.flatMap(sc => sc.words || []);
+  if (used.length) {
+    const w = pick(used), wrong = shuffle(Object.entries(plot.words).filter(([k]) => k !== w.word).map(([, m]) => m));
+    qs.push(mkQ(`In the story, what does "${w.word}" mean?`, w.meaning, wrong));
+  }
+  return qs.slice(0, 6);
+}
+
 // ---------------------------------------------------------------------------
 // Telling it
 // ---------------------------------------------------------------------------
 async function start(sameFriends) {
-  story = { scenes: [], history: [], reading: -1, ai: canUseAI() };
+  story = { scenes: [], history: [], reading: -1, ai: canUseAI(), level: level[1], glossary: {} };
   if (story.ai) countStory();
-  $('setup').classList.add('off'); $('story').classList.add('on'); $('back').hidden = false; $('end').classList.remove('on');
+  $('setup').classList.add('off'); $('story').classList.add('on'); $('back').hidden = false; $('end').classList.remove('on'); $('quiz').classList.remove('on');
   $('title').textContent = ''; $('scene').innerHTML = ''; $('text').innerHTML = '';
+  $('text').classList.toggle('grown', grown());
+  showMode();
   await nextScene();
 }
 async function nextScene() {
@@ -319,50 +575,118 @@ async function nextScene() {
   try { scene = story.ai ? await writeScene() : builtinScene(); }
   catch (e) { console.warn('writer failed, using the built-in story', e); story.ai = false; scene = builtinScene(); }
   $('thinking').classList.remove('on');
+  for (const w of (scene.words || [])) story.glossary[w.word.toLowerCase()] = w.meaning;
   story.scenes.push(scene); showScene(scene);
 }
+const bare = w => w.replace(/^[^\w']+|[^\w']+$/g, '');
 function showScene(scene) {
   $('title').textContent = scene.title || '';
   const sc = $('scene'); sc.innerHTML = ''; for (const e of (scene.emoji || []).slice(0, 4)) { const s = document.createElement('span'); s.textContent = e; sc.appendChild(s); }
   const text = $('text'); text.innerHTML = '';
   scene.lines.forEach((l, i) => {
     const p = document.createElement('p'); if (l.who !== NARRATOR) { p.className = 'say'; const w = document.createElement('span'); w.className = 'who'; w.textContent = l.who.emoji; p.appendChild(w); }
-    const body = document.createElement('span');
-    for (const word of l.text.split(' ')) { const sp = document.createElement('span'); sp.className = 'w'; sp.textContent = word + ' '; sp.onclick = (e) => { e.stopPropagation(); VOICE.say(word.replace(/[^\w']/g, ''), NARRATOR); }; body.appendChild(sp); }
-    p.appendChild(body); p.onclick = () => readFrom(i); text.appendChild(p);
+    const body = document.createElement('span'); p.words = [];
+    for (const word of l.text.split(' ')) {
+      const sp = document.createElement('span'); sp.className = 'w'; sp.textContent = word + ' ';
+      if (story.glossary[bare(word).toLowerCase()]) sp.classList.add('gw');
+      sp.onclick = (e) => { e.stopPropagation(); tapWord(word, i); };
+      body.appendChild(sp); p.words.push(sp);
+    }
+    p.appendChild(body); p.onclick = () => readFrom(i, selfRead); text.appendChild(p);
   });
+  if (selfRead) { story.reading = -1; afterScene(scene, true); return; }
   // Request every line of the scene now; the GPU works through them in order while the first ones play.
   VOICE.prefetchAll(scene.lines);
   readFrom(0);
 }
-function readFrom(i) {
+function highlight(line, word) {
+  document.querySelectorAll('#text .w.hl').forEach(x => x.classList.remove('hl'));
+  const p = $('text').children[line]; if (p && p.words && word >= 0 && p.words[word]) p.words[word].classList.add('hl');
+}
+// Tapping a word says it (and what it means, for a story word). Reading picks up again at the same line.
+function tapWord(word, line) {
+  const w = bare(word); if (!w) return;
+  const meaning = story.glossary[w.toLowerCase()], wasReading = !selfRead && story.reading >= 0 && story.reading < story.scenes[story.scenes.length - 1].lines.length;
+  story.reading = -2;
+  $('popWord').textContent = w; $('popMeaning').textContent = meaning || ''; $('pop').classList.add('on');
+  clearTimeout(tapWord.t); tapWord.t = setTimeout(() => $('pop').classList.remove('on'), meaning ? 4500 : 2000);
+  highlight(-1, -1);
+  VOICE.say(meaning ? `${w}. ${w} means ${meaning}.` : w, NARRATOR, null, () => { if (wasReading && story && story.reading === -2) setTimeout(() => readFrom(line), 400); });
+}
+function readFrom(i, once) {
   const scene = story && story.scenes[story.scenes.length - 1]; if (!scene) return; story.reading = i;
   const ps = $('text').children; [...ps].forEach((p, k) => p.classList.toggle('now', k === i));
   [...$('scene').children].forEach(s => s.classList.remove('now'));
-  if (i >= scene.lines.length) { VOICE.stop(); afterScene(scene); return; }
+  if (i >= scene.lines.length) { VOICE.stop(); highlight(-1, -1); afterScene(scene); return; }
   const l = scene.lines[i]; if (l.who !== NARRATOR) { const idx = (scene.emoji || []).indexOf(l.who.emoji); if (idx >= 0) $('scene').children[idx].classList.add('now'); }
-  if (i + 2 < scene.lines.length) VOICE.prefetch(scene.lines[i + 2].text, scene.lines[i + 2].who, scene.lines[i + 2].mood);
+  if (!once && i + 2 < scene.lines.length) VOICE.prefetch(scene.lines[i + 2].text, scene.lines[i + 2].who, scene.lines[i + 2].mood);
   ps[i].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  VOICE.say(l.text, l.who, l.mood, () => { if (story.reading === i) setTimeout(() => readFrom(i + 1), 300); });
+  VOICE.say(l.text, l.who, l.mood, () => {
+    highlight(-1, -1);
+    if (once) { if (story.reading === i) { story.reading = -1; ps[i].classList.remove('now'); } return; }
+    if (story.reading === i) setTimeout(() => { if (story && story.reading === i) readFrom(i + 1); }, 300);
+  }, w => { if (story && story.reading === i) highlight(i, w); });
 }
-function afterScene(scene) {
-  if (scene.end || !scene.choices.length) { $('end').classList.add('on'); say('The end! Tap the dice for another story.'); return; }
+function afterScene(scene, quiet) {
+  if (scene.end || !scene.choices.length) { $('end').classList.add('on'); if (grown()) { startQuiz(); } else say('The end! Tap the dice for another story.'); return; }
   const box = $('choices'); box.innerHTML = '';
   for (const c of scene.choices) {
     const b = document.createElement('button'); const e = document.createElement('span'); e.className = 'e'; e.textContent = c.emoji || '✨'; b.appendChild(e); b.appendChild(document.createTextNode(c.label));
-    b.onclick = () => { VOICE.stop(); story.history.push({ title: scene.title, summary: scene.summary || scene.title, choice: c.label }); say(c.label + '!'); nextScene(); };
+    b.onclick = () => { VOICE.stop(); story.history.push({ title: scene.title, summary: scene.summary || scene.title, choice: c.label, key: c.key, others: scene.choices.filter(x => x !== c).map(x => x.label) }); say(c.label + '!'); nextScene(); };
     box.appendChild(b);
   }
-  box.classList.add('on'); say('What should happen next?');
-  $('choices').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  box.classList.add('on'); if (!quiet) say('What should happen next?');
+  if (!quiet) $('choices').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
 }
+
+// The quiz: one question at a time, read aloud. A star for each one right on the first try.
+let quiz = null;
+function startQuiz() {
+  quiz = { qs: storyQuestions(), i: 0, first: 0, missed: false };
+  $('quiz').classList.add('on'); showQuestion();
+  $('quiz').scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
+function showQuestion() {
+  const q = quiz.qs[quiz.i], box = $('qChoices'); quiz.missed = false;
+  $('qNum').textContent = `Question ${quiz.i + 1} of ${quiz.qs.length}`; $('qText').textContent = q.q; box.innerHTML = '';
+  q.choices.forEach((c, k) => {
+    const b = document.createElement('button'); b.textContent = c;
+    b.onclick = () => {
+      if (quiz.done || b.disabled) return;
+      if (k === q.answer) {
+        b.classList.add('right'); [...box.children].forEach(x => x.disabled = true);
+        if (!quiz.missed) { quiz.first++; stars++; store.set('story-stars', stars); $('stars').textContent = '⭐ ' + stars; }
+        say(pick(['Yes! You got it.', 'That is right!', 'Great reading!']));
+        setTimeout(() => { quiz.i++; if (quiz.i < quiz.qs.length) showQuestion(); else endQuiz(); }, 1400);
+      } else { b.classList.add('wrong'); b.disabled = true; quiz.missed = true; say('Not quite. Think about the story and try again.'); }
+    };
+    box.appendChild(b);
+  });
+  say(q.q + ' ' + q.choices.join('? ') + '?');
+}
+function endQuiz() {
+  quiz.done = true;
+  $('qNum').textContent = ''; $('qText').textContent = `You got ${quiz.first} of ${quiz.qs.length} on the first try!`; $('qChoices').innerHTML = '';
+  say(`You got ${quiz.first} of ${quiz.qs.length} on the first try! Tap the dice for another story.`);
+}
+function showMode() { $('mode').textContent = selfRead ? '👀' : '👂'; $('mode').title = selfRead ? 'I read it myself (tap to have it read to you)' : 'Read to me (tap to read it yourself)'; }
+$('mode').onclick = () => {
+  selfRead = !selfRead; store.set('story-self-read', selfRead); showMode();
+  say(selfRead ? 'You read it. Tap a word if you need help.' : 'I will read it to you.');
+  const scene = story && story.scenes[story.scenes.length - 1];
+  if (scene && !selfRead && !$('choices').classList.contains('on') && !scene.end) readFrom(0);
+  else if (scene && selfRead && !$('choices').classList.contains('on') && !scene.end) { VOICE.stop(); story.reading = -1; highlight(-1, -1); afterScene(scene, true); }
+};
 $('go').onclick = () => start();
 $('read').onclick = () => { if (story) readFrom(0); };
 $('another').onclick = () => { VOICE.stop(); start(true); };
 $('back').onclick = () => { VOICE.stop(); story = null; $('setup').classList.remove('off'); $('story').classList.remove('on'); $('back').hidden = true; };
+$('stars').textContent = '⭐ ' + stars;
 try { speechSynthesis.onvoiceschanged = () => {}; } catch (e) {}
 addEventListener('pointerdown', () => say('Story Maker! Who is in the story?'), { once: true });
-window.SM = { CAST, get story() { return story; }, start, pick: (ids, p, k, d, l) => { picked = ids.map(id => CAST.find(c => c.id === id)); place = PLACES[p]; kind = KINDS[k]; drama = DRAMAS[d]; length = LENGTHS[l]; }, builtinScene, VOICE };
+const pickArgs = (ids, p, k, d, l, lv) => { picked = ids.map(id => CAST.find(c => c.id === id)); place = PLACES[p]; kind = KINDS[k]; drama = DRAMAS[d]; length = LENGTHS[l]; if (lv !== undefined) level = LEVELS[lv]; };
+window.STORY = { cfg: CFG, CAST, PLACES, KINDS, LEVELS, PLOTS, get story() { return story; }, get quiz() { return quiz; }, start, pick: pickArgs, builtinScene, storyQuestions, cleanQuestions, VOICE, setSelfRead: v => { selfRead = v; showMode(); } };
+window.SM = window.STORY;
 </script>
 </body>
 </html>

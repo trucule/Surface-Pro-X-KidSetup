@@ -12,10 +12,10 @@ Built for a Surface Pro X. Any Windows 11 Pro device with a touch screen works t
 - Edge locked to an allowlist of domains. Everything else is blocked.
 - A touch-first home screen (`KidHome.exe`, built on the tablet from source in the module) with large tiles, a
   wallpaper, and a Home button that closes any app.
-- Ten offline HTML apps: Level Up (reading, math, color science, patterns, time and money, shapes and fractions,
+- Eleven offline HTML apps: Level Up (reading, math, color science, patterns, time and money, shapes and fractions,
   each climbing from kindergarten to about 4th grade), Voice Band (her voice as an instrument: sing a melody, voice
-  effects, a looper band), Draw With Me (step-by-step drawing lessons), Trace With Me
-  (letters, numbers, shapes), Count With Me, Music Box, Story Maker (a read-aloud branching story app), Kitchen Lab,
+  effects, a looper band), Camera Fun (filters, face stickers and stamps), Draw With Me (step-by-step drawing lessons), Trace With Me
+  (letters, spelling, cursive), Count With Me, Music Box, Story Maker (a read-aloud branching story app), Kitchen Lab,
   Chemistry Lab, and Playground Lab (3D physics). Each one is described below.
 - Optional AI: with an Anthropic API key, Draw With Me learns new drawings on request and Story Maker writes each
   scene live, with a daily cap.
@@ -164,13 +164,52 @@ Audio uses ScriptProcessor nodes because file:// pages cannot load AudioWorklet 
 `tools/test-voice-band.py` checks pitch detection, note finding, every effect and all three rooms with a fake
 microphone.
 
+### Camera Fun
+`apps/camera-fun/` is a camera with three trays: **Filters** (comic, pencil, pop art, neon, old time, heat vision,
+pixels, X-ray, rainbow, kaleidoscope, twins, big head, tiny face, alien eyes, big mouth, swirl, stretchy, under
+water, ghost trails, melt, echo, and three magic backgrounds: space, under the sea and invisible), **Face stickers**
+(any number at once, on up to two faces: hats, crown, heart and star eyes, flower crown, butterflies, kitty, bunny,
+puppy, shades, googly eyes, clown nose, mustache, unicorn horn, halo, pirate, rosy cheeks, and rainbow, dragon fire
+and bubbles that come out when she opens her mouth) and **Stamps** (tap to place, drag to move). The side buttons
+take a picture, set a 3 or 10 second timer, make a 4-shot photo strip, turn on "say cheese" (a loud sound takes the
+picture), flip the camera and clear everything. Magic backgrounds ask her to step out for 5 seconds so the camera
+learns what is behind her.
+
+Pictures stay on the tablet in IndexedDB (database `camerafun`, newest 300 kept) and are shown in **My pictures**,
+where she can look through and delete them (delete asks for a second tap).
+
+**Adding filters and stickers**: everything she can pick is in `apps/camera-fun/effects.js`, and its header explains
+the format. A filter is a short GLSL function; an emoji sticker is one line (`emoji`, which part of the face, size);
+a drawn sticker is a small canvas function in face units; a stamp is one emoji in a list. Run
+`tools/test-camera-fun.py` after adding one: it compiles every filter and draws every sticker on a test face.
+
+Face tracking is MediaPipe Face Mesh (Apache 2.0) in `apps/camera-fun/facemesh/`, rebuilt from npm by
+`tools/build-camera-fun-vendor.py`. The kiosk only lets local apps load plain script files, so the model and
+WebAssembly binary are stored as base64 `.js` files and served from memory; nothing is fetched and no blob: or
+data: URLs are used. It loads only when a face sticker or face filter is picked. Filters run on the GPU (WebGL).
+
 ### Trace With Me
-`apps/trace-with-me.html` is a finger-tracing app: capital letters, small letters, numbers 0-9 and six shapes. A big
-faint glyph appears, she colours it in with one finger, and when most of it is covered (with the ink mostly on the
-glyph, so a scribble over the whole box does not count) it cheers, says the letter and a word, and gives her a
-sticker. Earned stickers show on the star button and are kept in Edge local storage under the key `tracer-stickers`.
-Nothing is sent anywhere and no API key is needed. To reset her sticker board, clear site data for the local apps
-folder in her Edge profile, or open the app, press F12 and run `localStorage.removeItem('tracer-stickers')`.
+`apps/trace-with-me.html` is a handwriting app with three modes. Nothing is sent anywhere and no API key is needed.
+- **Little**: the first decks. Capital letters, small letters, numbers 0-9 and six shapes; a big faint glyph appears,
+  she colours it in with one finger, and when most of it is covered (with the ink mostly on the glyph, so a scribble
+  over the whole box does not count) it cheers, says the letter and a word, and gives her a sticker. Stickers are kept
+  under `tracer-stickers`.
+- **Spell**: a word is spoken with a picture clue. On the first four levels she traces it letter by letter in school
+  print (numbered green start dots show the stroke order), then writes it from memory, one letter per box; on the
+  higher levels the word shows for a few seconds and then she writes it from memory. A small built-in letter matcher
+  reads each box; a letter it does not recognise is wiped for another try, and a second miss shows that letter to
+  trace. Levels: short vowels, blends, sh ch th ck, silent e, vowel teams, ar or er ir ur, endings -ing and -ed, and
+  tricky words (because, friend, laugh, thought, through). The ending and tricky words are read in a sentence.
+- **Cursive**: lowercase cursive drawn from stroke paths, so it needs no fonts. An orange "watch me" pen draws each
+  item first. Levels: the undercurve letters (i t u w e l s r j p), loops and ovals (b h k f a c d g o q), n m v x y z,
+  two-letter joins, joined words, and words with only a light guide.
+
+Spell and Cursive move up a level after four right first try in a row and down after two missed items in a row. A
+new player starts on silent e words (about 2nd grade) and the first cursive letters. Progress is kept under
+`trace-v2` and the last mode under `trace-mode`. Phrases outside the voice pack (most of Spell and Cursive) use the
+Windows voice. `tools/test-trace-with-me.py` checks every level, all 26 cursive letters, the level rule, the letter
+matcher, and tracing through the page. To reset her progress, open the app, press F12 and run
+`localStorage.removeItem('trace-v2')` (or `'tracer-stickers'` for the sticker board).
 
 ### Kitchen Lab and Chemistry Lab
 Built from `src/lab-games/` (`npm ci && npm test && npm run build`, then copy `dist/*.html` here).
@@ -221,6 +260,16 @@ Three more apps (`apps/count-with-me.html`, `apps/music-box.html`, `apps/story-m
   trouble, big trouble) and a length (3 or 6 parts). The story is told scene by scene; each scene ends in a choice.
   With `ANTHROPIC_API_KEY` in `.env`, Claude writes each scene live (`STORY_MODEL`, Haiku by default; `DRAW_DAILY_LIMIT`
   also caps stories per day). Without a key, a built-in branching story is used. Every line is read by its speaker.
+  A reading level (Little, 2nd grade, 3rd grade; default 2nd, kept under `story-level`) sets how the story is written.
+  Little is the original read-aloud for a five-year-old. 2nd and 3rd grade ask Claude for longer sentences, one or
+  two new words per scene, cause and effect, and (3rd grade) a clue or twist; offline, each kind of story has its own
+  built-in plot with two branches per choice, written once for 2nd grade and once in richer 3rd grade wording. At
+  those levels each word lights up as it is read, a tapped word is said aloud (a dotted story word also shows and
+  says its meaning, and reading picks up again at that line), 👂/👀 switches between "read to me" and "I read it
+  myself" (nothing is read until she taps a line or word), and the story ends with four to six questions (who,
+  where, what she chose, why, sequence, a word meaning), each with one right answer of three. Questions Claude
+  writes are checked and any malformed one is dropped. A star for each first-try answer, kept under `story-stars`.
+  Tested by `tools/test-story-maker.py`.
   Voices, best first: `TTS_PROVIDER=voicestudio` with `TTS_URL` uses the VoiceStudio app on your PC and the thirteen
   designed profiles named in `apps/story-maker/voices.js` (Narrator plus the cast; the file also holds each one's
   tuned sampler settings, and Beep's robot effect). The PC side is in `env.example`: the desktop app only listens on

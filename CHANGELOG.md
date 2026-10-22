@@ -1,5 +1,20 @@
 # Changes
 
+## 2026-10-22
+- New app: **Camera Fun**. 25 filters (looks, funhouse mirror, time effects, magic backgrounds), 20 face stickers
+  that follow up to two faces offline, tap-on stamps, timer, photo strips, "say cheese", and a picture gallery kept
+  on the tablet. New filters and stickers are added in `apps/camera-fun/effects.js`.
+- Home closes Store apps that run without a frame (full screen or game style, such as Learn to Write); they used to
+  be skipped, so Home and the screen-off sweep could not leave them. The home screen writes `home.log` in her
+  profile: the app in front, whether the Home pill is shown, and what covers it if anything does.
+  `Get-KidTabletStatus.ps1` shows it.
+- Trace With Me adds Spell (8 levels, short vowels to tricky words, traced then written from memory) and Cursive (all
+  26 joined lowercase letters, then words); the old decks stay as Little.
+- Story Maker has a reading level (Little, 2nd grade, 3rd grade): read-along word highlighting, tap a word to hear it
+  or its meaning, "I read it myself", and 4 to 6 questions after each story. Offline stories have their own plots.
+- Count With Me runs from counting to 5 up to 3rd grade: ten frames, arrays and times tables, equal groups and
+  sharing with leftovers, place value blocks with trading, and word problems up to two steps and coins.
+
 ## 2026-10-21
 - `Update-KidTabletApps.ps1` runs the install as a one-time scheduled task (`KidTablet-UpdateApps`, as SYSTEM) and
   returns at once, so ET Ducky's command time limit no longer stops an install partway through. Progress goes to
