@@ -1,0 +1,528 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Camera Fun</title>
+<!--
+  Camera Fun. A camera with filters, face stickers and stamps, all offline.
+  Filters run as WebGL shaders; face stickers follow her face with MediaPipe Face Mesh (facemesh/, loaded only when
+  something needs a face). Photos are kept in IndexedDB (database camerafun) and never leave the tablet.
+  New filters, stickers and stamps go in effects.js; that file explains the format.
+-->
+<style>
+  :root { --ink: #2B2140; --sun: #FFC93C; --pink: #FF4F8B; --grape: #9B6BFF; --leaf: #5CD38B; }
+  html, body { margin: 0; height: 100%; background: #111; overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); }
+  body { user-select: none; -webkit-user-select: none; }
+  button { font-family: inherit; color: var(--ink); cursor: pointer; }
+  #stage { position: fixed; inset: 0; touch-action: none; }
+  #gl, #ov { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #title { position: fixed; left: 14px; top: 10px; font-size: 24px; font-weight: 900; color: #fff; background: #0006; border-radius: 999px; padding: 6px 16px; }
+  #msg { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); background: #fff; border: 3px solid var(--ink); border-radius: 999px; padding: 8px 20px; font-size: 22px; font-weight: 800; display: none; max-width: calc(100% - 520px); text-align: center; }
+  #msg.on { display: block; }
+  #count { position: fixed; inset: 0; display: none; place-items: center; font-size: 220px; font-weight: 900; color: #fff; text-shadow: 0 8px 0 #0007; pointer-events: none; }
+  #count.on { display: grid; }
+  #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .35s; }
+  /* Right side: shutter and tools (the Home pill sits above, at the top right). */
+  #side { position: fixed; right: 16px; top: 90px; bottom: 170px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 12px; }
+  #side button { width: 72px; height: 72px; border-radius: 50%; border: 4px solid var(--ink); background: #fff; font-size: 30px; position: relative; }
+  #side button.on { background: var(--sun); }
+  #side button small { position: absolute; right: -4px; bottom: -4px; background: var(--pink); color: #fff; border-radius: 999px; font-size: 14px; font-weight: 900; padding: 1px 7px; border: 2px solid #fff; }
+  #side #snap { width: 116px; height: 116px; background: #fff; border: 8px solid var(--pink); font-size: 46px; box-shadow: 0 0 0 4px #fff; }
+  #side #snap:active { transform: scale(.92); }
+  /* Bottom tray. */
+  #tray { position: fixed; left: 0; right: 0; bottom: 0; background: #fffffff2; border-top: 4px solid var(--ink); padding: 8px 10px 10px; }
+  #tabs { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+  #tabs button { border: 3px solid var(--ink); background: #fff; border-radius: 999px; padding: 6px 16px; font-size: 18px; font-weight: 800; }
+  #tabs button.on { background: var(--sun); }
+  #tabs .hint { margin-left: auto; font-size: 16px; font-weight: 700; opacity: .7; padding-right: 8px; }
+  #row { display: flex; gap: 10px; overflow-x: auto; touch-action: pan-x; padding-bottom: 4px; scrollbar-width: none; }
+  #row::-webkit-scrollbar { display: none; }
+  .opt { flex: none; width: 92px; border: 3px solid var(--ink); background: #fff; border-radius: 20px; padding: 6px 2px; text-align: center; }
+  .opt .i { font-size: 38px; line-height: 1.1; display: block; }
+  .opt .n { font-size: 13px; font-weight: 800; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .opt.on { background: var(--sun); box-shadow: 0 0 0 3px var(--pink) inset; }
+  #bgbar { position: fixed; left: 50%; bottom: 160px; transform: translateX(-50%); display: none; }
+  #bgbar.on { display: block; }
+  #bgbar button { border: 4px solid var(--ink); background: var(--leaf); border-radius: 999px; padding: 12px 24px; font-size: 22px; font-weight: 900; }
+  /* Gallery. */
+  #gal { position: fixed; inset: 0; background: #FFF9F0; display: none; flex-direction: column; }
+  #gal.on { display: flex; }
+  #galHead { display: flex; align-items: center; gap: 12px; padding: 12px 210px 12px 16px; }
+  #galHead h2 { margin: 0 auto 0 0; font-size: 28px; }
+  #galHead button, #viewBar button { border: 4px solid var(--ink); background: #fff; border-radius: 999px; padding: 8px 18px; font-size: 20px; font-weight: 800; }
+  #grid { flex: 1; overflow-y: auto; touch-action: pan-y; display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; padding: 0 16px 16px; align-content: start; }
+  #grid canvas { width: 100%; border-radius: 14px; border: 3px solid var(--ink); background: #ddd; }
+  #empty { padding: 30px; font-size: 24px; font-weight: 700; text-align: center; }
+  #view { position: fixed; inset: 0; background: #111; display: none; }
+  #view.on { display: block; }
+  #view canvas { position: absolute; inset: 0 0 96px; margin: auto; max-width: 100%; max-height: calc(100% - 96px); }
+  #viewBar { position: absolute; left: 0; right: 0; bottom: 0; height: 96px; display: flex; align-items: center; justify-content: center; gap: 16px; background: #FFF9F0; }
+  #viewBar #del.armed { background: #ff6b6b; color: #fff; }
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="gl"></canvas><canvas id="ov"></canvas></div>
+<video id="v" playsinline muted style="display:none"></video>
+<div id="title">📸 Camera Fun</div>
+<div id="msg"></div>
+<div id="count"></div>
+<div id="flash"></div>
+<div id="side">
+  <button id="gallery" title="My pictures">🖼️</button>
+  <button id="timer" title="Timer">⏱️<small>off</small></button>
+  <button id="snap" title="Take a picture">📸</button>
+  <button id="strip" title="Photo strip">🎞️</button>
+  <button id="cheese" title="Say cheese">🎤</button>
+  <button id="flip" title="Turn the camera around">🔄</button>
+  <button id="clear" title="Take off stickers and stamps">🧽</button>
+</div>
+<div id="bgbar"><button id="takeBg">🚶 Take the background</button></div>
+<div id="tray">
+  <div id="tabs">
+    <button data-tab="filters" class="on">✨ Filters</button>
+    <button data-tab="stickers">😺 Face stickers</button>
+    <button data-tab="stamps">⭐ Stamps</button>
+    <span class="hint" id="hint"></span>
+  </div>
+  <div id="row"></div>
+</div>
+<div id="gal">
+  <div id="galHead"><h2>My pictures</h2><button id="galClose">📸 Back to camera</button></div>
+  <div id="grid"></div>
+</div>
+<div id="view"><canvas id="big"></canvas><div id="viewBar"><button id="prevPic">◀</button><button id="del">🗑️ Delete</button><button id="viewClose">✖ Close</button><button id="nextPic">▶</button></div></div>
+
+<script>
+// ---------------------------------------------------------------------------
+// The kiosk lets local apps load plain <script src> files only (no fetch of file://, no data: or blob: URLs).
+// facemesh/*.js files put the face model's binary files into window.CAMFUN_FILES as base64, and this serves them
+// from memory when face_mesh.js fetches them.
+// ---------------------------------------------------------------------------
+(function () {
+  const cache = {};
+  const nameOf = u => String(u && u.url || u).split('/').pop().split('?')[0];
+  const has = n => !!((window.CAMFUN_FILES && window.CAMFUN_FILES[n]) || cache[n]);
+  function bytes(n) {
+    if (!cache[n]) { const s = atob(window.CAMFUN_FILES[n]), u = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) u[i] = s.charCodeAt(i); cache[n] = u; delete window.CAMFUN_FILES[n]; }
+    return cache[n];
+  }
+  const realFetch = window.fetch.bind(window);
+  window.fetch = (u, o) => { const n = nameOf(u); if (has(n)) return Promise.resolve(new Response(bytes(n), { status: 200, headers: { 'Content-Type': n.endsWith('.wasm') ? 'application/wasm' : 'application/octet-stream' } })); return realFetch(u, o); };
+  const RealXHR = window.XMLHttpRequest;
+  window.XMLHttpRequest = function () {
+    const x = new RealXHR(), self = this; let name = null;
+    const set = (k, v) => Object.defineProperty(self, k, { value: v, configurable: true, writable: true });
+    this.open = (m, u, ...r) => { name = has(nameOf(u)) ? nameOf(u) : null; if (!name) x.open(m, u, ...r); };
+    this.send = b => {
+      if (!name) return x.send(b);
+      setTimeout(() => { const buf = bytes(name).buffer; set('response', buf); set('status', 200); set('readyState', 4);
+        if (self.onprogress) self.onprogress({ lengthComputable: true, loaded: buf.byteLength, total: buf.byteLength });
+        if (self.onreadystatechange) self.onreadystatechange(); if (self.onload) self.onload({ target: self }); }, 0);
+    };
+    for (const k of ['setRequestHeader', 'abort', 'overrideMimeType', 'getAllResponseHeaders', 'getResponseHeader', 'addEventListener']) this[k] = (...a) => name ? null : x[k](...a);
+    Object.defineProperty(this, 'responseType', { set(v) { this._rt = v; try { x.responseType = v; } catch (e) {} }, get() { return this._rt; }, configurable: true });
+    x.onload = e => { for (const k of ['response', 'status', 'readyState']) set(k, x[k]); try { set('responseText', x.responseText); } catch (er) {} if (self.onload) self.onload(e); };
+    x.onerror = e => { if (self.onerror) self.onerror(e); };
+  };
+})();
+</script>
+<script src="effects.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const C = window.CAMERA_FUN;
+const state = { tab: 'filters', filter: 'none', stickers: [], stamp: '⭐', timer: 0, mirror: true };
+try { Object.assign(state, JSON.parse(localStorage.getItem('camerafun-v1') || '{}')); } catch (e) {}
+if (!C.filters.find(f => f.id === state.filter)) state.filter = 'none';
+state.stickers = (state.stickers || []).filter(id => C.stickers.find(s => s.id === id));
+function persist() { try { localStorage.setItem('camerafun-v1', JSON.stringify({ tab: state.tab, filter: state.filter, stickers: state.stickers, stamp: state.stamp, timer: state.timer })); } catch (e) {} }
+function say(t) { try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(t); u.rate = .95; u.pitch = 1.1; speechSynthesis.speak(u); } catch (e) {} }
+let msgTimer = null;
+function msg(t, ms) { $('msg').textContent = t; $('msg').classList.toggle('on', !!t); clearTimeout(msgTimer); if (t && ms) msgTimer = setTimeout(() => $('msg').classList.remove('on'), ms); }
+const errors = [];
+
+// ---------------------------------------------------------------------------
+// WebGL
+// ---------------------------------------------------------------------------
+const glc = $('gl'), ov = $('ov'), octx = ov.getContext('2d');
+const gl = glc.getContext('webgl', { preserveDrawingBuffer: true, premultipliedAlpha: false, antialias: false });
+const VERT = `attribute vec2 p; varying vec2 v_uv; void main() { v_uv = vec2((p.x + 1.0) * 0.5, (1.0 - p.y) * 0.5); gl_Position = vec4(p, 0.0, 1.0); }`;
+const PRELUDE = `
+precision mediump float;
+varying vec2 v_uv;
+uniform sampler2D u_cam, u_prev, u_bg;
+uniform vec2 u_res, u_crop;
+uniform float u_mirror, u_time, u_faces;
+uniform vec4 u_face;
+uniform vec2 u_eyeL, u_eyeR;
+uniform vec3 u_mouth;
+#define ASP (u_res.x / u_res.y)
+#define px (1.0 / u_res)
+vec2 camUV(vec2 uv) { vec2 c = 0.5 + (uv - 0.5) * u_crop; if (u_mirror > 0.5) c.x = 1.0 - c.x; return c; }
+vec4 cam(vec2 uv) { return texture2D(u_cam, camUV(uv)); }
+vec4 bg(vec2 uv) { return texture2D(u_bg, camUV(uv)); }
+vec4 prev(vec2 uv) { return texture2D(u_prev, vec2(uv.x, 1.0 - uv.y)); }
+float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
+vec3 posterize(vec3 c, float n) { return floor(clamp(c, 0.0, 1.0) * n + 0.5) / n; }
+vec3 rgb(float h) { return clamp(abs(mod(h * 6.0 + vec3(0.0, 4.0, 2.0), 6.0) - 3.0) - 1.0, 0.0, 1.0); }
+vec3 hsv(vec3 c) {
+  vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+  vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+  vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+  float d = q.x - min(q.w, q.y);
+  return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + 1e-10)), d / (q.x + 1e-10), q.x);
+}
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x), f.y); }
+float edge(vec2 uv) {
+  vec2 d = px * 1.5;
+  float tl = luma(cam(uv + vec2(-d.x, -d.y)).rgb), t = luma(cam(uv + vec2(0.0, -d.y)).rgb), tr = luma(cam(uv + vec2(d.x, -d.y)).rgb);
+  float l = luma(cam(uv + vec2(-d.x, 0.0)).rgb), r = luma(cam(uv + vec2(d.x, 0.0)).rgb);
+  float bl = luma(cam(uv + vec2(-d.x, d.y)).rgb), b = luma(cam(uv + vec2(0.0, d.y)).rgb), br = luma(cam(uv + vec2(d.x, d.y)).rgb);
+  float gx = tr + 2.0 * r + br - tl - 2.0 * l - bl, gy = bl + 2.0 * b + br - tl - 2.0 * t - tr;
+  return length(vec2(gx, gy));
+}
+vec2 bulge(vec2 uv, vec2 c, float r, float amt) {
+  vec2 d = (uv - c) * vec2(ASP, 1.0); float l = length(d);
+  if (l < r) { float t = l / r; d *= 1.0 - amt * (1.0 - t) * (1.0 - t); }
+  return c + d / vec2(ASP, 1.0);
+}
+vec2 swirl(vec2 uv, vec2 c, float r, float ang) {
+  vec2 d = (uv - c) * vec2(ASP, 1.0); float l = length(d);
+  if (l < r) { float t = 1.0 - l / r; float a = ang * t * t, s = sin(a), co = cos(a); d = vec2(d.x * co - d.y * s, d.x * s + d.y * co); }
+  return c + d / vec2(ASP, 1.0);
+}
+`;
+const COPY = `precision mediump float; varying vec2 v_uv; uniform sampler2D u_prev; void main() { gl_FragColor = texture2D(u_prev, vec2(v_uv.x, 1.0 - v_uv.y)); }`;
+
+function shader(type, src) { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; }
+function program(frag) {
+  const p = gl.createProgram(); gl.attachShader(p, shader(gl.VERTEX_SHADER, VERT)); gl.attachShader(p, shader(gl.FRAGMENT_SHADER, frag));
+  gl.bindAttribLocation(p, 0, 'p'); gl.linkProgram(p); if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {}; const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS); for (let i = 0; i < n; i++) { const a = gl.getActiveUniform(p, i); u[a.name] = gl.getUniformLocation(p, a.name); }
+  return { p, u };
+}
+const programs = {};
+function programFor(f) {
+  if (programs[f.id] === undefined) {
+    try { programs[f.id] = program(PRELUDE + f.glsl + '\nvoid main() { gl_FragColor = vec4(effect(v_uv).rgb, 1.0); }'); }
+    catch (e) { programs[f.id] = null; errors.push('filter ' + f.id + ': ' + e.message); console.error('Camera Fun filter', f.id, e.message); }
+  }
+  return programs[f.id];
+}
+let copyProg = null;
+function texture() { const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t); for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.LINEAR], [gl.TEXTURE_MAG_FILTER, gl.LINEAR], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255])); return t; }
+let camTex, bgTex, fbos = [], hasBg = false;
+function makeTargets() {
+  for (const f of fbos) { gl.deleteFramebuffer(f.fb); gl.deleteTexture(f.tex); }
+  fbos = [0, 1].map(() => { const tex = texture(); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, glc.width, glc.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null); const fb = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fb); gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0); return { fb, tex }; });
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+}
+if (gl) {
+  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  camTex = texture(); bgTex = texture(); copyProg = program(COPY);
+} else errors.push('no WebGL');
+
+// ---------------------------------------------------------------------------
+// Camera
+// ---------------------------------------------------------------------------
+const video = $('v');
+let stream = null, facing = 'user', camReady = false;
+async function startCamera() {
+  try {
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+    video.srcObject = stream; await video.play(); camReady = true; state.mirror = facing === 'user'; hasBg = false; msg('');
+  } catch (e) { camReady = false; msg('The camera is not working right now.'); errors.push('camera: ' + e.message); }
+}
+$('flip').onclick = () => { facing = facing === 'user' ? 'environment' : 'user'; startCamera(); };
+
+let W = 0, H = 0;
+function resize() {
+  W = innerWidth; H = innerHeight;
+  const scale = Math.min(devicePixelRatio || 1, 1600 / W);
+  glc.width = Math.round(W * scale); glc.height = Math.round(H * scale);
+  ov.width = W * (devicePixelRatio || 1); ov.height = H * (devicePixelRatio || 1);
+  if (gl) { gl.viewport(0, 0, glc.width, glc.height); makeTargets(); }
+}
+addEventListener('resize', resize);
+function crop() {
+  const vw = video.videoWidth || 16, vh = video.videoHeight || 9, s = Math.max(W / vw, H / vh);
+  return [W / (vw * s), H / (vh * s)];
+}
+
+// ---------------------------------------------------------------------------
+// Faces
+// ---------------------------------------------------------------------------
+let faceMesh = null, faceState = 'off', faces = [], faceBusy = false, lastFaceT = 0;
+const FACE_FILES = ['facemesh/face_mesh.binarypb.js', 'facemesh/face_mesh_solution_packed_assets.data.js', 'facemesh/face_mesh_solution_simd_wasm_bin.wasm.js', 'facemesh/face_mesh.js'];
+function loadScript(src) { return new Promise((ok, no) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => no(new Error('could not load ' + src)); document.body.appendChild(s); }); }
+function needFace() { const f = C.filters.find(x => x.id === state.filter); return (f && f.needs.face) || state.stickers.length > 0; }
+async function startFaces() {
+  if (faceState !== 'off') return;
+  faceState = 'loading'; msg('Getting ready to find faces...');
+  try {
+    for (const f of FACE_FILES) await loadScript(f);
+    faceMesh = new FaceMesh({ locateFile: f => 'facemesh/' + f });
+    faceMesh.setOptions({ maxNumFaces: 2, refineLandmarks: false, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+    faceMesh.onResults(onFaces);
+    await faceMesh.initialize();
+    faceState = 'ready'; msg('');
+  } catch (e) { faceState = 'failed'; msg('Face stickers are not working on this tablet.', 4000); errors.push('faces: ' + e.message); }
+}
+async function faceTick() {
+  if (faceState !== 'ready' || faceBusy || !camReady || !needFace() || video.readyState < 2) return;
+  faceBusy = true;
+  try { await faceMesh.send({ image: video }); } catch (e) { errors.push('face send: ' + e.message); }
+  faceBusy = false;
+}
+const lastRaw = [];
+function onFaces(r) {
+  lastFaceT = performance.now();
+  const list = r.multiFaceLandmarks || [], [cx, cy] = crop();
+  faces = list.map((lm, i) => {
+    const pts = lm.map(p => { const x = state.mirror ? 1 - p.x : p.x; return { x: (0.5 + (x - 0.5) / cx) * W, y: (0.5 + (p.y - 0.5) / cy) * H }; });
+    const old = lastRaw[i];
+    if (old && old.length === pts.length && Math.hypot(old[1].x - pts[1].x, old[1].y - pts[1].y) < W * 0.15) for (let k = 0; k < pts.length; k++) { pts[k].x = old[k].x * 0.45 + pts[k].x * 0.55; pts[k].y = old[k].y * 0.45 + pts[k].y * 0.55; }
+    const moved = old ? { x: pts[1].x - old[1].x, y: pts[1].y - old[1].y } : { x: 0, y: 0 };
+    lastRaw[i] = pts;
+    return makeFace(pts, i, moved);
+  });
+  lastRaw.length = list.length;
+}
+function makeFace(P, index, moved) {
+  const mid = (a, b) => ({ x: (P[a].x + P[b].x) / 2, y: (P[a].y + P[b].y) / 2 });
+  const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  let eA = mid(33, 133), eB = mid(362, 263); if (eA.x > eB.x) [eA, eB] = [eB, eA];
+  let cA = P[205], cB = P[425]; if (cA.x > cB.x) [cA, cB] = [cB, cA];
+  let rA = P[234], rB = P[454]; if (rA.x > rB.x) [rA, rB] = [rB, rA];
+  const roll = Math.atan2(eB.y - eA.y, eB.x - eA.x), w = d(P[234], P[454]), h = d(P[10], P[152]);
+  const up = { x: Math.sin(roll), y: -Math.cos(roll) }, down = { x: -up.x, y: -up.y };
+  const forehead = P[10], head = { x: forehead.x + up.x * h * 0.22, y: forehead.y + up.y * h * 0.22 };
+  const mouth = mid(13, 14), open = Math.max(0, Math.min(1, (d(P[13], P[14]) / d(P[61], P[291]) - 0.2) / 0.4));   // 0 for a smile, 1 for a big "ahh"
+  const pts = { head, forehead, eyeL: eA, eyeR: eB, eyes: mid(33, 263), nose: P[1], mouth, chin: P[152], cheekL: cA, cheekR: cB, earL: rA, earR: rB, center: { x: (rA.x + rB.x) / 2, y: (P[10].y + P[152].y) / 2 } };
+  const f = { index, P, w, h, roll, up, down, open, moved, pts, at: n => pts[n] || pts.center };
+  f.local = (ctx, at, fn) => { const p = f.at(at); ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(roll); ctx.scale(w, w); fn(ctx); ctx.restore(); };
+  f.emoji = (ctx, ch, at, size, dx = 0, dy = 0, spin = 0) => {
+    const p = f.at(at); ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(roll); ctx.translate(dx * w, dy * w); ctx.rotate(spin);
+    ctx.font = `${Math.round(size * w)}px "Segoe UI Emoji","Noto Color Emoji",sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(ch, 0, 0); ctx.restore();
+  };
+  return f;
+}
+const PAIRS = { eyes: ['eyeL', 'eyeR'], cheeks: ['cheekL', 'cheekR'], ears: ['earL', 'earR'] };
+function drawSticker(s, f, t, dt) {
+  if (s.draw) return s.draw(octx, f, t, dt);
+  for (const at of PAIRS[s.at] || [s.at]) f.emoji(octx, s.emoji, at, s.size || 0.5, s.dx || 0, s.dy || 0);
+}
+
+// ---------------------------------------------------------------------------
+// Stamps (tap to place, drag to move)
+// ---------------------------------------------------------------------------
+let stamps = [], dragStamp = null;
+$('stage').addEventListener('pointerdown', e => {
+  if (state.tab !== 'stamps') return;
+  const x = e.clientX / W, y = e.clientY / H;
+  dragStamp = [...stamps].reverse().find(s => Math.hypot((s.x - x) * W, (s.y - y) * H) < s.size * H * 0.5);
+  if (!dragStamp) { dragStamp = { ch: state.stamp, x, y, size: 0.12 }; stamps.push(dragStamp); pop(); }
+  $('stage').setPointerCapture(e.pointerId);
+});
+$('stage').addEventListener('pointermove', e => { if (dragStamp) { dragStamp.x = e.clientX / W; dragStamp.y = e.clientY / H; } });
+$('stage').addEventListener('pointerup', () => { dragStamp = null; });
+$('clear').onclick = () => { stamps = []; state.stickers = []; for (const s of C.stickers) { delete s.parts; } persist(); buildRow(); msg('All clean!', 1500); };
+
+// ---------------------------------------------------------------------------
+// Drawing
+// ---------------------------------------------------------------------------
+let filterStart = performance.now(), ping = 0, lastT = performance.now();
+function render() {
+  const now = performance.now(), dt = Math.min(0.1, (now - lastT) / 1000); lastT = now;
+  const f = C.filters.find(x => x.id === state.filter) || C.filters[0];
+  if (gl) {
+    if (camReady && video.readyState >= 2) { gl.bindTexture(gl.TEXTURE_2D, camTex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video); }
+    const pr = programFor(f) || programFor(C.filters[0]);
+    const usePrev = !!f.needs.prev;
+    gl.useProgram(pr.p);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, camTex); gl.uniform1i(pr.u.u_cam, 0);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, usePrev ? fbos[1 - ping].tex : camTex); gl.uniform1i(pr.u.u_prev, 1);
+    gl.activeTexture(gl.TEXTURE2); gl.bindTexture(gl.TEXTURE_2D, hasBg ? bgTex : camTex); gl.uniform1i(pr.u.u_bg, 2);
+    const [cx, cy] = crop(), F = faces[0];
+    const uv = p => [p.x / W, p.y / H];
+    gl.uniform2f(pr.u.u_res, glc.width, glc.height); gl.uniform2f(pr.u.u_crop, cx, cy);
+    gl.uniform1f(pr.u.u_mirror, state.mirror ? 1 : 0); gl.uniform1f(pr.u.u_time, (now - filterStart) / 1000);
+    gl.uniform1f(pr.u.u_faces, F && now - lastFaceT < 1000 ? faces.length : 0);
+    if (F) { const c = uv(F.pts.center); gl.uniform4f(pr.u.u_face, c[0], c[1], F.h / 2 / H, F.roll); gl.uniform2fv(pr.u.u_eyeL, uv(F.pts.eyeL)); gl.uniform2fv(pr.u.u_eyeR, uv(F.pts.eyeR)); gl.uniform3f(pr.u.u_mouth, F.pts.mouth.x / W, F.pts.mouth.y / H, F.open); }
+    if (usePrev) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbos[ping].fb); gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null); gl.useProgram(copyProg.p); gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, fbos[ping].tex); gl.uniform1i(copyProg.u.u_prev, 1);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4); ping = 1 - ping;
+    } else gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+  // Overlay: stickers on each face, then stamps.
+  const dpr = ov.width / W; octx.setTransform(dpr, 0, 0, dpr, 0, 0); octx.clearRect(0, 0, W, H);
+  const t = now / 1000, fresh = now - lastFaceT < 600;
+  if (fresh) for (const face of faces) for (const id of state.stickers) { const s = C.stickers.find(x => x.id === id); try { drawSticker(s, face, t, dt); } catch (e) { errors.push('sticker ' + id + ': ' + e.message); state.stickers = state.stickers.filter(x => x !== id); } }
+  else for (const id of state.stickers) { const s = C.stickers.find(x => x.id === id); if (s && s.parts) s.draw.call(s, octx, { open: 0, index: 1, at: () => ({ x: 0, y: 0 }), down: { x: 0, y: 1 }, w: 0 }, t, dt); }
+  for (const s of stamps) { octx.font = `${Math.round(s.size * H)}px "Segoe UI Emoji","Noto Color Emoji",sans-serif`; octx.textAlign = 'center'; octx.textBaseline = 'middle'; octx.fillText(s.ch, s.x * W, s.y * H); }
+  updateHint(fresh);
+  faceTick();
+  requestAnimationFrame(render);
+}
+function updateHint(fresh) {
+  let h = '';
+  if (state.stickers.length || (C.filters.find(x => x.id === state.filter) || {}).needs.face) {
+    if (faceState === 'loading') h = 'Getting ready...'; else if (faceState === 'ready' && !fresh) h = 'Show me your face!';
+    else { const s = state.stickers.map(id => C.stickers.find(x => x.id === id)).find(s => s && s.hint); if (s) h = s.hint; }
+  }
+  if (state.tab === 'stamps') h = 'Tap the picture to stamp. Drag to move.';
+  $('hint').textContent = h;
+}
+
+// ---------------------------------------------------------------------------
+// Picker
+// ---------------------------------------------------------------------------
+function buildRow() {
+  const row = $('row'); row.innerHTML = '';
+  const add = (icon, name, on, fn) => { const b = document.createElement('button'); b.className = 'opt' + (on ? ' on' : ''); b.innerHTML = `<span class="i"></span><span class="n"></span>`; b.querySelector('.i').textContent = icon; b.querySelector('.n').textContent = name; b.onclick = () => { fn(); pop(); }; row.appendChild(b); return b; };
+  if (state.tab === 'filters') for (const f of C.filters) add(f.icon, f.name, f.id === state.filter, () => pickFilter(f.id));
+  if (state.tab === 'stickers') for (const s of C.stickers) add(s.icon, s.name, state.stickers.includes(s.id), () => toggleSticker(s.id));
+  if (state.tab === 'stamps') for (const ch of C.stamps) add(ch, '', ch === state.stamp, () => { state.stamp = ch; persist(); buildRow(); });
+}
+function pickFilter(id) {
+  state.filter = id; filterStart = performance.now(); persist(); buildRow();
+  const f = C.filters.find(x => x.id === id);
+  $('bgbar').classList.toggle('on', !!f.needs.bg);
+  if (f.needs.bg && !hasBg) msg('Tap "Take the background", then step out of the picture.', 5000);
+  if (f.needs.prev && gl) for (const fb of fbos) { gl.bindFramebuffer(gl.FRAMEBUFFER, fb.fb); gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT); }
+  if (gl) gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  if (needFace()) startFaces();
+}
+function toggleSticker(id) {
+  state.stickers = state.stickers.includes(id) ? state.stickers.filter(x => x !== id) : [...state.stickers, id];
+  persist(); buildRow(); if (needFace()) startFaces();
+}
+document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => { state.tab = b.dataset.tab; document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b)); persist(); buildRow(); });
+
+// Magic backgrounds: she steps out, the camera remembers what is behind her.
+$('takeBg').onclick = async () => {
+  if (!camReady) return;
+  say('Step out of the picture!');
+  await countdown(5, 'Step out!');
+  gl.bindTexture(gl.TEXTURE_2D, bgTex); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video); hasBg = true;
+  click(); say('Got it! Come back in.'); msg('Got it! Come back in.', 2500);
+};
+
+// ---------------------------------------------------------------------------
+// Sounds, countdown, taking pictures
+// ---------------------------------------------------------------------------
+let actx = null;
+function ac() { if (!actx) try { actx = new AudioContext(); } catch (e) {} if (actx && actx.state === 'suspended') actx.resume(); return actx; }
+function tone(f, dur, type = 'sine', vol = 0.2) { const a = ac(); if (!a) return; const o = a.createOscillator(), g = a.createGain(); o.type = type; o.frequency.value = f; g.gain.setValueAtTime(vol, a.currentTime); g.gain.exponentialRampToValueAtTime(0.001, a.currentTime + dur); o.connect(g); g.connect(a.destination); o.start(); o.stop(a.currentTime + dur); }
+function pop() { tone(660, 0.08, 'triangle', 0.12); }
+function click() { const a = ac(); if (!a) return; const n = a.createBufferSource(), b = a.createBuffer(1, a.sampleRate * 0.08, a.sampleRate), d = b.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 3); n.buffer = b; const g = a.createGain(); g.gain.value = 0.5; n.connect(g); g.connect(a.destination); n.start(); }
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function countdown(n, label) {
+  for (let i = n; i > 0; i--) { $('count').textContent = i; $('count').classList.add('on'); tone(i === 1 ? 880 : 660, 0.15); if (label && i === n) msg(label, n * 1000); await sleep(window.CF_FAST ? 5 : 1000); }
+  $('count').classList.remove('on');
+}
+function frameCanvas() {
+  const c = document.createElement('canvas'); c.width = glc.width; c.height = glc.height;
+  const x = c.getContext('2d'); x.drawImage(glc, 0, 0); x.drawImage(ov, 0, 0, c.width, c.height); return c;
+}
+function flash() { const f = $('flash'); f.style.transition = 'none'; f.style.opacity = 0.9; requestAnimationFrame(() => { f.style.transition = 'opacity .35s'; f.style.opacity = 0; }); click(); }
+let busy = false;
+async function snap() {
+  if (busy || !camReady) return; busy = true;
+  try {
+    if (state.timer) await countdown(state.timer);
+    flash(); await savePhoto(frameCanvas());
+    msg('Saved to My pictures!', 1500);
+  } finally { busy = false; }
+}
+async function snapStrip() {
+  if (busy || !camReady) return; busy = true;
+  try {
+    const shots = [];
+    for (let i = 0; i < 4; i++) { await countdown(i === 0 ? 3 : 2); flash(); shots.push(frameCanvas()); msg(`${i + 1} of 4`, 900); }
+    const w = 520, h = Math.round(w * shots[0].height / shots[0].width), pad = 24, strip = document.createElement('canvas');
+    strip.width = w + pad * 2; strip.height = (h + pad) * 4 + pad + 70;
+    const x = strip.getContext('2d'); x.fillStyle = '#fff'; x.fillRect(0, 0, strip.width, strip.height);
+    shots.forEach((s, i) => x.drawImage(s, pad, pad + i * (h + pad), w, h));
+    x.fillStyle = '#2B2140'; x.font = 'bold 34px "Segoe UI", sans-serif'; x.textAlign = 'center';
+    x.fillText('📸 ' + new Date().toLocaleDateString(), strip.width / 2, strip.height - 28);
+    await savePhoto(strip); msg('Photo strip saved!', 1800);
+  } finally { busy = false; }
+}
+$('snap').onclick = snap;
+$('strip').onclick = snapStrip;
+const TIMERS = [0, 3, 10];
+function showTimer() { $('timer').querySelector('small').textContent = state.timer ? state.timer + 's' : 'off'; $('timer').classList.toggle('on', !!state.timer); }
+$('timer').onclick = () => { state.timer = TIMERS[(TIMERS.indexOf(state.timer) + 1) % TIMERS.length]; persist(); showTimer(); pop(); };
+
+// Say cheese: a loud sound (a shout, a clap, "cheese!") takes the picture.
+let cheeseOn = false, cheeseStream = null, cheeseLoud = 0, cheeseQuiet = 0;
+$('cheese').onclick = async () => {
+  if (cheeseOn) { cheeseOn = false; $('cheese').classList.remove('on'); if (cheeseStream) cheeseStream.getTracks().forEach(t => t.stop()); return; }
+  try {
+    cheeseStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const a = ac(), src = a.createMediaStreamSource(cheeseStream), an = a.createAnalyser(); an.fftSize = 1024; src.connect(an);
+    const buf = new Float32Array(an.fftSize); cheeseOn = true; $('cheese').classList.add('on'); say('Say cheese!'); msg('Say "cheese!" to take a picture.', 3000);
+    const listen = () => {
+      if (!cheeseOn) return;
+      an.getFloatTimeDomainData(buf); let s = 0; for (const v of buf) s += v * v; const rms = Math.sqrt(s / buf.length);
+      if (rms > 0.12) cheeseLoud++; else { cheeseLoud = 0; cheeseQuiet++; }
+      if (cheeseLoud >= 6 && cheeseQuiet > 40 && !busy) { cheeseLoud = 0; cheeseQuiet = 0; snap(); }
+      requestAnimationFrame(listen);
+    };
+    listen();
+  } catch (e) { msg('The microphone is not working right now.', 3000); }
+};
+
+// ---------------------------------------------------------------------------
+// Pictures, kept in IndexedDB. Shown by drawing them on canvases (the kiosk blocks blob: URLs).
+// ---------------------------------------------------------------------------
+let dbp = null;
+function db() { return dbp || (dbp = new Promise((ok, no) => { const r = indexedDB.open('camerafun', 1); r.onupgradeneeded = () => r.result.createObjectStore('photos', { keyPath: 'id', autoIncrement: true }); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); })); }
+function tx(mode, fn) { return db().then(d => new Promise((ok, no) => { const t = d.transaction('photos', mode), s = t.objectStore('photos'); const r = fn(s); t.oncomplete = () => ok(r && r.result); t.onerror = () => no(t.error); })); }
+async function savePhoto(canvas) {
+  const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.9));
+  await tx('readwrite', s => s.add({ time: Date.now(), blob, w: canvas.width, h: canvas.height }));
+  const all = await tx('readonly', s => s.getAllKeys());
+  if (all.length > 300) await tx('readwrite', s => { for (const k of all.slice(0, all.length - 300)) s.delete(k); });
+}
+const allPhotos = () => tx('readonly', s => s.getAll()).then(a => (a || []).sort((x, y) => y.time - x.time));
+async function drawBlob(blob, canvas, maxW) {
+  const bmp = await createImageBitmap(blob); const s = Math.min(1, maxW / bmp.width);
+  canvas.width = Math.round(bmp.width * s); canvas.height = Math.round(bmp.height * s); canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height); bmp.close && bmp.close();
+}
+let photos = [], viewing = -1;
+async function openGallery() {
+  $('gal').classList.add('on'); const grid = $('grid'); grid.innerHTML = '';
+  photos = await allPhotos();
+  if (!photos.length) { grid.innerHTML = '<div id="empty">No pictures yet. Tap 📸 to take one!</div>'; return; }
+  photos.forEach((p, i) => { const c = document.createElement('canvas'); c.onclick = () => openView(i); grid.appendChild(c); drawBlob(p.blob, c, 360).catch(e => errors.push('thumb: ' + e.message)); });
+}
+async function openView(i) { viewing = i; $('del').classList.remove('armed'); $('del').textContent = '🗑️ Delete'; $('view').classList.add('on'); await drawBlob(photos[i].blob, $('big'), 1600); }
+$('gallery').onclick = openGallery;
+$('galClose').onclick = () => $('gal').classList.remove('on');
+$('viewClose').onclick = () => $('view').classList.remove('on');
+$('prevPic').onclick = () => { if (viewing > 0) openView(viewing - 1); };
+$('nextPic').onclick = () => { if (viewing < photos.length - 1) openView(viewing + 1); };
+$('del').onclick = async () => {
+  const b = $('del');
+  if (!b.classList.contains('armed')) { b.classList.add('armed'); b.textContent = '🗑️ Tap again to delete'; return; }
+  await tx('readwrite', s => s.delete(photos[viewing].id));
+  $('view').classList.remove('on'); openGallery();
+};
+
+// ---------------------------------------------------------------------------
+resize(); showTimer(); buildRow();
+document.querySelector(`#tabs button[data-tab="${state.tab}"]`)?.click();
+pickFilter(state.filter);
+startCamera();
+requestAnimationFrame(render);
+window.CF = { C, state, errors, faces: () => faces, faceState: () => faceState, pickFilter, toggleSticker, snap, snapStrip, allPhotos, openGallery, programFor, hasBg: () => hasBg, stamps: () => stamps };
+</script>
+</body>
+</html>

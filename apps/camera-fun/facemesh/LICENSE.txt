@@ -1,0 +1,3 @@
+MediaPipe Face Mesh 0.4.1633559619 (npm @mediapipe/face_mesh), Copyright Google LLC, Apache License 2.0:
+https://www.apache.org/licenses/LICENSE-2.0
+Changes: face_mesh.js loads its scripts without the crossorigin attribute; binary files are stored as base64 .js.

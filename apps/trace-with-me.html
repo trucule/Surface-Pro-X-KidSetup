@@ -5,40 +5,53 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Trace With Me</title>
 <!--
-  Trace With Me. A finger-tracing app for letters, numbers and shapes. One file, no network, no API.
-  She picks a deck, a big faint letter appears, she colours it in with her finger. When most of the
-  letter is covered it cheers, says the letter and a word, and gives her a sticker. Stickers are kept
-  in localStorage (key tracer-stickers) so the board survives restarts.
+  Trace With Me. Handwriting from first letters to joined cursive. One file, no network, no API.
+  Three modes:
+    Little   the original decks: capital letters, small letters, numbers and shapes to colour in with a finger.
+    Spell    a word is spoken (with a picture clue). She traces it letter by letter in school print, then writes it
+             from memory in letter boxes; each box is read by a small built-in letter matcher. Eight levels, from short
+             vowel words to tricky 3rd grade words (because, friend, laugh).
+    Cursive  lowercase cursive drawn from stroke paths (no fonts): single letters in their teaching groups with a
+             "watch me" pen, then joined words, then words with only a light guide.
+  Spell and Cursive move up a level after four right first try in a row and down after two missed in a row.
+  Progress is kept in localStorage (key trace-v2); the Little sticker board keeps its old key (tracer-stickers).
 -->
 <style>
   :root { --ink: #2B2140; --paper: #FFF9F0; --accent: #FF4F8B; --sun: #FFC93C; --sky: #58C7F0; --leaf: #5CD38B; --grape: #9B6BFF; }
   html, body { margin: 0; height: 100%; background: var(--paper); overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); }
   body { touch-action: none; user-select: none; -webkit-user-select: none; }
+  button { font-family: inherit; color: var(--ink); }
   #app { position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr auto; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
-  header { display: flex; align-items: center; gap: 10px; padding: 10px 14px; }
-  header h1 { font-size: 26px; margin: 0 auto 0 0; font-weight: 900; }
+  /* The right 210px of the header stays clear: the Home pill sits there. */
+  header { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 10px 210px 10px 14px; }
+  header h1 { font-size: 26px; margin: 0; font-weight: 900; }
   .decks { display: flex; gap: 8px; }
-  .deck { border: 3px solid var(--ink); background: #fff; border-radius: 999px; padding: 8px 16px; font-size: 20px; font-weight: 800; cursor: pointer; }
-  .deck.on { background: var(--sun); }
+  .deck, .mode { border: 3px solid var(--ink); background: #fff; border-radius: 999px; padding: 8px 16px; font-size: 20px; font-weight: 800; cursor: pointer; }
+  .deck.on, .mode.on { background: var(--sun); }
+  #badge { font-size: 17px; font-weight: 800; background: #fff; border: 3px solid var(--ink); border-radius: 999px; padding: 5px 12px; white-space: nowrap; }
+  #stars { font-size: 22px; font-weight: 900; margin-left: auto; }
+  .hide { display: none !important; }
   main { position: relative; min-height: 0; }
   #stage { position: absolute; inset: 0; display: grid; place-items: center; }
   canvas#c { background: #fff; border: 4px solid var(--ink); border-radius: 28px; box-shadow: 0 10px 0 #E7DCCF; touch-action: none; max-width: 100%; max-height: 100%; aspect-ratio: 1 / 1; }
-  #word { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); font-size: 30px; font-weight: 900; background: #fff; border: 3px solid var(--ink); border-radius: 999px; padding: 6px 18px; pointer-events: none; white-space: nowrap; }
-  #meter { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); width: 46%; height: 22px; background: #fff; border: 3px solid var(--ink); border-radius: 999px; overflow: hidden; pointer-events: none; }
+  #wide { position: absolute; inset: 8px 14px 4px; }
+  canvas#w { width: 100%; height: 100%; background: #fff; border: 4px solid var(--ink); border-radius: 28px; box-shadow: 0 10px 0 #E7DCCF; touch-action: none; box-sizing: border-box; display: block; }
+  #word { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); font-size: 30px; font-weight: 900; background: #fff; border: 3px solid var(--ink); border-radius: 999px; padding: 6px 18px; pointer-events: none; white-space: nowrap; z-index: 2; }
+  #meter { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); width: 46%; height: 22px; background: #fff; border: 3px solid var(--ink); border-radius: 999px; overflow: hidden; pointer-events: none; z-index: 2; }
   #meter i { display: block; height: 100%; width: 0; background: var(--leaf); transition: width .15s; }
   footer { display: flex; align-items: center; justify-content: center; gap: 14px; padding: 10px 14px 16px; }
   footer button { border: 4px solid var(--ink); background: #fff; border-radius: 50%; width: 76px; height: 76px; font-size: 34px; cursor: pointer; display: grid; place-items: center; touch-action: manipulation; }
   footer button:active { transform: scale(.93); }
   footer button.big { width: 92px; height: 92px; background: var(--sun); }
   footer button:disabled { opacity: .35; }
-  #win { position: absolute; inset: 0; display: none; place-items: center; pointer-events: none; }
+  #win { position: absolute; inset: 0; display: none; place-items: center; pointer-events: none; z-index: 5; }
   #win.on { display: grid; }
   #win .card { background: #fff; border: 4px solid var(--ink); border-radius: 28px; padding: 22px 36px; font-size: 44px; font-weight: 900; text-align: center; box-shadow: 0 12px 0 var(--accent); animation: pop .4s cubic-bezier(.2,1.6,.4,1); }
   #win .card small { display: block; font-size: 60px; margin-top: 6px; }
   @keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-  .spark { position: absolute; font-size: 44px; animation: fly 1.1s ease-out forwards; pointer-events: none; }
+  .spark { position: absolute; font-size: 44px; animation: fly 1.1s ease-out forwards; pointer-events: none; z-index: 6; }
   @keyframes fly { from { transform: translate(0,0) scale(.4); opacity: 1; } to { transform: translate(var(--dx), var(--dy)) scale(1.3) rotate(40deg); opacity: 0; } }
-  #board { position: fixed; inset: 0; background: rgba(43,33,64,.85); display: none; padding: 24px; overflow: auto; }
+  #board { position: fixed; inset: 0; background: rgba(43,33,64,.85); display: none; padding: 24px; overflow: auto; z-index: 10; }
   #board.on { display: block; }
   #board .sheet { background: var(--paper); border-radius: 28px; padding: 20px; max-width: 900px; margin: 0 auto; }
   #board h2 { margin: 0 0 12px; font-size: 30px; }
@@ -47,21 +60,28 @@
   #stickers div.got { border: 3px solid var(--ink); background: var(--sun); }
   #stickers div.got::after { content: attr(data-l); position: relative; margin-top: -78px; margin-left: 58px; font-size: 16px; font-weight: 900; background: #fff; border-radius: 999px; padding: 0 6px; }
   #board button { margin-top: 14px; }
+  #boardNote { font-size: 20px; font-weight: 700; margin: 0 0 12px; }
 </style>
 </head>
 <body>
 <div id="app">
   <header>
     <h1>Trace With Me</h1>
-    <div class="decks">
+    <button class="mode" data-mode="little">Little</button>
+    <button class="mode" data-mode="spell">Spell</button>
+    <button class="mode" data-mode="cursive">Cursive</button>
+    <div class="decks" id="decks">
       <button class="deck on" data-deck="upper">ABC</button>
       <button class="deck" data-deck="lower">abc</button>
       <button class="deck" data-deck="numbers">123</button>
       <button class="deck" data-deck="shapes">&#9711;&#9634;&#9651;</button>
     </div>
+    <span id="badge" class="hide"></span>
+    <span id="stars"></span>
   </header>
   <main>
     <div id="stage"><canvas id="c" width="1000" height="1000"></canvas></div>
+    <div id="wide" class="hide"><canvas id="w"></canvas></div>
     <div id="word"></div>
     <div id="meter"><i></i></div>
     <div id="win"><div class="card"><span id="winText"></span><small id="winEmoji"></small></div></div>
@@ -74,7 +94,7 @@
     <button id="next" title="Next">&#9654;</button>
   </footer>
 </div>
-<div id="board"><div class="sheet"><h2>My stickers</h2><div id="stickers"></div><button class="deck" id="board-close">Back to tracing</button></div></div>
+<div id="board"><div class="sheet"><h2>My stickers</h2><p id="boardNote"></p><div id="stickers"></div><button class="deck" id="board-close">Back to tracing</button></div></div>
 <script id="voicepack">/* voice pack goes here: run voices/make-voices.py */</script>
 <script>
 // ---------------------------------------------------------------------------
@@ -102,9 +122,17 @@ const VOICE = (() => {
   return { play, stop, has, key };
 })();
 
-// ---------------------------------------------------------------------------
-// The decks. Each item: the glyph to trace, what to say, and the sticker it earns.
-// ---------------------------------------------------------------------------
+function say(text) {
+  try { speechSynthesis.cancel(); } catch (e) {}
+  VOICE.stop(); if (VOICE.play(text)) return;
+  try { const u = new SpeechSynthesisUtterance(text); u.rate = 0.9; u.pitch = 1.1; speechSynthesis.speak(u); } catch (e) {}
+}
+const $ = id => document.getElementById(id);
+const pick = a => a[Math.floor(Math.random() * a.length)];
+
+// ===========================================================================
+// LITTLE: the original decks (colour in a big letter, number or shape).
+// ===========================================================================
 const WORDS = { A: ['apple', '🍎'], B: ['bear', '🐻'], C: ['cat', '🐱'], D: ['dog', '🐶'], E: ['egg', '🥚'], F: ['fish', '🐟'], G: ['grapes', '🍇'],
   H: ['hat', '🎩'], I: ['ice cream', '🍦'], J: ['jellyfish', '🪼'], K: ['kite', '🪁'], L: ['lion', '🦁'], M: ['moon', '🌙'], N: ['nest', '🪺'],
   O: ['octopus', '🐙'], P: ['pig', '🐷'], Q: ['queen', '👸'], R: ['rainbow', '🌈'], S: ['sun', '☀️'], T: ['turtle', '🐢'], U: ['umbrella', '☂️'],
@@ -128,34 +156,23 @@ const FONT = '900 820px "Segoe UI", "Arial Rounded MT Bold", Arial, sans-serif';
 const DONE_AT = 0.72;          // coverage needed to win
 const BRUSH = 72;              // her finger line, in page units
 
-// ---------------------------------------------------------------------------
-// State
-// ---------------------------------------------------------------------------
 let deck = 'upper', idx = 0, won = false, nudged = false, last = null;
-const cv = document.getElementById('c'), g = cv.getContext('2d');
+const cv = $('c'), g = cv.getContext('2d');
 const ink = document.createElement('canvas'); ink.width = ink.height = 1000; const ig = ink.getContext('2d');
 const mask = document.createElement('canvas'); mask.width = mask.height = 1000; const mg = mask.getContext('2d');
-let samples = [], outside = []; // grid points inside / outside the glyph, checked against her ink
-const meter = document.querySelector('#meter i'), wordEl = document.getElementById('word');
+let samples = [], outside = [];
+const meter = document.querySelector('#meter i'), wordEl = $('word');
 const SKEY = 'tracer-stickers';
 function loadStickers() { try { return JSON.parse(localStorage.getItem(SKEY) || '[]'); } catch (e) { return []; } }
 function saveSticker(id) { const s = loadStickers(); if (!s.includes(id)) { s.push(id); try { localStorage.setItem(SKEY, JSON.stringify(s)); } catch (e) {} } }
-
-function say(text) {
-  try { speechSynthesis.cancel(); } catch (e) {}
-  VOICE.stop(); if (VOICE.play(text)) return;
-  try { const u = new SpeechSynthesisUtterance(text); u.rate = 0.9; u.pitch = 1.1; speechSynthesis.speak(u); } catch (e) {}
-}
 function item() { return DECKS[deck][idx]; }
 
-// Draw the glyph into the mask (solid) so we know which pixels count.
 function buildMask() {
   mg.clearRect(0, 0, 1000, 1000); mg.fillStyle = '#000'; mg.strokeStyle = '#000';
   const it = item();
   if (it.shape) { mg.lineWidth = 120; mg.lineJoin = mg.lineCap = 'round'; mg.beginPath(); it.shape.path(mg); mg.stroke(); }
   else {
     mg.font = FONT; mg.textAlign = 'center'; mg.textBaseline = 'middle';
-    // Shrink wide glyphs (W, M) so they fit with a margin.
     let size = 820; const w = mg.measureText(it.glyph).width; if (w > 780) size = Math.floor(820 * 780 / w);
     mg.font = FONT.replace('820px', size + 'px');
     mg.fillText(it.glyph, 500, it.glyph === it.glyph.toLowerCase() && /[gjpqy]/.test(it.glyph) ? 430 : 500);
@@ -163,10 +180,8 @@ function buildMask() {
   const d = mg.getImageData(0, 0, 1000, 1000).data; samples = []; outside = [];
   for (let y = 10; y < 1000; y += 12) for (let x = 10; x < 1000; x += 12) (d[(y * 1000 + x) * 4 + 3] > 128 ? samples : outside).push([x, y]);
 }
-
-function render() {
+function renderLittle() {
   g.clearRect(0, 0, 1000, 1000);
-  // Faint guide fill, then a dotted edge so it reads as "trace me".
   g.save(); g.globalAlpha = 0.18; g.drawImage(mask, 0, 0); g.restore();
   g.save(); g.setLineDash([22, 18]); g.lineWidth = 7; g.strokeStyle = '#9B6BFF'; g.lineJoin = g.lineCap = 'round';
   const it = item();
@@ -175,8 +190,6 @@ function render() {
   g.restore();
   g.drawImage(ink, 0, 0);
 }
-
-// How much of the glyph she has covered, and how much ink landed outside it.
 function coverage() {
   if (!samples.length) return { on: 0, off: 0 };
   const d = ig.getImageData(0, 0, 1000, 1000).data; let hit = 0, miss = 0;
@@ -184,20 +197,15 @@ function coverage() {
   for (const [x, y] of outside) if (d[(y * 1000 + x) * 4 + 3] > 40) miss++;
   return { on: hit / samples.length, off: miss / Math.max(1, hit) };
 }
-
-function load(i, speak = true) {
+function loadLittle(i, speak = true) {
   idx = (i + DECKS[deck].length) % DECKS[deck].length; won = false; nudged = false;
   ig.clearRect(0, 0, 1000, 1000); meter.style.width = '0';
-  document.getElementById('win').classList.remove('on');
-  buildMask(); render();
+  $('win').classList.remove('on');
+  buildMask(); renderLittle();
   const it = item();
   wordEl.textContent = it.shape ? it.shape.name : (it.label + '  ' + (it.emoji.length > 4 ? '' : it.emoji));
   if (speak) say(it.say);
 }
-
-// ---------------------------------------------------------------------------
-// Finger input. One pointer at a time; the rest are ignored (a resting palm).
-// ---------------------------------------------------------------------------
 let activeId = null;
 function pos(e) { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * 1000, (e.clientY - r.top) / r.height * 1000]; }
 cv.addEventListener('pointerdown', e => { if (activeId !== null || won) return; activeId = e.pointerId; cv.setPointerCapture(e.pointerId); last = pos(e); dot(last); });
@@ -205,64 +213,577 @@ cv.addEventListener('pointermove', e => {
   if (e.pointerId !== activeId) return;
   const p = pos(e);
   ig.strokeStyle = colorFor(); ig.lineWidth = BRUSH; ig.lineCap = ig.lineJoin = 'round';
-  ig.beginPath(); ig.moveTo(last[0], last[1]); ig.lineTo(p[0], p[1]); ig.stroke(); last = p; render();
+  ig.beginPath(); ig.moveTo(last[0], last[1]); ig.lineTo(p[0], p[1]); ig.stroke(); last = p; renderLittle();
 });
-function dot(p) { ig.fillStyle = colorFor(); ig.beginPath(); ig.arc(p[0], p[1], BRUSH / 2, 0, Math.PI * 2); ig.fill(); render(); }
+function dot(p) { ig.fillStyle = colorFor(); ig.beginPath(); ig.arc(p[0], p[1], BRUSH / 2, 0, Math.PI * 2); ig.fill(); renderLittle(); }
 function endStroke(e) {
   if (e.pointerId !== activeId) return; activeId = null;
   const c = coverage(); meter.style.width = Math.round(Math.min(1, c.on / DONE_AT) * 100) + '%';
-  // Done when most of the glyph is covered and the ink is mostly on it (a scribble over the whole box is not a trace).
-  if (c.on >= DONE_AT && c.off <= 1.0) win();
+  if (c.on >= DONE_AT && c.off <= 1.0) winLittle();
   else if (c.on >= DONE_AT && !nudged) { nudged = true; say('Try to stay inside the ' + (item().shape ? item().shape.name : 'letter') + '. Tap the drop to start over.'); }
 }
 cv.addEventListener('pointerup', endStroke); cv.addEventListener('pointercancel', endStroke);
 const COLORS = ['#FF4F8B', '#58C7F0', '#5CD38B', '#FFC93C', '#9B6BFF', '#FF8C42'];
 function colorFor() { return COLORS[idx % COLORS.length]; }
-
-function win() {
-  won = true; const it = item(); saveSticker(it.id);
-  document.getElementById('winText').textContent = it.done;
-  document.getElementById('winEmoji').textContent = it.emoji;
-  document.getElementById('win').classList.add('on');
-  say('You did it! ' + it.done);
-  const stage = document.getElementById('stage');
+function sparkle() {
+  const host = document.querySelector('main');
   for (let i = 0; i < 14; i++) {
     const s = document.createElement('span'); s.className = 'spark'; s.textContent = ['⭐', '✨', '🌟', '💫'][i % 4];
     s.style.left = '50%'; s.style.top = '50%'; s.style.setProperty('--dx', (Math.random() * 700 - 350) + 'px'); s.style.setProperty('--dy', (Math.random() * 500 - 250) + 'px');
-    stage.appendChild(s); setTimeout(() => s.remove(), 1200);
+    host.appendChild(s); setTimeout(() => s.remove(), 1200);
   }
-  // Move on by itself after a moment, so she doesn't have to find the arrow.
-  setTimeout(() => { if (won) load(idx + 1); }, 3200);
+}
+function winLittle() {
+  won = true; const it = item(); saveSticker(it.id);
+  $('winText').textContent = it.done; $('winEmoji').textContent = it.emoji; $('win').classList.add('on');
+  say('You did it! ' + it.done); sparkle();
+  setTimeout(() => { if (won && mode === 'little') loadLittle(idx + 1); }, 3200);
 }
 
+// ===========================================================================
+// LETTER SHAPES. Units: top line y=0, midline y=100, baseline y=200, descender line y=300.
+// Print letters are school ball-and-stick strokes (in stroke order). Cursive letters are one joined body stroke
+// (plus dots and crosses); joins between letters are made by connect().
+// ===========================================================================
+const PRINT = {
+  a: { w: 105, d: ['M97 134 A48 48 0 1 0 97 166', 'M100 100 V200'] },
+  b: { w: 110, d: ['M10 0 V200', 'M13 134 A48 48 0 1 1 13 166'] },
+  c: { w: 95, d: ['M89 119 A48 48 0 1 0 89 181'] },
+  d: { w: 105, d: ['M97 134 A48 48 0 1 0 97 166', 'M100 0 V200'] },
+  e: { w: 105, d: ['M6 150 H100 A48 48 0 1 0 90 180'] },
+  f: { w: 90, d: ['M88 22 C75 0 40 0 40 40 V200', 'M10 100 H75'] },
+  g: { w: 105, d: ['M97 134 A48 48 0 1 0 97 166', 'M100 100 V260 C100 305 40 305 15 280'] },
+  h: { w: 105, d: ['M10 0 V200', 'M10 145 C18 105 92 95 95 145 V200'] },
+  i: { w: 60, d: ['M30 100 V200', 'M30 52 L30 56'] },
+  j: { w: 70, d: ['M55 100 V265 C55 305 15 305 2 282', 'M55 52 L55 56'] },
+  k: { w: 95, d: ['M10 0 V200', 'M85 100 L12 160', 'M38 140 L90 200'] },
+  l: { w: 50, d: ['M25 0 V200'] },
+  m: { w: 140, d: ['M10 100 V200', 'M10 140 C14 105 62 98 68 140 V200', 'M68 140 C72 105 122 98 128 140 V200'] },
+  n: { w: 105, d: ['M10 100 V200', 'M10 145 C18 105 92 95 95 145 V200'] },
+  o: { w: 105, d: ['M52 102 A48 48 0 0 0 52 198 A48 48 0 0 0 52 102'] },
+  p: { w: 110, d: ['M10 100 V300', 'M13 134 A48 48 0 1 1 13 166'] },
+  q: { w: 125, d: ['M97 134 A48 48 0 1 0 97 166', 'M100 100 V300 L122 282'] },
+  r: { w: 90, d: ['M10 100 V200', 'M10 145 C18 108 55 98 85 112'] },
+  s: { w: 92, d: ['M85 116 C72 96 15 96 15 126 C15 152 85 146 85 174 C85 206 20 206 5 184'] },
+  t: { w: 85, d: ['M40 20 V180 C40 202 62 204 78 192', 'M8 100 H75'] },
+  u: { w: 105, d: ['M10 100 V160 C10 212 90 212 90 160', 'M90 100 V200'] },
+  v: { w: 100, d: ['M5 100 L50 200 L95 100'] },
+  w: { w: 130, d: ['M5 100 L35 200 L65 105 L95 200 L125 100'] },
+  x: { w: 100, d: ['M10 100 L90 200', 'M90 100 L10 200'] },
+  y: { w: 100, d: ['M5 100 L50 200', 'M95 100 L35 300'] },
+  z: { w: 105, d: ['M10 100 H90 L10 200 H95'] },
+};
+// Other ways children write the same letter, for the letter matcher only.
+const PRINT_ALT = {
+  a: [['M97 134 A48 48 0 1 0 97 166 C100 182 102 196 110 200']],
+  e: [['M8 150 C40 152 75 150 98 146 C100 110 60 95 30 108 C0 125 2 185 40 198 C60 204 80 196 92 184']],
+  k: [['M10 0 V200', 'M82 104 L14 152 L88 200']],
+  t: [['M40 0 V180 C40 202 62 204 78 192', 'M8 90 H75']],
+  y: [['M10 100 V150 C10 200 90 200 90 150', 'M90 100 V260 C90 302 25 302 10 272']],
+  q: [['M97 134 A48 48 0 1 0 97 166', 'M100 100 V300']],
+  u: [['M10 100 V170 C10 212 90 212 92 160 V100 V200']],
+  j: [['M55 100 V265 C55 305 15 305 2 282']],
+  i: [['M30 100 V200']],
+  g: [['M97 134 A48 48 0 1 0 97 166', 'M100 100 V300']],
+};
+const CURSIVE = {
+  a: ['M68 112 C55 92 20 98 12 135 C5 175 30 205 55 190 C68 182 72 150 74 102 C72 140 70 175 74 190 C77 202 92 200 100 194'],
+  b: ['M5 165 C30 130 55 60 50 25 C47 0 22 5 20 40 C18 90 14 160 16 188 C18 205 50 205 56 160 C58 130 50 112 46 108 C55 118 70 112 85 106'],
+  c: ['M72 112 C66 100 58 96 46 98 C24 102 12 120 12 145 C10 178 30 202 58 196 C70 193 80 190 92 188'],
+  d: ['M68 112 C55 92 20 98 12 135 C5 175 30 205 55 190 C68 182 75 140 80 10 C80 60 76 160 78 188 C80 202 95 200 104 194'],
+  e: ['M8 170 C40 160 60 130 50 112 C40 95 10 110 8 150 C6 190 30 205 55 195 C65 191 75 188 85 184'],
+  // After a midline exit (b, o, v, w) the e loop is made from a short dip instead of an undercurve.
+  'e+': ['M4 124 C24 128 46 126 52 113 C50 96 14 104 10 146 C6 190 32 205 57 195 C67 191 77 188 87 184'],
+  f: ['M5 165 C30 130 55 60 50 25 C47 0 22 5 20 40 C20 120 20 220 20 280 C20 310 40 300 38 270 C35 235 30 215 25 200 C45 195 65 190 85 182'],
+  g: ['M68 112 C55 92 20 98 12 135 C5 175 30 205 55 190 C68 182 72 150 74 102 C72 160 74 230 70 280 C66 315 30 310 30 285 C32 250 70 220 95 195'],
+  h: ['M5 165 C30 130 55 60 50 25 C47 0 22 5 20 40 C18 90 14 160 14 200 C20 140 40 100 60 110 C75 118 72 160 72 185 C73 202 90 200 102 192'],
+  i: ['M10 100 C8 140 6 175 12 190 C18 203 32 200 42 194', 'M15 56 L16 59'],
+  j: ['M10 100 C10 160 12 230 10 280 C8 315 -25 305 -20 280 C-15 255 25 220 55 195', 'M15 56 L16 59'],
+  k: ['M5 165 C30 130 55 60 50 25 C47 0 22 5 20 40 C18 90 14 160 14 200 C20 140 45 95 68 108 C85 120 60 150 35 148 C55 155 68 175 72 188 C75 200 90 200 100 192'],
+  l: ['M5 165 C30 130 55 60 50 25 C47 0 22 5 20 40 C18 90 14 160 16 185 C18 205 40 200 55 192'],
+  m: ['M5 170 C12 130 25 98 35 100 C45 102 42 150 40 200 C45 140 60 100 75 104 C88 108 85 150 85 200 C90 140 105 100 122 104 C136 108 132 160 134 185 C136 202 152 200 162 192'],
+  n: ['M5 170 C12 130 25 98 35 100 C45 102 42 150 40 200 C45 140 60 100 78 104 C92 108 88 160 90 185 C92 202 108 200 118 192'],
+  o: ['M62 108 C50 92 15 100 10 140 C6 180 30 205 52 192 C70 182 72 140 64 108 C70 112 80 110 92 104'],
+  p: ['M5 165 C15 140 20 120 22 100 C22 170 20 240 18 300 C18 250 20 140 45 108 C65 90 85 120 75 160 C68 190 45 200 30 190 C50 195 70 192 90 188'],
+  q: ['M68 112 C55 92 20 98 12 135 C5 175 30 205 55 190 C68 182 72 150 74 102 C72 160 74 230 72 290 C70 310 60 300 64 280 C70 250 85 220 100 200'],
+  r: ['M5 165 C20 140 25 115 25 96 C35 100 45 104 52 98 C50 130 50 160 52 185 C54 200 70 200 82 192'],
+  s: ['M5 170 C20 140 30 110 32 98 C45 130 62 160 50 185 C40 202 15 200 10 188 C25 198 60 198 80 190'],
+  t: ['M5 165 C20 120 30 70 34 30 C32 90 28 160 30 185 C32 202 55 200 68 192', 'M10 85 H62'],
+  u: ['M10 100 C8 140 6 175 14 190 C25 205 50 195 60 165 C64 145 66 120 66 100 C64 140 62 175 66 190 C70 202 85 200 95 194'],
+  v: ['M5 165 C10 120 25 95 35 100 C45 105 40 160 45 185 C50 205 70 195 78 160 C82 140 82 115 80 100 C85 108 95 110 108 106'],
+  w: ['M10 100 C8 140 6 175 14 190 C25 205 48 195 56 165 C60 145 62 120 62 100 C60 140 60 180 72 192 C85 202 98 180 100 150 C102 125 98 108 96 100 C100 108 112 110 125 106'],
+  x: ['M5 170 C12 130 25 98 35 100 C50 102 55 150 58 180 C62 200 80 200 92 190', 'M80 105 L25 195'],
+  y: ['M5 170 C12 130 25 98 35 100 C45 104 40 160 45 185 C50 205 70 195 76 160 C80 140 80 115 80 100 C80 160 80 230 76 280 C72 315 38 310 38 285 C40 250 78 220 102 195'],
+  z: ['M5 170 C12 130 25 98 38 100 C55 102 70 104 70 120 C70 150 30 170 28 185 C45 175 70 190 66 230 C62 290 30 300 30 280 C32 255 70 220 98 195'],
+};
+const SLANT = 0.26;      // cursive leans right: x moves by SLANT per unit of height above the baseline
+
+// Path sampling through a hidden SVG (getPointAtLength), cached per path string.
+const svgNS = 'http://www.w3.org/2000/svg';
+const svgHost = document.createElementNS(svgNS, 'svg'); svgHost.setAttribute('width', '0'); svgHost.setAttribute('height', '0'); svgHost.style.cssText = 'position:absolute;left:-10px;top:-10px;overflow:hidden';
+document.body.appendChild(svgHost);
+const sampleCache = new Map();
+function samplePath(d, step = 4) {
+  const k = d + '|' + step; if (sampleCache.has(k)) return sampleCache.get(k);
+  const p = document.createElementNS(svgNS, 'path'); p.setAttribute('d', d); svgHost.appendChild(p);
+  const L = p.getTotalLength(), n = Math.max(1, Math.ceil(L / step)), pts = [];
+  for (let i = 0; i <= n; i++) { const q = p.getPointAtLength(L * i / n); pts.push([q.x, q.y]); }
+  p.remove(); sampleCache.set(k, pts); return pts;
+}
+function cubic(P, c1, c2, Q, n = 14) {
+  const out = [];
+  for (let i = 0; i <= n; i++) { const t = i / n, u = 1 - t; out.push([u * u * u * P[0] + 3 * u * u * t * c1[0] + 3 * u * t * t * c2[0] + t * t * t * Q[0], u * u * u * P[1] + 3 * u * u * t * c1[1] + 3 * u * t * t * c2[1] + t * t * t * Q[1]]); }
+  return out;
+}
+// The join from one letter's exit to the next letter's start: leaves going right, arrives going up (an undercurve)
+// or level (a join at the midline).
+function connect(P, Q) {
+  const dx = Q[0] - P[0], dy = Q[1] - P[1];
+  return cubic(P, [P[0] + dx * 0.45, P[1]], [Q[0] - dx * 0.25, Q[1] - dy * 0.45], Q);
+}
+// A cursive word as strokes in units (before the slant): one joined stroke plus dots and crosses.
+function cursiveWord(word) {
+  const main = [], extras = []; let prevE = null;
+  for (const ch of word) {
+    const high = prevE && prevE[1] < 150;
+    const def = (high && CURSIVE[ch + '+']) || CURSIVE[ch]; let body = samplePath(def[0]).slice();
+    // After a letter that ends at the midline (b, o, v, w), a letter that starts low begins where it reaches that height.
+    if (high && !CURSIVE[ch + '+'] && body[0][1] > prevE[1] + 30) {
+      const i = body.findIndex(p => p[1] <= prevE[1] + 8); if (i > 0) body = body.slice(i);
+    }
+    const S = body[0], E = body[body.length - 1];
+    let off;
+    if (!prevE) { off = 40 - S[0]; main.push(...connect([off + S[0] - 36, 200], [off + S[0], S[1]])); }
+    else {
+      // Keep clear of the letter before: an oval letter starts at its right side and swings back left.
+      const G = S[1] <= 125 ? 30 : 20, minX = Math.min(...body.map(p => p[0]));
+      off = Math.max(prevE[0] + G - S[0], prevE[0] + 14 - minX);
+      main.push(...connect(prevE, [off + S[0], S[1]]).slice(1));
+    }
+    for (const [a, b] of body) main.push([a + off, b]);
+    for (let k = 1; k < def.length; k++) extras.push(samplePath(def[k], 2).map(([a, b]) => [a + off, b]));
+    prevE = [E[0] + off, E[1]];
+  }
+  main.push(...cubic(prevE, [prevE[0] + 10, prevE[1]], [prevE[0] + 18, prevE[1] - 6], [prevE[0] + 24, prevE[1] - 18], 6).slice(1));
+  return [main, ...extras];
+}
+const slant = strokes => strokes.map(s => s.map(([x, y]) => [x + SLANT * (200 - y), y]));
+const printLetter = ch => PRINT[ch].d.map(d => samplePath(d, d.length < 16 ? 2 : 4));
+
 // ---------------------------------------------------------------------------
-// Buttons
+// Letter matcher: her strokes and each letter's strokes are drawn into the same small normalised grid, blurred,
+// and compared (cosine), with small penalties when the height on the lines or the shape's proportions differ.
 // ---------------------------------------------------------------------------
-document.getElementById('prev').onclick = () => load(idx - 1);
-document.getElementById('next').onclick = () => load(idx + 1);
-document.getElementById('clear').onclick = () => load(idx, false);
-document.getElementById('hear').onclick = () => say(item().say);
+const GN = 32;
+const gridCv = document.createElement('canvas'); gridCv.width = gridCv.height = GN; const gx = gridCv.getContext('2d', { willReadFrequently: true });
+function features(strokes) {
+  let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9, len = 0;
+  for (const s of strokes) for (let i = 0; i < s.length; i++) { const [x, y] = s[i]; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); if (i) len += Math.hypot(x - s[i - 1][0], y - s[i - 1][1]); }
+  const w = Math.max(x1 - x0, 1), h = Math.max(y1 - y0, 1), m = Math.max(w, h, 40), sc = 24 / m;
+  gx.clearRect(0, 0, GN, GN); gx.strokeStyle = gx.fillStyle = '#000'; gx.lineWidth = 3.2; gx.lineCap = gx.lineJoin = 'round';
+  for (const s of strokes) {
+    gx.beginPath(); gx.moveTo(16 + (s[0][0] - (x0 + x1) / 2) * sc, 16 + (s[0][1] - (y0 + y1) / 2) * sc);
+    for (const [x, y] of s) gx.lineTo(16 + (x - (x0 + x1) / 2) * sc, 16 + (y - (y0 + y1) / 2) * sc);
+    if (s.length < 3) gx.lineTo(16 + (s[0][0] - (x0 + x1) / 2) * sc + .1, 16 + (s[0][1] - (y0 + y1) / 2) * sc);
+    gx.stroke();
+  }
+  const d = gx.getImageData(0, 0, GN, GN).data; let v = new Float32Array(GN * GN);
+  for (let i = 0; i < GN * GN; i++) v[i] = d[i * 4 + 3] / 255;
+  for (let pass = 0; pass < 2; pass++) {
+    const o = new Float32Array(GN * GN);
+    for (let y = 0; y < GN; y++) for (let x = 0; x < GN; x++) { let s = 0, c = 0; for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) { const xx = x + i, yy = y + j; if (xx >= 0 && yy >= 0 && xx < GN && yy < GN) { s += v[yy * GN + xx]; c++; } } o[y * GN + x] = s / c; }
+    v = o;
+  }
+  let n = 0; for (const a of v) n += a * a; n = Math.sqrt(n) || 1; for (let i = 0; i < v.length; i++) v[i] /= n;
+  return { v, top: y0, bottom: y1, ar: h / w, len };
+}
+let TEMPLATES = null;
+function templates() {
+  if (TEMPLATES) return TEMPLATES;
+  TEMPLATES = [];
+  for (const ch of Object.keys(PRINT)) {
+    TEMPLATES.push({ ch, f: features(printLetter(ch)) });
+    for (const alt of PRINT_ALT[ch] || []) TEMPLATES.push({ ch, f: features(alt.map(d => samplePath(d, d.length < 16 ? 2 : 4))) });
+  }
+  return TEMPLATES;
+}
+function similarity(a, b) {
+  let c = 0; for (let i = 0; i < a.v.length; i++) c += a.v[i] * b.v[i];
+  const clip = (x, m) => Math.min(Math.abs(x), m);
+  return c - 0.0012 * (clip(a.top - b.top, 150) + clip(a.bottom - b.bottom, 150)) - 0.07 * clip(Math.log(a.ar / b.ar), 1.5);
+}
+// Strokes in letter-box units (lines at 0, 100, 200, 300). Returns the ranking and whether `expected` is accepted.
+function recognize(strokes, expected) {
+  const f = features(strokes);
+  if (f.len < 35) return { ok: false, empty: true, ranking: [] };
+  const best = {};
+  for (const t of templates()) { const s = similarity(f, t.f); if (!(t.ch in best) || s > best[t.ch]) best[t.ch] = s; }
+  const ranking = Object.entries(best).sort((a, b) => b[1] - a[1]);
+  const rank = ranking.findIndex(([ch]) => ch === expected);
+  return { ok: rank >= 0 && (rank < 3 || best[expected] >= ranking[0][1] - 0.04), rank, ranking: ranking.slice(0, 5).map(([c, s]) => c + ':' + s.toFixed(3)) };
+}
+
+// ===========================================================================
+// SPELL and CURSIVE levels
+// ===========================================================================
+const W = (s) => s.split(',').map(x => { const [w, e, sen] = x.trim().split('|'); return { word: w, emoji: e || '', sentence: sen || '' }; });
+const SPELL = [
+  { name: 'Short vowels', trace: true, words: W('cat|🐱,dog|🐶,sun|☀️,map|🗺️,pig|🐷,hen|🐔,bus|🚌,cup|☕,bed|🛏️,fox|🦊,bat|🦇,web|🕸️,box|📦,bug|🐛,hat|🎩,pen|🖊️') },
+  { name: 'Blends', trace: true, words: W('frog|🐸,crab|🦀,drum|🥁,flag|🚩,nest|🪺,hand|✋,milk|🥛,swim|🏊,stop|🛑,plant|🌱,sled|🛷,tent|⛺,gift|🎁,clap|👏,snack|🍿,spin|🌀') },
+  { name: 'sh ch th ck', trace: true, words: W('ship|🚢,fish|🐟,shell|🐚,chick|🐥,lunch|🍱,bath|🛁,duck|🦆,sock|🧦,rock|🪨,truck|🚚,chip|🍟,brush|🪥,math|🔢,wish|🌠,black|⬛,whip|🍦') },
+  { name: 'Silent e', trace: true, words: W('cake|🎂,bike|🚲,kite|🪁,rose|🌹,bone|🦴,cube|🧊,cone|🍦,game|🎲,home|🏠,flute|🪈,smile|😊,plane|✈️,snake|🐍,grape|🍇,nose|👃,slide|🛝') },
+  { name: 'Vowel teams', trace: false, words: W('rain|🌧️,boat|⛵,tree|🌳,seed|🌱,snow|❄️,coat|🧥,train|🚆,sheep|🐑,bee|🐝,queen|👸,road|🛣️,mail|📬,leaf|🍃,paint|🎨,goat|🐐,beach|🏖️,moon|🌙,spoon|🥄,book|📖') },
+  { name: 'ar or er ir ur', trace: false, words: W('car|🚗,star|⭐,farm|🚜,shark|🦈,corn|🌽,fork|🍴,horse|🐴,bird|🐦,girl|👧,shirt|👕,turtle|🐢,purple|🟣,church|⛪,storm|⛈️,tiger|🐯,winter|⛄') },
+  { name: 'Endings ing and ed', trace: false, words: W('jumping|🦘|The kangaroo is jumping.,running|🏃|I am running fast.,swimming|🏊|We went swimming.,hopped|🐇|The bunny hopped away.,baked|🧁|We baked muffins.,played|🎮|They played a game.,wanted|🙋|She wanted a turn.,sitting|🪑|He is sitting down.,making|🛠️|We are making a fort.,smiled|😊|The baby smiled.,singing|🎤|She is singing a song.,kicked|⚽|He kicked the ball.,dancing|💃|They are dancing.,cried|😢|The puppy cried.') },
+  { name: 'Tricky words', trace: false, words: W('because|🤔|I smiled because I was happy.,friend|🤝|My friend came to play.,laugh|😂|Jokes make me laugh.,people|👥|Many people came.,said|💬|Mom said yes.,again|🔁|Read it again.,would|🙂|Would you like some?,could|🙂|I could see the moon.,thought|💭|I thought about it.,enough|✋|That is enough.,through|🚪|We walked through the door.,answer|✅|I know the answer.,believe|🌟|I believe in you.,often|📅|We often go to the park.,school|🏫|I like my school.,favorite|❤️|Blue is my favorite color.,beautiful|🌸|What a beautiful day.,different|🔀|Each leaf is different.') },
+];
+const CURSIVE_LEVELS = [
+  { name: 'Cursive i t u w e l', letters: 'ituwelsrjp' },
+  { name: 'Cursive loops and ovals', letters: 'bhkfacdgoq' },
+  { name: 'Cursive n m v x y z', letters: 'nmvxyz' },
+  { name: 'Join two letters', words: 'it,up,us,we,be,so,go,me,no,at,an,in,is,on,to,of,am,he,my,by' },
+  { name: 'Cursive words', words: 'cat,sun,dog,fish,cake,bike,frog,ship,tree,boat,moon,star,home,rain,nest,milk,duck,kite,snow,bird' },
+  { name: 'Light guide', words: 'jumping,friend,school,turtle,purple,tiger,beach,smile,plane,laugh,people,again,winter,horse', light: true },
+];
+const START = { spell: 3, cursive: 0 };
+
+let P = { lv: Object.assign({}, START), st: {}, stars: 0, words: 0, cursive: 0 };
+try { const s = JSON.parse(localStorage.getItem('trace-v2') || 'null'); if (s) P = Object.assign(P, s, { lv: Object.assign({}, START, s.lv || {}), st: s.st || {} }); } catch (e) {}
+P.lv.spell = Math.max(0, Math.min(SPELL.length - 1, P.lv.spell | 0)); P.lv.cursive = Math.max(0, Math.min(CURSIVE_LEVELS.length - 1, P.lv.cursive | 0));
+function persist() { try { localStorage.setItem('trace-v2', JSON.stringify(P)); } catch (e) {} }
+const LEVELS = { spell: SPELL, cursive: CURSIVE_LEVELS };
+// One result per item: right first try, or missed. Returns +1, -1 or 0 for a level change.
+function record(m, right) {
+  const s = P.st[m] || (P.st[m] = { streak: 0, miss: 0 }); let change = 0;
+  if (right) { s.miss = 0; s.streak++; if (s.streak >= 4 && P.lv[m] < LEVELS[m].length - 1) { P.lv[m]++; s.streak = 0; change = 1; } }
+  else { s.streak = 0; s.miss++; if (s.miss >= 2 && P.lv[m] > 0) { P.lv[m]--; s.miss = 0; change = -1; } }
+  persist(); return change;
+}
+const bags = {};
+function draw(m, list) { const k = m + P.lv[m]; if (!bags[k] || !bags[k].length) bags[k] = list.slice().sort(() => Math.random() - .5); return bags[k].pop(); }
+function makeItem(m) {
+  const lv = LEVELS[m][P.lv[m]];
+  if (m === 'spell') { const w = draw(m, lv.words); return Object.assign({ kind: 'spell', trace: lv.trace }, w); }
+  if (lv.letters) return { kind: 'cursive', text: draw(m, lv.letters.split('')), single: true };
+  return { kind: 'cursive', text: draw(m, lv.words.split(',')), single: false, light: !!lv.light };
+}
+
+// ===========================================================================
+// The wide board: layout, drawing, input
+// ===========================================================================
+const wc = $('w'), wg = wc.getContext('2d');
+const winkCv = document.createElement('canvas'), wink = winkCv.getContext('2d', { willReadFrequently: true });
+let mode = 'spell', cur = null, phase = '', layout = null, strokes = [], drawing = null, missed = false, busy = false, demo = null, gradeTimer = null, dpr = 1;
+let WCSS = { w: 0, h: 0 };
+
+function sizeWide() {
+  const r = $('wide').getBoundingClientRect(); dpr = Math.min(2, window.devicePixelRatio || 1);
+  WCSS = { w: Math.max(200, Math.round(r.width - 8)), h: Math.max(200, Math.round(r.height - 8)) };
+  for (const c of [wc, winkCv]) { c.width = Math.round(WCSS.w * dpr); c.height = Math.round(WCSS.h * dpr); }
+}
+// Lays out the current item. Everything is kept in screen pixels (CSS px) after this.
+function buildLayout() {
+  const it = cur, L = { boxes: [], guides: [], lines: null };
+  if (it.kind === 'spell') {
+    const word = it.word, gap = 14; let x = 0; const boxesU = [];
+    for (const ch of word) { const bw = Math.max(PRINT[ch].w, 90) + 40; boxesU.push({ ch, x, w: bw }); x += bw + gap; }
+    const Wu = x - gap, s = Math.min((WCSS.w - 60) / Wu, (WCSS.h - 150) / 330, 1.7);
+    const ox = (WCSS.w - Wu * s) / 2, oy = (WCSS.h - 300 * s) / 2 + 26;
+    L.s = s; L.ox = ox; L.oy = oy; L.brush = Math.max(12, 0.17 * 100 * s);
+    for (const b of boxesU) {
+      const lx = b.x + (b.w - PRINT[b.ch].w) / 2;
+      const glyph = printLetter(b.ch).map(st => st.map(([a, c]) => [ox + (lx + a) * s, oy + c * s]));
+      L.boxes.push({ ch: b.ch, x: ox + b.x * s, w: b.w * s, ux: b.x, lx, glyph, state: 'empty', tries: 0 });
+    }
+    L.lines = { x0: ox - 10, x1: ox + Wu * s + 10 };
+  } else {
+    const raw = it.single ? cursiveWord(it.text) : cursiveWord(it.text);
+    const st = slant(raw);
+    let x0 = 1e9, x1 = -1e9; for (const s1 of st) for (const [x] of s1) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); }
+    const Wu = x1 - x0, s = Math.min((WCSS.w - 80) / Wu, (WCSS.h - 150) / 330, it.single ? 2.3 : 1.6);
+    const ox = (WCSS.w - Wu * s) / 2 - x0 * s, oy = (WCSS.h - 300 * s) / 2 + 26;
+    L.s = s; L.ox = ox; L.oy = oy; L.brush = Math.max(12, 0.16 * 100 * s);
+    L.guides = st.map(s1 => s1.map(([a, c]) => [ox + a * s, oy + c * s]));
+    L.lines = { x0: ox + x0 * s - 30, x1: ox + x1 * s + 30 };
+  }
+  return L;
+}
+function drawLines(x0, x1) {
+  const { s, oy } = layout; const y = u => oy + u * s;
+  wg.save(); wg.lineWidth = 2;
+  wg.strokeStyle = '#d8cfe6'; wg.setLineDash([]); wg.beginPath(); wg.moveTo(x0, y(0)); wg.lineTo(x1, y(0)); wg.stroke();
+  wg.strokeStyle = '#b9aed0'; wg.setLineDash([12, 10]); wg.beginPath(); wg.moveTo(x0, y(100)); wg.lineTo(x1, y(100)); wg.stroke();
+  wg.setLineDash([]); wg.strokeStyle = '#8d7fb0'; wg.lineWidth = 3; wg.beginPath(); wg.moveTo(x0, y(200)); wg.lineTo(x1, y(200)); wg.stroke();
+  wg.strokeStyle = '#e6dff0'; wg.lineWidth = 2; wg.beginPath(); wg.moveTo(x0, y(300)); wg.lineTo(x1, y(300)); wg.stroke();
+  wg.restore();
+}
+function polyline(ctx, pts) { ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]); for (const p of pts) ctx.lineTo(p[0], p[1]); if (pts.length < 3) ctx.lineTo(pts[0][0] + .1, pts[0][1] + .1); ctx.stroke(); }
+// A guide: a faint wide band, a dashed centre line, and numbered green start dots.
+function drawGuide(list, opts = {}) {
+  const b = layout.brush;
+  wg.save(); wg.lineCap = wg.lineJoin = 'round';
+  wg.strokeStyle = opts.color || '#9B6BFF'; wg.globalAlpha = opts.light ? 0.10 : 0.16; wg.lineWidth = b; for (const st of list) polyline(wg, st);
+  wg.globalAlpha = opts.light ? 0.35 : 1; wg.lineWidth = Math.max(3, b * 0.18); if (!opts.solid) wg.setLineDash([b * 0.5, b * 0.45]); for (const st of list) polyline(wg, st);
+  wg.setLineDash([]); wg.globalAlpha = 1;
+  if (!opts.noDots) list.forEach((st, i) => {
+    if (st.length < 3 && i > 0) return;
+    wg.fillStyle = '#5CD38B'; wg.strokeStyle = '#2B2140'; wg.lineWidth = 2; wg.beginPath(); wg.arc(st[0][0], st[0][1], Math.max(7, b * 0.32), 0, Math.PI * 2); wg.fill(); wg.stroke();
+    if (list.length > 1) { wg.fillStyle = '#2B2140'; wg.font = `900 ${Math.round(Math.max(11, b * 0.42))}px Segoe UI, sans-serif`; wg.textAlign = 'center'; wg.textBaseline = 'middle'; wg.fillText(i + 1, st[0][0], st[0][1] + 1); }
+  });
+  wg.restore();
+}
+function renderWide() {
+  wg.setTransform(dpr, 0, 0, dpr, 0, 0); wg.clearRect(0, 0, WCSS.w, WCSS.h);
+  if (!layout) return;
+  const { s, oy } = layout;
+  if (cur.kind === 'spell') {
+    for (const b of layout.boxes) {
+      wg.save(); wg.lineWidth = 3; wg.strokeStyle = b.state === 'ok' ? '#5CD38B' : b.state === 'wrong' ? '#FF4F8B' : '#d9cfe8'; wg.setLineDash(b.state === 'ok' ? [] : [10, 8]);
+      wg.beginPath(); wg.roundRect(b.x, oy - 22 * s, b.w, 344 * s, 14); wg.stroke(); wg.restore();
+      if (b.state === 'ok') { wg.save(); wg.fillStyle = 'rgba(92,211,139,.10)'; wg.beginPath(); wg.roundRect(b.x, oy - 22 * s, b.w, 344 * s, 14); wg.fill(); wg.restore(); }
+    }
+    drawLines(layout.lines.x0, layout.lines.x1);
+    for (const b of layout.boxes) {
+      if (phase === 'trace' || b.state === 'ghost' || phase === 'look') drawGuide(b.glyph, { color: b.state === 'ok' ? '#5CD38B' : '#9B6BFF', solid: phase === 'look', noDots: phase === 'look' });
+      if (phase === 'write' && b.state === 'ok' && b.shown) drawGuide(b.glyph, { color: '#5CD38B', solid: true, noDots: true, light: true });
+    }
+  } else {
+    drawLines(layout.lines.x0, layout.lines.x1);
+    if (phase !== 'demo' || demo) drawGuide(layout.guides, { light: cur.light, noDots: false });
+  }
+  wg.drawImage(winkCv, 0, 0, WCSS.w, WCSS.h);
+  if (demo && demo.pts) {
+    wg.save(); wg.lineCap = wg.lineJoin = 'round'; wg.strokeStyle = '#FF8C42'; wg.lineWidth = layout.brush * 0.55;
+    for (const st of demo.pts) polyline(wg, st);
+    const tip = demo.tip; if (tip) { wg.font = `${Math.round(layout.brush * 2)}px Segoe UI Emoji, sans-serif`; wg.textAlign = 'left'; wg.textBaseline = 'bottom'; wg.fillText('✏️', tip[0] - 4, tip[1] + 6); }
+    wg.restore();
+  }
+}
+function redrawInk() {
+  wink.setTransform(dpr, 0, 0, dpr, 0, 0); wink.clearRect(0, 0, WCSS.w, WCSS.h);
+  wink.lineCap = wink.lineJoin = 'round';
+  for (const st of strokes) { wink.strokeStyle = st.color; wink.lineWidth = layout.brush; polyline(wink, st.pts); }
+}
+const INK = ['#FF4F8B', '#58C7F0', '#FF8C42', '#9B6BFF', '#2BB673'];
+
+function loadWide(speak = true) {
+  clearTimeout(gradeTimer); stopDemo(); busy = false; missed = false; strokes = []; drawing = null;
+  $('win').classList.remove('on'); meter.style.width = '0';
+  cur = makeItem(mode); sizeWide(); layout = buildLayout(); redrawInk();
+  $('badge').textContent = 'Level ' + (P.lv[mode] + 1) + ': ' + LEVELS[mode][P.lv[mode]].name;
+  $('meter').classList.toggle('hide', cur.kind === 'spell');
+  if (cur.kind === 'spell') {
+    wordEl.textContent = cur.emoji + '  ' + (cur.trace ? cur.word : '?');
+    if (cur.trace) { phase = 'trace'; if (speak) say(`Spell ${cur.word}. ${cur.sentence} Trace each letter of ${cur.word}.`); }
+    else { phase = 'look'; wordEl.textContent = cur.emoji + '  ' + cur.word; if (speak) say(`Spell ${cur.word}. ${cur.sentence} Look at it and remember it.`); busy = true; lookTimer = setTimeout(() => { busy = false; startWrite(speak); }, TRACE_HOOK.lookMs); }
+  } else {
+    wordEl.textContent = cur.single ? 'Cursive ' + cur.text : cur.text;
+    phase = 'trace';
+    if (speak) say(cur.single ? `Cursive ${cur.text}. Watch me, then trace it. Start at the green dot.` : `Write ${cur.text} in cursive. Keep your finger down to join the letters.`);
+    if (P.lv.cursive <= 3 || cur.light) startDemo();
+  }
+  renderWide();
+}
+let lookTimer = null;
+function startWrite(speak = true) {
+  phase = 'write'; strokes = []; redrawInk();
+  for (const b of layout.boxes) { b.state = 'empty'; b.tries = 0; b.shown = false; }
+  wordEl.textContent = cur.emoji + '  ?';
+  if (speak) say(`Now write ${cur.word} from memory. One letter in each box.`);
+  renderWide();
+}
+
+// "Watch me": an orange pen draws the guide once.
+function startDemo() {
+  stopDemo();
+  const all = layout.guides; const total = all.reduce((n, s) => n + s.length, 0); let shown = 0;
+  demo = { pts: [], tip: null };
+  const stepPerFrame = Math.max(2, Math.round(total / 90));
+  const tick = () => {
+    if (!demo) return;
+    shown += stepPerFrame; let left = shown; demo.pts = [];
+    for (const st of all) { if (left <= 0) break; const part = st.slice(0, Math.min(st.length, left)); left -= st.length; demo.pts.push(part); demo.tip = part[part.length - 1]; }
+    renderWide();
+    if (shown < total + 25) demo.raf = requestAnimationFrame(tick); else { demo = null; renderWide(); }
+  };
+  demo.raf = requestAnimationFrame(tick);
+}
+function stopDemo() { if (demo && demo.raf) cancelAnimationFrame(demo.raf); demo = null; }
+
+function wpos(e) { const r = wc.getBoundingClientRect(); return [(e.clientX - r.left) * WCSS.w / r.width, (e.clientY - r.top) * WCSS.h / r.height]; }
+let wActive = null;
+wc.addEventListener('pointerdown', e => {
+  if (wActive !== null || busy || !cur) return;
+  if (phase === 'look') return;
+  stopDemo(); clearTimeout(gradeTimer);
+  wActive = e.pointerId; wc.setPointerCapture(e.pointerId);
+  const p = wpos(e); drawing = { pts: [p], color: INK[strokes.length % INK.length], box: -1 };
+  if (cur.kind === 'spell') {
+    drawing.box = boxAt(p[0]);
+    // Starting in another box: grade the box she was writing in.
+    if (phase === 'write') for (const b of layout.boxes) if (b.state === 'inked' && layout.boxes.indexOf(b) !== drawing.box) gradeBox(layout.boxes.indexOf(b));
+    const b = layout.boxes[drawing.box]; if (phase === 'write' && b && b.state === 'ok') { drawing = null; wActive = null; return; }
+  }
+  strokes.push(drawing); redrawInk(); renderWide();
+});
+wc.addEventListener('pointermove', e => {
+  if (e.pointerId !== wActive || !drawing) return;
+  const p = wpos(e), q = drawing.pts[drawing.pts.length - 1];
+  if (Math.hypot(p[0] - q[0], p[1] - q[1]) < 1.5) return;
+  drawing.pts.push(p);
+  wink.strokeStyle = drawing.color; wink.lineWidth = layout.brush; wink.lineCap = wink.lineJoin = 'round';
+  wink.beginPath(); wink.moveTo(q[0], q[1]); wink.lineTo(p[0], p[1]); wink.stroke(); renderWide();
+});
+function wEnd(e) {
+  if (e.pointerId !== wActive) return; wActive = null;
+  const st = drawing; drawing = null; if (!st) return;
+  if (cur.kind === 'spell') {
+    if (phase === 'trace') checkTrace();
+    else if (phase === 'write') { const b = layout.boxes[st.box]; if (b && (b.state === 'empty' || b.state === 'inked' || b.state === 'retry')) { b.state = 'inked'; gradeTimer = setTimeout(() => gradeBox(st.box), TRACE_HOOK.gradeMs); } else if (b && b.state === 'ghost') checkGhost(st.box); }
+  } else checkCursive();
+}
+wc.addEventListener('pointerup', wEnd); wc.addEventListener('pointercancel', wEnd);
+function boxAt(x) { let best = 0, bd = 1e9; layout.boxes.forEach((b, i) => { const d = x < b.x ? b.x - x : x > b.x + b.w ? x - b.x - b.w : 0; if (d < bd) { bd = d; best = i; } }); return best; }
+
+// Coverage of guide strokes by her ink: each guide point counts if ink is on it or very close to it.
+function guideCoverage(guides) {
+  const d = wink.getImageData(0, 0, winkCv.width, winkCv.height).data, W = winkCv.width, H = winkCv.height, b = layout.brush * 0.42 * dpr;
+  const at = (x, y) => { x = Math.round(x); y = Math.round(y); return x >= 0 && y >= 0 && x < W && y < H && d[(y * W + x) * 4 + 3] > 40; };
+  let hit = 0, n = 0;
+  for (const st of guides) for (let i = 0; i < st.length; i += 2) { const x = st[i][0] * dpr, y = st[i][1] * dpr; n++; if (at(x, y) || at(x + b, y) || at(x - b, y) || at(x, y + b) || at(x, y - b)) hit++; }
+  return n ? hit / n : 0;
+}
+// Share of her ink that is far from every guide (a scribble is not a trace).
+function offGuide(guides, list) {
+  const r = layout.brush * 1.5; let far = 0, n = 0; const pts = []; for (const st of guides) for (let i = 0; i < st.length; i += 2) pts.push(st[i]);
+  for (const st of list) for (let i = 0; i < st.pts.length; i += 2) { const [x, y] = st.pts[i]; n++; let near = false; for (const q of pts) if (Math.abs(q[0] - x) < r && Math.abs(q[1] - y) < r && Math.hypot(q[0] - x, q[1] - y) < r) { near = true; break; } if (!near) far++; }
+  return n ? far / n : 0;
+}
+let nudgedW = false;
+function checkTrace() {
+  layout.boxes.forEach((b, i) => {
+    if (b.state === 'ok') return;
+    const mine = strokes.filter(s => s.box === i);
+    if (!mine.length) return;
+    if (guideCoverage(b.glyph) >= 0.8 && offGuide(b.glyph, mine) <= 0.35) { b.state = 'ok'; say(b.ch); }
+  });
+  renderWide();
+  if (layout.boxes.every(b => b.state === 'ok')) { busy = true; setTimeout(() => { busy = false; startWrite(); }, 1100); }
+}
+function checkCursive() {
+  const c = guideCoverage(layout.guides), off = offGuide(layout.guides, strokes);
+  const need = cur.single ? 0.86 : 0.82;
+  meter.style.width = Math.round(Math.min(1, c / need) * 100) + '%';
+  if (c >= need && off <= 0.3) return winWide();
+  if (c >= need && !nudgedW) { nudgedW = true; missed = true; say('Try to stay on the line. Tap the drop to start over.'); }
+}
+function boxStrokesInUnits(i) {
+  const { s, ox, oy } = layout, b = layout.boxes[i];
+  return strokes.filter(st => st.box === i).map(st => st.pts.map(([x, y]) => [(x - ox) / s - b.lx, (y - oy) / s]));
+}
+function gradeBox(i) {
+  clearTimeout(gradeTimer);
+  const b = layout.boxes[i]; if (!b || b.state !== 'inked') return;
+  const res = recognize(boxStrokesInUnits(i), b.ch); b.last = res;
+  if (res.ok) { b.state = 'ok'; renderWide(); say(b.ch); if (layout.boxes.every(x => x.state === 'ok')) winWide(); return; }
+  missed = true; b.tries++;
+  strokes = strokes.filter(st => st.box !== i); redrawInk();
+  if (b.tries >= 2) { b.state = 'ghost'; say(`This one is ${b.ch}. Trace it.`); }
+  else { b.state = 'retry'; b.flash = true; say(`Hmm, try that letter again. ${cur.word}.`); }
+  renderWide();
+}
+function checkGhost(i) {
+  const b = layout.boxes[i]; const mine = strokes.filter(s => s.box === i);
+  if (guideCoverage(b.glyph) >= 0.75 && offGuide(b.glyph, mine) <= 0.4) { b.state = 'ok'; b.shown = true; renderWide(); say(b.ch); if (layout.boxes.every(x => x.state === 'ok')) winWide(); }
+}
+function winWide() {
+  busy = true; clearTimeout(gradeTimer);
+  const right = !missed, ch = record(mode, right);
+  P.stars++; if (mode === 'spell') P.words++; else P.cursive++; persist(); showStars();
+  const spelled = cur.kind === 'spell' ? cur.word.split('').join(', ') + '. ' + cur.word + '!' : '';
+  $('winText').textContent = cur.kind === 'spell' ? cur.word : (cur.single ? 'Cursive ' + cur.text : cur.text);
+  $('winEmoji').textContent = cur.kind === 'spell' ? (cur.emoji || '⭐') : '✍️';
+  $('win').classList.add('on'); sparkle();
+  say(cur.kind === 'spell' ? 'You spelled it! ' + spelled : 'Beautiful cursive!');
+  let wait = 3000;
+  if (ch > 0) { setTimeout(() => { $('winText').textContent = 'Level up!'; $('winEmoji').textContent = LEVELS[mode][P.lv[mode]].name; say('Level up! ' + LEVELS[mode][P.lv[mode]].name + '!'); }, 2600); wait = 5000; }
+  else if (ch < 0) setTimeout(() => say('Let us practise some easier ones.'), 2600);
+  winTimer = setTimeout(() => { if (mode !== 'little') { nudgedW = false; loadWide(); } }, wait);
+}
+let winTimer = null;
+function clearWide() {
+  if (busy || !cur) return;
+  clearTimeout(gradeTimer);
+  if (strokes.length) missed = missed || cur.kind === 'cursive';
+  if (cur.kind === 'spell') {
+    const keep = new Set(layout.boxes.map((b, i) => b.state === 'ok' ? i : -1));
+    strokes = strokes.filter(st => keep.has(st.box));
+    for (const b of layout.boxes) if (b.state === 'inked' || b.state === 'retry') b.state = 'empty';
+  } else { strokes = []; meter.style.width = '0'; nudgedW = false; }
+  redrawInk(); renderWide();
+}
+
+// ===========================================================================
+// Modes and buttons
+// ===========================================================================
+function showStars() { $('stars').textContent = mode === 'little' ? '' : '⭐ ' + P.stars; }
+function setMode(m) {
+  clearTimeout(winTimer); clearTimeout(lookTimer); clearTimeout(gradeTimer); stopDemo();
+  mode = m; busy = false;
+  document.querySelectorAll('.mode').forEach(x => x.classList.toggle('on', x.dataset.mode === m));
+  const little = m === 'little';
+  $('decks').classList.toggle('hide', !little); $('badge').classList.toggle('hide', little);
+  $('stage').classList.toggle('hide', !little); $('wide').classList.toggle('hide', little);
+  $('prev').classList.toggle('hide', !little); $('meter').classList.remove('hide');
+  showStars();
+  if (little) { requestAnimationFrame(() => { fit(); loadLittle(idx); }); }
+  else requestAnimationFrame(() => loadWide());
+  try { localStorage.setItem('trace-mode', m); } catch (e) {}
+}
+document.querySelectorAll('.mode').forEach(b => b.onclick = () => setMode(b.dataset.mode));
+$('prev').onclick = () => { if (mode === 'little') loadLittle(idx - 1); };
+$('next').onclick = () => { if (mode === 'little') loadLittle(idx + 1); else { clearTimeout(winTimer); clearTimeout(lookTimer); loadWide(); } };
+$('clear').onclick = () => { if (mode === 'little') loadLittle(idx, false); else clearWide(); };
+$('hear').onclick = () => {
+  if (mode === 'little') return say(item().say);
+  if (cur.kind === 'spell') say(`${cur.word}. ${cur.sentence} ${cur.word}.`); else say(cur.single ? 'Cursive ' + cur.text : cur.text);
+};
 document.querySelectorAll('.deck[data-deck]').forEach(b => b.onclick = () => {
   document.querySelectorAll('.deck[data-deck]').forEach(x => x.classList.toggle('on', x === b));
-  deck = b.dataset.deck; load(0);
+  deck = b.dataset.deck; loadLittle(0);
 });
-document.getElementById('board-btn').onclick = () => {
-  const got = new Set(loadStickers()), grid = document.getElementById('stickers'); grid.innerHTML = '';
+$('board-btn').onclick = () => {
+  const got = new Set(loadStickers()), grid = $('stickers'); grid.innerHTML = '';
   for (const d of Object.values(DECKS)) for (const it of d) {
     const cell = document.createElement('div'); cell.dataset.l = it.label; cell.textContent = got.has(it.id) ? (it.emoji.length > 4 ? it.emoji.slice(0, 2) : it.emoji) : '';
     if (got.has(it.id)) cell.classList.add('got'); grid.appendChild(cell);
   }
-  document.getElementById('board').classList.add('on');
+  $('boardNote').textContent = `⭐ ${P.stars}: ${P.words} words spelled, ${P.cursive} cursive.`;
+  $('board').classList.add('on');
   say(`You have ${got.size} stickers!`);
 };
-document.getElementById('board-close').onclick = () => document.getElementById('board').classList.remove('on');
+$('board-close').onclick = () => $('board').classList.remove('on');
 
-// Fit the square canvas to whatever space is left.
 function fit() { const m = document.querySelector('main'), s = Math.min(m.clientWidth, m.clientHeight) - 24; cv.style.width = cv.style.height = s + 'px'; }
-addEventListener('resize', fit); fit();
-load(0, false);
-// Browsers only allow speech after a tap; greet her on the first touch anywhere.
-addEventListener('pointerdown', () => say('Trace With Me! ' + item().say), { once: true });
+let rz = null;
+addEventListener('resize', () => { clearTimeout(rz); rz = setTimeout(() => { if (mode === 'little') fit(); else if (cur && !busy) { sizeWide(); layout = buildLayout(); strokes = []; if (phase === 'write') for (const b of layout.boxes) b.state = 'empty'; redrawInk(); renderWide(); } }, 200); });
+const TRACE_HOOK = { lookMs: 3500, gradeMs: 1500 };
+let startMode = 'spell'; try { startMode = localStorage.getItem('trace-mode') || 'spell'; } catch (e) {}
+if (!['little', 'spell', 'cursive'].includes(startMode)) startMode = 'spell';
+setMode(startMode);
+addEventListener('pointerdown', () => { if (mode === 'little') say('Trace With Me! ' + item().say); else $('hear').click(); }, { once: true });
+
+// Test hook.
+window.TRACE = {
+  PRINT, PRINT_ALT, CURSIVE, SPELL, CURSIVE_LEVELS, START, SLANT, opts: TRACE_HOOK,
+  samplePath, cursiveWord, slant, printLetter, recognize, features, record, makeItem,
+  P: () => P, current: () => cur, phase: () => phase, layout: () => layout, mode: () => mode, setMode,
+  load: () => loadWide(false), startWrite: () => startWrite(false),
+  // Guide strokes in page (client) coordinates, for driving the mouse in tests.
+  clientGuides: () => { const r = wc.getBoundingClientRect(), k = r.width / WCSS.w; const map = st => st.map(([x, y]) => [r.left + x * k, r.top + y * k]); return cur.kind === 'spell' ? layout.boxes.map(b => b.glyph.map(map)) : [layout.guides.map(map)]; },
+  boxes: () => layout.boxes.map(b => ({ ch: b.ch, state: b.state, last: b.last && b.last.ranking })),
+  toClient: (i, unitStrokes) => { const r = wc.getBoundingClientRect(), k = r.width / WCSS.w, b = layout.boxes[i]; return unitStrokes.map(st => st.map(([x, y]) => [r.left + (layout.ox + (x + b.lx) * layout.s) * k, r.top + (layout.oy + y * layout.s) * k])); },
+};
 </script>
 </body>
 </html>
