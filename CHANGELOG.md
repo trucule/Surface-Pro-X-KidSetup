@@ -12,6 +12,8 @@
   26 joined lowercase letters, then words); the old decks stay as Little.
 - Story Maker has a reading level (Little, 2nd grade, 3rd grade): read-along word highlighting, tap a word to hear it
   or its meaning, "I read it myself", and 4 to 6 questions after each story. Offline stories have their own plots.
+- Tile icon lookups skip anything that is not an image: a site's "not found" page no longer reaches the image loader,
+  which reported it as "Out of memory" in the update log.
 - Count With Me runs from counting to 5 up to 3rd grade: ten frames, arrays and times tables, equal groups and
   sharing with leftovers, place value blocks with trading, and word problems up to two steps and coins.
 

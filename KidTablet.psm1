@@ -1664,10 +1664,39 @@ function Get-KidTileImage {
     if (Test-Path $f) { $f } else { '' }
 }
 
+function Test-KidImageBytes {
+    # PNG, JPEG, GIF, BMP or ICO by their first bytes. A web server's "not found" page saved under an icon's name is
+    # none of these, and System.Drawing reports such a file as "Out of memory".
+    param([byte[]]$Bytes)
+    if (-not $Bytes -or $Bytes.Length -lt 8) { return $false }
+    $h = ($Bytes[0..3] | ForEach-Object { $_.ToString('X2') }) -join ''
+    return ($h -eq '89504E47' -or $h.StartsWith('FFD8') -or $h.StartsWith('474946') -or $h.StartsWith('424D') -or $h -eq '00000100')
+}
+
+function Get-KidWebBytes {
+    # The body of an https URL, or $null for any non-success status (no error record, so logs stay readable).
+    param([string]$Url)
+    if (-not $script:KidHttp) {
+        Add-Type -AssemblyName System.Net.Http
+        $script:KidHttp = New-Object System.Net.Http.HttpClient
+        $script:KidHttp.Timeout = [TimeSpan]::FromSeconds(15)
+        [void]$script:KidHttp.DefaultRequestHeaders.UserAgent.TryParseAdd('Mozilla/5.0 KidTablet')
+    }
+    try {
+        $r = $script:KidHttp.GetAsync($Url).GetAwaiter().GetResult()
+        if (-not $r.IsSuccessStatusCode) { return $null }
+        return , $r.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
+    } catch { return $null }
+}
+
 function Save-ImageAsPng {
     param([string]$Source, [string]$Out)
     Add-Type -AssemblyName System.Drawing
-    $img = [System.Drawing.Image]::FromFile((Resolve-KidPath $Source))
+    $path = Resolve-KidPath $Source
+    $head = New-Object byte[] 8
+    $fs = [IO.File]::OpenRead($path); try { [void]$fs.Read($head, 0, 8) } finally { $fs.Dispose() }
+    if (-not (Test-KidImageBytes $head)) { return $false }
+    $img = [System.Drawing.Image]::FromFile($path)
     try {
         if ($img.Width -lt 24) { return $false }   # too small to look right on a tile
         $img.Save($Out, [System.Drawing.Imaging.ImageFormat]::Png); $true
@@ -1741,8 +1770,10 @@ function Save-WebAppImage {
         $cands += [pscustomobject]@{ Url = ([uri]::new([uri]$base, '/favicon.ico')).AbsoluteUri; Size = 1 }
         foreach ($c in $cands | Sort-Object Size -Descending) {
             $tmp = "$Out.download"
+            $bytes = Get-KidWebBytes $c.Url
+            if (-not (Test-KidImageBytes $bytes)) { continue }
             try {
-                Invoke-WebRequest -Uri $c.Url -UseBasicParsing -TimeoutSec 15 -OutFile $tmp
+                [IO.File]::WriteAllBytes($tmp, $bytes)
                 if (Save-ImageAsPng $tmp $Out) { return $true }
             } catch { } finally { Remove-Item $tmp -Force -ErrorAction SilentlyContinue }
         }
