@@ -1,5 +1,13 @@
 # Changes
 
+## 2026-10-23
+- Travel mode (`Set-KidTravelMode`, ET Ducky script `Set-KidTabletTravelMode.ps1`): lifts her website allowlist for
+  a few hours for an airplane's entertainment portal, then restores it by itself (at the end time, or at her next
+  sign-in). The sites her apps opened meanwhile are listed in `jobs\travel-hosts.txt` and shown by
+  `Get-KidTabletStatus.ps1`, so the ones a portal needs can be allowed for good.
+- `Add-KidTabletWebApp.ps1` adds a website tile from ET Ducky (set up for Southwest's inflight portal,
+  southwestwifi.com) and syncs in the background (`Start-KidBackgroundSync`, log in `jobs\sync.log`).
+
 ## 2026-10-22
 - New app: **Camera Fun**. 25 filters (looks, funhouse mirror, time effects, magic backgrounds), 20 face stickers
   that follow up to two faces offline, tap-on stamps, timer, photo strips, "say cheese", and a picture gallery kept

@@ -1951,6 +1951,9 @@ function Complete-KidSignIn {
     [CmdletBinding()]
     param()
     Assert-Elevated
+    # Travel mode that ran out while the tablet was asleep ends here (allowlist back on, sites noted).
+    $pre = Read-Config
+    if ([string]$pre.TravelUntil -and -not (Test-KidTravelMode $pre)) { Set-KidTravelMode -Off }
     Sync-KidUserSettings
     $cfg = Read-Config
     $cfg.ActiveTargets = @(@($cfg.DesktopApps | ForEach-Object { $_.Path } | Where-Object { $_ }) +
@@ -2021,7 +2024,8 @@ function Sync-KidUserSettings {
             Set-RegValue $edgePol 'VideoCaptureAllowed' 0
             Remove-Item "$edgePol\AudioCaptureAllowedUrls", "$edgePol\VideoCaptureAllowedUrls" -Recurse -Force -ErrorAction SilentlyContinue
         }
-        if ($c.AllowAllWebsites) {
+        # Travel mode (Set-KidTravelMode) lifts the site blocklist for a few hours; it lapses on its own.
+        if ($c.AllowAllWebsites -or (Test-KidTravelMode $c)) {
             Remove-Item "$edgePol\URLBlocklist", "$edgePol\URLAllowlist" -Recurse -Force -ErrorAction SilentlyContinue
         } else {
             Set-RegList "$edgePol\URLBlocklist" @('*')
@@ -2168,6 +2172,98 @@ function Add-KidWebApp {
     $cfg.AllowedDomains = @(@($cfg.AllowedDomains) + ($AllowDomain | ForEach-Object { if ($_ -like 'file:*') { $_ } else { $_.ToLowerInvariant() } }) | Select-Object -Unique)
     Write-Config $cfg
     if (-not $NoSync) { Sync-KidTablet -RestartSession:$RestartSession }
+}
+
+function Start-KidBackgroundSync {
+    <#
+    .SYNOPSIS
+        Runs Sync-KidTablet as a one-time SYSTEM task and returns at once, so a remote tool's time limit cannot
+        stop a sync partway. Progress goes to C:\ProgramData\KidTablet\jobs\sync.log.
+    #>
+    [CmdletBinding()]
+    param([switch]$RestartSession)
+    Assert-Elevated
+    $jobDir = Join-Path $script:DataDir 'jobs'
+    New-Item -ItemType Directory -Path $jobDir -Force | Out-Null
+    $log = Join-Path $jobDir 'sync.log'
+    $restart = if ($RestartSession) { ' -RestartSession' } else { '' }
+    $cmd = "Start-Transcript -Path '$log' -Force | Out-Null; try { Import-Module KidTablet -Force; Sync-KidTablet$restart; Write-Host 'Sync finished' } catch { Write-Host ('Sync FAILED: ' + `$_.Exception.Message) } finally { Stop-Transcript | Out-Null }"
+    $action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ("-NoProfile -ExecutionPolicy Bypass -Command `"$cmd`"")
+    $runAs    = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 1)
+    Register-ScheduledTask -TaskName 'KidTablet-Sync' -Action $action -Principal $runAs -Settings $settings -Force | Out-Null
+    Start-ScheduledTask -TaskName 'KidTablet-Sync'
+    Write-Host "Sync started in the background. Progress: $log"
+}
+
+function Set-KidTravelMode {
+    <#
+    .SYNOPSIS
+        Lifts her website allowlist for a few hours (for an airplane's entertainment portal, whose web addresses
+        are not known ahead of time), then puts it back on its own.
+    .DESCRIPTION
+        Only the site blocklist is lifted; every other limit stays. When it ends (a one-time task at the end time,
+        and again at her next sign-in if the tablet was asleep), the allowlist returns and the sites her apps
+        opened in the meantime are written to C:\ProgramData\KidTablet\jobs\travel-hosts.txt, so the ones the
+        portal needs can be added for good with Add-KidAllowedDomain.
+    .EXAMPLE
+        Set-KidTravelMode -Hours 6
+    .EXAMPLE
+        Set-KidTravelMode -Off
+    #>
+    [CmdletBinding()]
+    param([ValidateRange(1, 24)][int]$Hours = 6, [switch]$Off)
+    Assert-Elevated
+    $cfg = Read-Config
+    Initialize-Prop $cfg 'TravelUntil' ''
+    $task = 'KidTablet-TravelEnd'
+    if ($Off) {
+        $was = [string]$cfg.TravelUntil
+        $cfg.TravelUntil = ''
+        Write-Config $cfg
+        Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
+        Sync-KidUserSettings
+        if ($was) { Save-KidTravelHosts }
+        Write-Host 'Travel mode is off. Her website allowlist is back on.'
+        return
+    }
+    $until = (Get-Date).AddHours($Hours)
+    $cfg.TravelUntil = $until.ToString('o')
+    Write-Config $cfg
+    $action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -Command "Import-Module KidTablet -Force; Set-KidTravelMode -Off"'
+    $trigger  = New-ScheduledTaskTrigger -Once -At $until
+    $runAs    = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+    Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Principal $runAs -Settings $settings -Force | Out-Null
+    Sync-KidUserSettings
+    Write-Host ("Travel mode is on until {0:ddd h:mm tt}. Her website allowlist comes back on by itself then." -f $until)
+}
+
+function Test-KidTravelMode {
+    param($Config)
+    $u = [string]$Config.TravelUntil
+    $t = [datetime]::MinValue
+    return ($u -and [datetime]::TryParse($u, [ref]$t) -and $t -gt (Get-Date))
+}
+
+function Save-KidTravelHosts {
+    # Web hosts in her Edge history that her allowlist does not cover, for adding the ones a portal needs.
+    $cfg = Read-Config
+    $out = Join-Path $script:DataDir 'jobs\travel-hosts.txt'
+    New-Item -ItemType Directory -Path (Split-Path $out) -Force | Out-Null
+    $hosts = @()
+    foreach ($h in Get-ChildItem "C:\Users\$($cfg.UserName)\AppData\Local\Microsoft\Edge\User Data\*\History" -ErrorAction SilentlyContinue) {
+        $copy = Join-Path $env:TEMP ('kid-history-' + [guid]::NewGuid().ToString('N'))
+        try {
+            Copy-Item $h.FullName $copy -Force
+            $text = [Text.Encoding]::GetEncoding(28591).GetString([IO.File]::ReadAllBytes($copy))   # byte for byte
+            $hosts += [regex]::Matches($text, 'https?://([a-z0-9][a-z0-9.-]*\.[a-z]{2,})', 'IgnoreCase') | ForEach-Object { $_.Groups[1].Value.ToLowerInvariant() }
+        } catch { } finally { Remove-Item $copy -Force -ErrorAction SilentlyContinue }
+    }
+    $allowed = @($cfg.AllowedDomains | Where-Object { $_ -notlike 'file:*' })
+    $new = @($hosts | Select-Object -Unique | Where-Object { $h = $_; -not ($allowed | Where-Object { $h -eq $_ -or $h.EndsWith('.' + $_) }) } | Sort-Object)
+    $lines = @("Sites her apps opened that the allowlist does not cover (checked {0:yyyy-MM-dd HH:mm}):" -f (Get-Date)) + $(if ($new) { $new } else { '(none)' })
+    Set-Content -Path $out -Value $lines -Encoding UTF8
 }
 
 function Read-KidEnvFile {
@@ -3232,4 +3328,4 @@ Export-ModuleMember -Function `
     Invoke-KidAutoAdd, Hide-KidAvailableApp, Repair-KidStoreApp,
     Add-KidStoreApp, Find-KidStoreApp, Find-KidWallpaper, Add-KidLocalApp, Start-KidStoreInstall, Invoke-KidStoreQueue, Complete-KidStoreInstall,
     Get-KidTabletConfig, Get-KidApp, Add-KidWebApp, Add-KidDesktopApp, Find-KidPackagedApp,
-    Add-KidPackagedApp, Get-KidAvailableApp, Add-KidAvailableApp, Set-KidApp, Set-KidTabletSetting, Remove-KidApp, Add-KidAllowedDomain, Remove-KidAllowedDomain, Update-KidAppConfig
+    Add-KidPackagedApp, Get-KidAvailableApp, Add-KidAvailableApp, Set-KidApp, Set-KidTabletSetting, Remove-KidApp, Add-KidAllowedDomain, Remove-KidAllowedDomain, Update-KidAppConfig, Start-KidBackgroundSync, Set-KidTravelMode, Save-KidTravelHosts

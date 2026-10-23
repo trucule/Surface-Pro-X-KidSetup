@@ -67,6 +67,15 @@ if ($task) { $info = $task | Get-ScheduledTaskInfo; Write-Output ('Task {0}; las
 $jobLog = Join-Path $dataDir 'jobs\update-apps.log'
 if (Test-Path $jobLog) { Get-Content $jobLog -Tail $LogLines | Where-Object { $_ -notmatch '^\*{10}' } | ForEach-Object { Write-Output $_ } }
 
+Section 'Travel mode'
+$cfgNow = Get-Content (Join-Path $dataDir 'config.json') -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json -ErrorAction SilentlyContinue
+$tu = if ($cfgNow) { [string]$cfgNow.TravelUntil } else { '' }
+if ($tu -and ([datetime]$tu) -gt (Get-Date)) { Write-Output ('On until {0:ddd h:mm tt}. Her website allowlist is lifted until then.' -f [datetime]$tu) } else { Write-Output 'Off.' }
+$th = Join-Path $dataDir 'jobs\travel-hosts.txt'
+if (Test-Path $th) { Get-Content $th | ForEach-Object { Write-Output $_ } }
+$sl = Join-Path $dataDir 'jobs\sync.log'
+if (Test-Path $sl) { Section 'Background sync'; Get-Content $sl -Tail 6 | Where-Object { $_ -notmatch '^\*{10}' } | ForEach-Object { Write-Output $_ } }
+
 # The launcher writes launch.log (errors) and home.log (the app in front and the Home pill) into her own profile;
 # the kiosk log is machine-wide.
 $logs = @(Get-ChildItem 'C:\Users\*\AppData\Local\KidTablet\launch.log', 'C:\Users\*\AppData\Local\KidTablet\home.log' -ErrorAction SilentlyContinue) + @(Get-Item (Join-Path $dataDir 'kiosk-apply.log') -ErrorAction SilentlyContinue)

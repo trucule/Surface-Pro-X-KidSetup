@@ -33,6 +33,8 @@ Copy-Item (Join-Path $root 'Deploy-KidTablet.ps1')          (Join-Path $Destinat
 Copy-Item (Join-Path $root 'etducky\Sync-KidTablet.ps1')      (Join-Path $Destination 'Sync-KidTablet.ps1') -Force
 Copy-Item (Join-Path $root 'etducky\Get-KidTabletStatus.ps1') (Join-Path $Destination 'Get-KidTabletStatus.ps1') -Force
 Copy-Item (Join-Path $root 'etducky\Update-KidTabletApps.ps1') (Join-Path $Destination 'Update-KidTabletApps.ps1') -Force
+Copy-Item (Join-Path $root 'etducky\Add-KidTabletWebApp.ps1') (Join-Path $Destination 'Add-KidTabletWebApp.ps1') -Force
+Copy-Item (Join-Path $root 'etducky\Set-KidTabletTravelMode.ps1') (Join-Path $Destination 'Set-KidTabletTravelMode.ps1') -Force
 # Set-KidTabletVoices holds this household's voice server address in its Settings block, so an existing copy in the
 # scripts repo is left alone; the package copy has a placeholder address.
 $voicesScript = Join-Path $Destination 'Set-KidTabletVoices.ps1'
@@ -48,4 +50,4 @@ if ($smIndex -match '~LT~|~CS~' -or $smVoices -match '~LT~|~CS~') { throw 'A Sto
 # ~LT~ and every '://' as ~CS~; the script turns them back before writing the files.
 $esc = { param($t) $t.Replace('<', '~LT~').Replace('://', '~CS~') }
 [IO.File]::WriteAllText((Join-Path $Destination 'Update-KidTabletStoryMaker.ps1'), $smTemplate.Replace('__INDEX__', (& $esc $smIndex)).Replace('__VOICES__', (& $esc $smVoices)), $utf8)
-Write-Host "Wrote Deploy, Update, Sync, Get-KidTabletStatus, Update-KidTabletApps, Update-KidTabletStoryMaker and Set-KidTabletVoices scripts to $Destination"
+Write-Host "Wrote Deploy, Update, Sync, Get-KidTabletStatus, Update-KidTabletApps, Add-KidTabletWebApp, Set-KidTabletTravelMode, Update-KidTabletStoryMaker and Set-KidTabletVoices scripts to $Destination"
