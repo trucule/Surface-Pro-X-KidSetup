@@ -14,6 +14,9 @@
   or its meaning, "I read it myself", and 4 to 6 questions after each story. Offline stories have their own plots.
 - `Install-KidApps.ps1` syncs the tablet once at the end instead of after every tile image. Each sync takes minutes on
   the Surface, so eleven of them ran past the background update's one-hour limit.
+- Tile icon lookups are capped at 15 seconds and 4 MB per download, skip local apps, and remember a missing icon for
+  a week. A site page read with Invoke-WebRequest (whose timeout does not cover the body) held the sync for hours,
+  so the home screen's tile list was never written and new apps did not appear.
 - Tile icon lookups skip anything that is not an image: a site's "not found" page no longer reaches the image loader,
   which reported it as "Out of memory" in the update log.
 - Count With Me runs from counting to 5 up to 3rd grade: ten frames, arrays and times tables, equal groups and

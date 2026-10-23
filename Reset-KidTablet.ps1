@@ -1737,13 +1737,18 @@ function Get-KidWebBytes {
     param([string]$Url)
     if (-not $script:KidHttp) {
         Add-Type -AssemblyName System.Net.Http
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
         $script:KidHttp = New-Object System.Net.Http.HttpClient
-        $script:KidHttp.Timeout = [TimeSpan]::FromSeconds(15)
+        $script:KidHttp.Timeout = [TimeSpan]::FromSeconds(15)              # the whole request, body included
+        $script:KidHttp.MaxResponseContentBufferSize = 4MB                 # a page or icon is never this big
         [void]$script:KidHttp.DefaultRequestHeaders.UserAgent.TryParseAdd('Mozilla/5.0 KidTablet')
     }
+    $script:KidLastUri = $null
+    if ($Url -notmatch '^https?://') { return $null }
     try {
         $r = $script:KidHttp.GetAsync($Url).GetAwaiter().GetResult()
         if (-not $r.IsSuccessStatusCode) { return $null }
+        $script:KidLastUri = $r.RequestMessage.RequestUri                  # after redirects
         return , $r.Content.ReadAsByteArrayAsync().GetAwaiter().GetResult()
     } catch { return $null }
 }
@@ -1809,13 +1814,16 @@ public static extern bool DestroyIcon(IntPtr hIcon);
 
 function Save-WebAppImage {
     # Downloads the site's largest declared icon, then touch icon, then favicon. SVG is skipped.
+    # Every download is capped at 15 seconds and 4 MB (Get-KidWebBytes): Invoke-WebRequest's timeout does not
+    # cover reading the page, and a slow site used to hold the whole sync for hours.
     param([string]$Url, [string]$Out)
     try {
-        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-        $page = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 15
-        $base = if ($page.BaseResponse.ResponseUri) { $page.BaseResponse.ResponseUri } else { [uri]$Url }
+        $pageBytes = Get-KidWebBytes $Url
+        if (-not $pageBytes) { return $false }
+        $base = if ($script:KidLastUri) { $script:KidLastUri } else { [uri]$Url }
+        $content = [Text.Encoding]::UTF8.GetString($pageBytes)
         $cands = @()
-        foreach ($m in [regex]::Matches($page.Content, '<link\b[^>]*>', 'IgnoreCase')) {
+        foreach ($m in [regex]::Matches($content, '<link\b[^>]*>', 'IgnoreCase')) {
             $tag = $m.Value
             if ($tag -notmatch 'rel\s*=\s*["'']?([^"''>]*icon[^"''>]*)') { continue }
             $relAttr = $Matches[1]
@@ -1827,7 +1835,7 @@ function Save-WebAppImage {
         }
         $cands += [pscustomobject]@{ Url = ([uri]::new([uri]$base, '/apple-touch-icon.png')).AbsoluteUri; Size = 179 }
         $cands += [pscustomobject]@{ Url = ([uri]::new([uri]$base, '/favicon.ico')).AbsoluteUri; Size = 1 }
-        foreach ($c in $cands | Sort-Object Size -Descending) {
+        foreach ($c in $cands | Sort-Object Size -Descending | Select-Object -First 6) {
             $tmp = "$Out.download"
             $bytes = Get-KidWebBytes $c.Url
             if (-not (Test-KidImageBytes $bytes)) { continue }
@@ -1846,11 +1854,20 @@ function Update-KidTileImages {
     New-Item -ItemType Directory -Path $script:IconDir -Force | Out-Null
     $packages = @(Get-AppxPackage -AllUsers)
     $keep = @()
+    # Apps whose icon could not be found are tried again after a week (or with -Refresh), not on every sync.
+    $failFile = Join-Path $script:IconDir 'not-found.txt'
+    $failed = @{}
+    if ((Test-Path $failFile) -and -not $Refresh) {
+        foreach ($l in Get-Content $failFile) { $n, $d = $l -split "`t"; $t = [datetime]::MinValue
+            if ([datetime]::TryParse($d, [ref]$t) -and $t -gt (Get-Date).AddDays(-7)) { $failed[$n] = $d } }
+    }
     foreach ($list in 'WebApps', 'DesktopApps', 'PackagedApps') {
         foreach ($app in $Config.$list) {
             $out = Get-KidIconFile $app.Name
             $keep += $out
             if ((Test-Path $out) -and -not $Refresh) { continue }
+            if ($failed.ContainsKey($app.Name)) { continue }
+            if ($list -eq 'WebApps' -and $app.Url -notmatch '^https://') { continue }   # local apps bring their own tile
             $ok = try {
                 switch ($list) {
                     'WebApps'      { Save-WebAppImage $app.Url $out }
@@ -1858,9 +1875,10 @@ function Update-KidTileImages {
                     'PackagedApps' { Save-PackagedAppImage $app $packages $out }
                 }
             } catch { $false }
-            if (-not $ok) { Remove-Item $out -Force -ErrorAction SilentlyContinue }
+            if (-not $ok) { Remove-Item $out -Force -ErrorAction SilentlyContinue; $failed[$app.Name] = (Get-Date).ToString('s') }
         }
     }
+    Set-Content -Path $failFile -Value @($failed.GetEnumerator() | ForEach-Object { "$($_.Key)`t$($_.Value)" }) -Encoding UTF8
     Get-ChildItem $script:IconDir -Filter '*.png' | Where-Object { $keep -notcontains $_.FullName } | Remove-Item -Force
 }
 
