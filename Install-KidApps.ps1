@@ -58,7 +58,7 @@ foreach ($app in $apps) {
     $src = Join-Path $here $app.Path
     if (-not (Test-Path $src)) { throw "App source missing: $src" }
     Add-KidLocalApp -Name $app.Name -Path $src -NoSync
-    if ($app.Tile) { Set-KidApp -Name $app.Name -Image (Join-Path $here $app.Tile) -Color $app.Color }
+    if ($app.Tile) { Set-KidApp -Name $app.Name -Image (Join-Path $here $app.Tile) -Color $app.Color -NoSync }   # one sync at the end
     Write-Host ("  installed {0}" -f $app.Name)
 }
 

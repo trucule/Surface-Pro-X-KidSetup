@@ -12,6 +12,8 @@
   26 joined lowercase letters, then words); the old decks stay as Little.
 - Story Maker has a reading level (Little, 2nd grade, 3rd grade): read-along word highlighting, tap a word to hear it
   or its meaning, "I read it myself", and 4 to 6 questions after each story. Offline stories have their own plots.
+- `Install-KidApps.ps1` syncs the tablet once at the end instead of after every tile image. Each sync takes minutes on
+  the Surface, so eleven of them ran past the background update's one-hour limit.
 - Tile icon lookups skip anything that is not an image: a site's "not found" page no longer reaches the image loader,
   which reported it as "Out of memory" in the update log.
 - Count With Me runs from counting to 5 up to 3rd grade: ten frames, arrays and times tables, equal groups and
