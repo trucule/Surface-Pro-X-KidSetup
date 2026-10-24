@@ -1,0 +1,569 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Planet Explorer</title>
+<!--
+  Planet Explorer. Fly around a 3D solar system, land on worlds and jump to feel their gravity, and answer quests.
+  One file, offline, no network.
+  Facts come from the NASA Planetary Fact Sheet: diameter, surface gravity, length of a day (sunrise to sunrise),
+  spin, axial tilt, length of a year and distance from the Sun. Relative values are kept true:
+    Jump height is the same push on every world, so it is 1 foot on Earth times 9.8 divided by the world's gravity
+    (about 6 feet on the Moon, 2 and a half on Mars, less than half a foot on Jupiter). The jump plays in slow motion,
+    twice as slow everywhere, so the hang times keep their true ratio.
+    Orbits and spins run at their true relative speeds. Planets are tilted by their real axial tilt.
+    The space view spreads the planets out and enlarges the small ones so they can be tapped. The Look closer view
+    shows two worlds at their true relative size.
+  Quests: find a planet, planet order, bigger or smaller, jump tests, day length, how high, seasons, year length,
+  weight on other worlds and mystery planets.
+  Four right first try in a row moves up a level; two missed quests in a row moves down.
+  Progress is kept in localStorage (key planet-explorer-v1). New players start at a 2nd grade level.
+  Test hook: window.PLANET_EXPLORER.
+  three.js r149 is inlined below under its MIT License (Copyright 2010-2023 three.js authors).
+-->
+<style>
+  :root { --ink: #2B2140; --paper: #FFF9F0; --pink: #FF4F8B; --sun: #FFC93C; --sky: #58C7F0; --leaf: #5CD38B; --grape: #9B6BFF; }
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); background: #0A0630; }
+  body { touch-action: none; user-select: none; -webkit-user-select: none; }
+  button { font-family: inherit; color: var(--ink); }
+  #app { position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr); }
+  /* The right 210px of the header stays clear: the Home pill sits there. */
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 210px 10px 14px; background: linear-gradient(90deg, #9B6BFF, #FF4F8B); border-bottom: 4px solid var(--ink); z-index: 3; }
+  header h1 { font-size: 26px; margin: 0; font-weight: 900; white-space: nowrap; color: #fff; text-shadow: 0 3px 0 var(--ink); }
+  #badge { font-size: 17px; font-weight: 800; background: #fff; border: 3px solid var(--ink); border-radius: 999px; padding: 5px 12px; margin-right: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  header > :not(#badge) { flex: none; }
+  #stars { font-size: 22px; font-weight: 900; white-space: nowrap; color: #fff; text-shadow: 0 2px 0 var(--ink); }
+  .pill { border: 3px solid var(--ink); background: #fff; border-radius: 999px; padding: 8px 14px; font-size: 19px; font-weight: 800; cursor: pointer; }
+  main { position: relative; min-height: 0; overflow: hidden; }
+  canvas#gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #askRow { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); display: flex; gap: 10px; align-items: center; z-index: 2; max-width: 94%; }
+  #ask { font-size: 25px; font-weight: 900; background: #fff; border: 4px solid var(--ink); border-radius: 26px; padding: 8px 20px; text-align: center; box-shadow: 0 6px 0 var(--sun); }
+  #hear { flex: none; width: 64px; height: 64px; border-radius: 50%; border: 4px solid var(--ink); background: var(--sun); font-size: 30px; cursor: pointer; }
+  #bottom { position: absolute; left: 0; right: 0; bottom: 16px; display: flex; justify-content: center; align-items: flex-end; gap: 14px; z-index: 2; flex-wrap: wrap; padding: 0 12px; }
+  .ans { border: 5px solid var(--ink); border-radius: 26px; padding: 14px 24px; font-size: 27px; font-weight: 900; cursor: pointer; box-shadow: 0 7px 0 var(--ink); background: #fff; display: flex; align-items: center; gap: 10px; }
+  .ans i { width: 30px; height: 30px; border-radius: 50%; border: 3px solid var(--ink); display: inline-block; }
+  .ans:active { transform: translateY(4px); box-shadow: 0 3px 0 var(--ink); }
+  .ans.no { background: #ddd; color: #888; }
+  .ans.yes { background: var(--leaf); }
+  .tool { border: 4px solid var(--ink); border-radius: 22px; padding: 10px 18px; font-size: 22px; font-weight: 900; cursor: pointer; background: var(--sky); box-shadow: 0 5px 0 var(--ink); }
+  .tool.big { background: var(--sun); font-size: 30px; padding: 14px 30px; }
+  #info { position: absolute; right: 14px; top: 92px; z-index: 2; background: #fffffff2; border: 4px solid var(--ink); border-radius: 24px; padding: 10px 16px; font-size: 19px; font-weight: 700; display: none; min-width: 250px; }
+  #info.on { display: block; }
+  #info h2 { margin: 0 0 6px; font-size: 28px; }
+  #info div { margin: 3px 0; }
+  #jumps { position: absolute; left: 14px; top: 92px; z-index: 2; display: flex; flex-direction: column; gap: 6px; }
+  #jumps div { background: #fff; border: 3px solid var(--ink); border-radius: 14px; padding: 3px 10px; font-size: 18px; font-weight: 800; }
+  #peak { position: absolute; z-index: 3; font-size: 34px; font-weight: 900; background: var(--sun); border: 4px solid var(--ink); border-radius: 20px; padding: 4px 14px; display: none; transform: translate(-50%, -100%); }
+  #hint { position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); color: #fff; font-size: 20px; font-weight: 800; text-shadow: 0 2px 4px #000; z-index: 2; white-space: nowrap; }
+  #card { position: absolute; inset: 0; display: none; place-items: center; z-index: 5; pointer-events: none; }
+  #card.on { display: grid; }
+  /* A win card sits low, so the solved board, tank or planet stays in view behind it. */
+  #card.on.win { place-items: end center; padding-bottom: 12px; box-sizing: border-box; }
+  #card.win .c { display: flex; align-items: center; gap: 18px; padding: 10px 22px; font-size: 28px; max-width: 92%; box-shadow: 0 8px 0 var(--pink); text-align: left; }
+  #card.win .c small { font-size: 18px; margin: 0; max-width: 560px; }
+  #card.win .c button { margin: 0; flex: none; }
+  #card .c { background: #fff; border: 5px solid var(--ink); border-radius: 30px; padding: 22px 34px; font-size: 34px; font-weight: 900; text-align: center; box-shadow: 0 12px 0 var(--grape); animation: pop .4s cubic-bezier(.2,1.6,.4,1); max-width: 76%; pointer-events: auto; }
+  #card .c small { display: block; font-size: 22px; font-weight: 700; margin-top: 8px; line-height: 1.35; }
+  #card .c button { margin-top: 14px; font-size: 26px; padding: 10px 26px; background: var(--leaf); }
+  #card.bad .c { box-shadow: 0 12px 0 var(--pink); }
+  @keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  .conf { position: absolute; width: 14px; height: 20px; z-index: 6; pointer-events: none; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>🪐 Planet Explorer</h1>
+    <span id="badge"></span>
+    <span id="stars">⭐ 0</span>
+    <button class="pill" id="skip" title="New quest">🔀 New</button>
+  </header>
+  <main id="main">
+    <canvas id="gl"></canvas>
+    <div id="askRow"><div id="ask"></div><button id="hear" title="Hear it again">🔈</button></div>
+    <div id="info"></div>
+    <div id="jumps"></div>
+    <div id="peak"></div>
+    <div id="hint"></div>
+    <div id="bottom"></div>
+    <div id="card"></div>
+  </main>
+</div>
+<script>/*@@THREE@@*/</script>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+// ---------------------------------------------------------------------------
+// Facts (NASA Planetary Fact Sheet). d: diameter km, g: surface gravity m/s2, day: sunrise to sunrise in hours,
+// spin: one turn in hours (minus means it spins backwards), tilt: axial tilt in degrees, year: Earth days,
+// dist: million km from the Sun, temp: mean temperature in C.
+// ---------------------------------------------------------------------------
+const DATA = {
+  Mercury: { d: 4879, g: 3.7, day: 4222.6, spin: 1407.6, tilt: 0.034, year: 88.0, dist: 57.9, temp: 167, col: '#B9B2C9', solid: true },
+  Venus: { d: 12104, g: 8.9, day: 2802.0, spin: -5832.5, tilt: 177.4, year: 224.7, dist: 108.2, temp: 464, col: '#FFC46B', solid: true },
+  Earth: { d: 12756, g: 9.8, day: 24.0, spin: 23.9, tilt: 23.4, year: 365.2, dist: 149.6, temp: 15, col: '#3D8BFF', solid: true },
+  Moon: { d: 3475, g: 1.6, day: 708.7, spin: 655.7, tilt: 1.5, year: null, dist: null, temp: -20, col: '#D8D4E6', solid: true, moon: true },
+  Mars: { d: 6792, g: 3.7, day: 24.7, spin: 24.6, tilt: 25.2, year: 687.0, dist: 228.0, temp: -65, col: '#FF6A3D', solid: true },
+  Jupiter: { d: 142984, g: 23.1, day: 9.9, spin: 9.9, tilt: 3.1, year: 4331, dist: 778.5, temp: -110, col: '#F0A15A' },
+  Saturn: { d: 120536, g: 9.0, day: 10.7, spin: 10.7, tilt: 26.7, year: 10747, dist: 1432.0, temp: -140, col: '#F7D27A' },
+  Uranus: { d: 51118, g: 8.7, day: 17.2, spin: -17.2, tilt: 97.8, year: 30589, dist: 2867.0, temp: -195, col: '#7FF0F0' },
+  Neptune: { d: 49528, g: 11.0, day: 16.1, spin: 16.1, tilt: 28.3, year: 59800, dist: 4515.0, temp: -200, col: '#4C6BFF' },
+};
+const PLANETS = ['Mercury', 'Venus', 'Earth', 'Mars', 'Jupiter', 'Saturn', 'Uranus', 'Neptune'];
+const WORLDS = [...PLANETS.slice(0, 3), 'Moon', ...PLANETS.slice(3)];
+const G_EARTH = 9.8;
+const jumpFt = w => G_EARTH / DATA[w].g;            // a 1 foot Earth jump
+const weightOn = (w, lb) => lb * DATA[w].g / G_EARTH;
+const seasonTilt = w => Math.min(DATA[w].tilt, 180 - DATA[w].tilt); // how tipped it is, ignoring which way it spins
+const ORD = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth'];
+function dayText(w) { const h = DATA[w].day; return h < 48 ? 'about ' + Math.round(h) + ' hours' : 'about ' + Math.round(h / 24) + ' Earth days'; }
+function yearText(w) { const y = DATA[w].year; if (!y) return 'it goes around Earth'; return y < 1000 ? 'about ' + Math.round(y) + ' Earth days' : 'about ' + Math.round(y / 365.25) + ' Earth years'; }
+function ftText(x) { return x >= 4 ? Math.round(x) + ' feet' : (Math.round(x * 10) / 10) + (Math.abs(x - 1) < 0.05 ? ' foot' : ' feet'); }
+const isWorld = w => w === 'Moon' ? 'the Moon' : w;
+const Cap = s => s[0].toUpperCase() + s.slice(1);
+
+// ---------------------------------------------------------------------------
+// Quests
+// ---------------------------------------------------------------------------
+// Two worlds that differ clearly on f, by at least a ratio (or by a difference when diff is set).
+function pairBy(pool, f, min, diff) {
+  for (let k = 0; k < 200; k++) {
+    const [a, b] = shuffle(pool.slice()).slice(0, 2), x = f(a), y = f(b);
+    if (diff ? Math.abs(x - y) >= min : Math.max(x, y) / Math.min(x, y) >= min) return [a, b];
+  }
+  throw new Error('no pair');
+}
+const times = r => r < 1.75 ? 'about one and a half times' : 'about ' + Math.round(r) + ' times';
+function choiceQuest(text, choices, ans, why, topic, worlds) { return { kind: 'choice', text, choices, ans, why, topic, worlds }; }
+const HOW_HIGH = [['about 6 feet', x => x >= 4], ['about 2 and a half feet', x => x >= 2 && x < 4], ['about 1 foot', x => x >= 0.75 && x < 1.5], ['less than half a foot', x => x < 0.6]];
+const catOf = x => HOW_HIGH.find(c => c[1](x))[0];
+const CLUES = {
+  Mercury: [['I am the closest planet to the Sun.', () => PLANETS[0] === 'Mercury'], ['I am the smallest planet.', () => argBy(PLANETS, w => -DATA[w].d) === 'Mercury'], ['My year is only 88 days long.', () => Math.round(DATA.Mercury.year) === 88]],
+  Venus: [['I am the hottest planet.', () => argBy(PLANETS, w => DATA[w].temp) === 'Venus'], ['I spin backwards, so my Sun rises in the west.', () => DATA.Venus.spin < 0], ['I am the second planet from the Sun.', () => PLANETS[1] === 'Venus']],
+  Earth: [['I have oceans of liquid water on my outside.', null], ['I am the third planet from the Sun.', () => PLANETS[2] === 'Earth'], ['My day is 24 hours long.', () => Math.round(DATA.Earth.day) === 24]],
+  Mars: [['I am the red planet.', null], ['I have the tallest volcano of all the planets.', null], ['I am the fourth planet from the Sun.', () => PLANETS[3] === 'Mars']],
+  Jupiter: [['I am the biggest planet.', () => argBy(PLANETS, w => DATA[w].d) === 'Jupiter'], ['I have the shortest day, about 10 hours.', () => argBy(PLANETS, w => -DATA[w].day) === 'Jupiter'], ['I have a giant storm called the Great Red Spot.', null]],
+  Saturn: [['I have the biggest, brightest rings.', null], ['I am the sixth planet from the Sun.', () => PLANETS[5] === 'Saturn'], ['I am so light for my size that I could float in a giant bathtub.', null]],
+  Uranus: [['I spin tipped over on my side.', () => argBy(PLANETS, seasonTilt) === 'Uranus'], ['I am the seventh planet from the Sun.', () => PLANETS[6] === 'Uranus'], ['I am an ice giant, and I look blue-green.', null]],
+  Neptune: [['I am the farthest planet from the Sun.', () => PLANETS[7] === 'Neptune'], ['My year is about 164 Earth years long.', () => Math.round(DATA.Neptune.year / 365.25) === 164], ['I have the fastest winds of all the planets.', null]],
+};
+function argBy(list, f) { return list.reduce((a, b) => (f(b) > f(a) ? b : a)); }
+
+const LEVELS = [
+  { name: 'Find a planet', gen() { const t = pick(PLANETS); return { kind: 'fly', text: 'Fly to ' + t + '! Tap it.', ans: t, why: t + ' is the ' + ORD[PLANETS.indexOf(t)] + ' planet from the Sun.' }; } },
+  { name: 'Planet order', gen() {
+    const v = rnd(0, 3);
+    if (v === 0) return { kind: 'fly', text: 'Fly to the planet closest to the Sun!', ans: argBy(PLANETS, w => -DATA[w].dist), why: 'Mercury is closest to the Sun.' };
+    if (v === 1) return { kind: 'fly', text: 'Fly to the planet farthest from the Sun!', ans: argBy(PLANETS, w => DATA[w].dist), why: 'Neptune is farthest from the Sun.' };
+    const n = rnd(1, 6), t = PLANETS.slice().sort((a, b) => DATA[a].dist - DATA[b].dist)[n];
+    return { kind: 'fly', text: 'Count out from the Sun. Fly to the ' + ORD[n] + ' planet!', ans: t, why: t + ' is the ' + ORD[n] + ' planet from the Sun.' };
+  } },
+  { name: 'Big or small', gen() {
+    const [a, b] = pairBy(WORLDS, w => DATA[w].d, 1.3), big = Math.random() < 0.6, ans = (DATA[a].d > DATA[b].d) === big ? a : b, o = ans === a ? b : a;
+    const r = DATA[ans].d / DATA[o].d;
+    return choiceQuest('Which is ' + (big ? 'bigger' : 'smaller') + ', ' + isWorld(a) + ' or ' + isWorld(b) + '?', [a, b], ans,
+      big ? Cap(isWorld(ans)) + ' is ' + times(r) + ' as wide as ' + isWorld(o) + '.' : Cap(isWorld(ans)) + ' is smaller. ' + Cap(isWorld(o)) + ' is ' + times(1 / r) + ' as wide.', 'size', [a, b]);
+  } },
+  { name: 'Jump test', gen() {
+    const [a, b] = pairBy(WORLDS.filter(w => w !== 'Earth' || Math.random() < 0.5), jumpFt, 1.25), ans = jumpFt(a) > jumpFt(b) ? a : b;
+    return choiceQuest('Where can you jump higher, ' + isWorld(a) + ' or ' + isWorld(b) + '? Land and try!', [a, b], ans,
+      'Less gravity pulls you down on ' + isWorld(ans) + ', so the same jump goes higher: ' + ftText(jumpFt(ans)) + '!', 'jump', [a, b]);
+  } },
+  { name: 'Day length', gen() {
+    const [a, b] = pairBy(WORLDS, w => DATA[w].day, 1.3), long = Math.random() < 0.6, ans = (DATA[a].day > DATA[b].day) === long ? a : b;
+    return choiceQuest('Which has a ' + (long ? 'longer' : 'shorter') + ' day, ' + isWorld(a) + ' or ' + isWorld(b) + '?', [a, b], ans,
+      'A day is sunrise to sunrise. On ' + isWorld(ans) + ' it is ' + dayText(ans) + '. On ' + isWorld(ans === a ? b : a) + ' it is ' + dayText(ans === a ? b : a) + '.', 'day', [a, b]);
+  } },
+  { name: 'How high?', gen() {
+    const w = pick(WORLDS.filter(x => x !== 'Earth')), right = catOf(jumpFt(w)), wrong = shuffle(HOW_HIGH.map(c => c[0]).filter(c => c !== right)).slice(0, 2);
+    return choiceQuest('You jump 1 foot high on Earth. About how high on ' + isWorld(w) + '?', shuffle([right, ...wrong]), right,
+      'Gravity on ' + isWorld(w) + ' is ' + (DATA[w].g < G_EARTH ? 'weaker' : 'stronger') + ' than on Earth, so the same jump goes ' + ftText(jumpFt(w)) + ' high.', 'jump', [w]);
+  } },
+  { name: 'Seasons', gen() {
+    const [a, b] = pairBy(PLANETS, seasonTilt, 10, true), ans = seasonTilt(a) > seasonTilt(b) ? a : b;
+    return choiceQuest('Which planet has bigger seasons, ' + a + ' or ' + b + '?', [a, b], ans,
+      'Seasons come from being tipped. ' + ans + ' is tipped about ' + Math.round(seasonTilt(ans)) + ' degrees, and ' + (ans === a ? b : a) + ' about ' + Math.round(seasonTilt(ans === a ? b : a)) + '.' + (ans === 'Uranus' ? ' Uranus is on its side!' : ''), 'seasons', [a, b]);
+  } },
+  { name: 'Year length', gen() {
+    const [a, b] = pairBy(PLANETS, w => DATA[w].year, 1.5), long = Math.random() < 0.6, ans = (DATA[a].year > DATA[b].year) === long ? a : b;
+    return choiceQuest('A year is one trip around the Sun. Which has a ' + (long ? 'longer' : 'shorter') + ' year, ' + a + ' or ' + b + '?', [a, b], ans,
+      'Planets farther out travel a bigger circle, slower. A year on ' + a + ' is ' + yearText(a) + ', on ' + b + ' ' + yearText(b) + '.', 'year', [a, b]);
+  } },
+  { name: 'Weigh in', gen() {
+    for (let k = 0; k < 100; k++) {
+      const lb = pick([10, 20, 30, 40, 50, 60, 80, 100]), w = pick(WORLDS.filter(x => x !== 'Earth')), right = Math.round(weightOn(w, lb));
+      const others = shuffle(WORLDS.filter(x => x !== w).map(x => Math.round(weightOn(x, lb)))).filter((v, i, a) => a.indexOf(v) === i);
+      const pickd = []; for (const v of others) if ([right, ...pickd].every(u => Math.max(u, v) / Math.max(1, Math.min(u, v)) >= 1.25)) pickd.push(v);
+      if (pickd.length < 2) continue;
+      const opts = [right, ...pickd.slice(0, 2)].map(v => 'about ' + v + ' pounds');
+      return choiceQuest('A dog weighs ' + lb + ' pounds on Earth. About how much would it weigh on ' + isWorld(w) + '?', shuffle(opts.slice()), opts[0],
+        isWorld(w) + ' pulls ' + (DATA[w].g < G_EARTH ? 'less' : 'more') + ' than Earth: ' + lb + ' pounds times ' + (Math.round(DATA[w].g / G_EARTH * 100) / 100) + ' is about ' + right + '.', 'weight', [w]);
+    }
+    throw new Error('no weigh quest');
+  } },
+  { name: 'Mystery planet', gen() {
+    const t = pick(PLANETS), cl = shuffle(CLUES[t].slice()).slice(0, 2), ch = shuffle([t, ...shuffle(PLANETS.filter(x => x !== t)).slice(0, 3)]);
+    return choiceQuest('Mystery planet! ' + cl[0][0] + ' ' + cl[1][0] + ' Who am I?', ch, t, 'It is ' + t + '!', 'mystery', [t]);
+  } },
+];
+const START = 2;
+function genLevel(i) { const q = LEVELS[i].gen(); q.level = i; return q; }
+// The right answer worked out again from the facts, so tests can check each quest.
+function recheck(q) {
+  const T = q.text;
+  if (q.kind === 'fly') {
+    if (/closest/.test(T)) return argBy(PLANETS, w => -DATA[w].dist);
+    if (/farthest/.test(T)) return argBy(PLANETS, w => DATA[w].dist);
+    const m = T.match(/the (\w+) planet!/); if (m && /Count/.test(T)) return PLANETS.slice().sort((a, b) => DATA[a].dist - DATA[b].dist)[ORD.indexOf(m[1])];
+    return T.match(/Fly to (\w+)!/)[1];
+  }
+  const [a, b] = q.worlds || [];
+  if (q.topic === 'size') return (DATA[a].d > DATA[b].d) === / bigger/.test(T) ? a : b;
+  if (q.topic === 'jump' && q.worlds.length === 2) return jumpFt(a) > jumpFt(b) ? a : b;
+  if (q.topic === 'jump') return catOf(jumpFt(a));
+  if (q.topic === 'day') return (DATA[a].day > DATA[b].day) === /longer/.test(T) ? a : b;
+  if (q.topic === 'seasons') return seasonTilt(a) > seasonTilt(b) ? a : b;
+  if (q.topic === 'year') return (DATA[a].year > DATA[b].year) === /longer/.test(T) ? a : b;
+  if (q.topic === 'weight') { const lb = +T.match(/weighs (\d+)/)[1]; return 'about ' + Math.round(weightOn(a, lb)) + ' pounds'; }
+  if (q.topic === 'mystery') { const fits = PLANETS.filter(p => CLUES[p].filter(c => T.includes(c[0])).length === 2); return fits.length === 1 ? fits[0] : null; }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Progress
+// ---------------------------------------------------------------------------
+const KEY = 'planet-explorer-v1';
+let P = { stars: 0, lv: START, st: { streak: 0, miss: 0 } };
+try { const s = JSON.parse(localStorage.getItem(KEY) || 'null'); if (s) P = Object.assign(P, s, { st: Object.assign({ streak: 0, miss: 0 }, s.st || {}) }); } catch (e) {}
+P.lv = Math.max(0, Math.min(LEVELS.length - 1, P.lv | 0));
+function persist() { try { localStorage.setItem(KEY, JSON.stringify(P)); } catch (e) {} }
+// One result per quest: right first try, or missed. Returns +1, -1 or 0 for a level change.
+function record(right) {
+  const s = P.st; let change = 0;
+  if (right) { s.miss = 0; s.streak++; if (s.streak >= 4 && P.lv < LEVELS.length - 1) { P.lv++; s.streak = 0; change = 1; } }
+  else { s.streak = 0; s.miss++; if (s.miss >= 2 && P.lv > 0) { P.lv--; s.miss = 0; change = -1; } }
+  persist(); return change;
+}
+
+// ---------------------------------------------------------------------------
+// Sound and speech
+// ---------------------------------------------------------------------------
+function say(t) { try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(t); u.rate = 0.92; u.pitch = 1.1; speechSynthesis.speak(u); } catch (e) {} }
+let AC = null;
+function ac() { if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; } } if (AC && AC.state === 'suspended') AC.resume(); return AC; }
+function tone(f, d = 0.15, type = 'sine', vol = 0.16, when = 0, slide = 0) {
+  const c = ac(); if (!c) return; const t = c.currentTime + when, o = c.createOscillator(), g = c.createGain();
+  o.type = type; o.frequency.setValueAtTime(f, t); if (slide) o.frequency.exponentialRampToValueAtTime(f * slide, t + d);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+  o.connect(g); g.connect(c.destination); o.start(t); o.stop(t + d + 0.05);
+}
+const SND = {
+  whoosh() { tone(200, 0.6, 'sawtooth', 0.05, 0, 4); tone(300, 0.5, 'sine', 0.08, 0.05, 3); },
+  boing(dur) { tone(220, Math.min(1.2, dur), 'sine', 0.14, 0, 3); },
+  thud() { tone(110, 0.15, 'triangle', 0.16, 0, 0.5); },
+  win() { [523, 659, 784, 1047, 1319].forEach((f, i) => tone(f, 0.3, 'triangle', 0.14, i * 0.09)); },
+  miss() { tone(330, 0.2, 'sawtooth', 0.07); tone(247, 0.3, 'sawtooth', 0.07, 0.15); },
+  tap() { tone(880, 0.06, 'triangle', 0.1); },
+};
+
+// ---------------------------------------------------------------------------
+// 3D: textures
+// ---------------------------------------------------------------------------
+function canvasTex(w, h, draw) { const c = document.createElement('canvas'); c.width = w; c.height = h; draw(c.getContext('2d'), w, h); const t = new THREE.CanvasTexture(c); return t; }
+function seeded(n) { let s = n * 9301 + 49297; return () => { s = (s * 9301 + 49297) % 233280; return s / 233280; }; }
+function bands(g, w, h, cols, r) { for (let y = 0; y < h; y++) { const k = (Math.sin(y * 0.19) + Math.sin(y * 0.07 + 1) + 2) / 4, i = Math.floor(k * cols.length * 0.999); g.fillStyle = cols[i]; g.fillRect(0, y, w, 1); } for (let n = 0; n < 60; n++) { g.globalAlpha = 0.25; g.fillStyle = pick(cols); g.beginPath(); g.ellipse(r() * w, r() * h, 20 + r() * 40, 2 + r() * 3, 0, 0, 7); g.fill(); } g.globalAlpha = 1; }
+function craters(g, w, h, base, dark, r, n) { g.fillStyle = base; g.fillRect(0, 0, w, h); for (let k = 0; k < n; k++) { const x = r() * w, y = r() * h, s = 3 + r() * 12; g.fillStyle = dark; g.globalAlpha = 0.5; g.beginPath(); g.arc(x, y, s, 0, 7); g.fill(); g.globalAlpha = 0.35; g.fillStyle = '#fff'; g.beginPath(); g.arc(x - s * 0.25, y - s * 0.25, s * 0.6, 0, 7); g.fill(); } g.globalAlpha = 1; }
+function blobs(g, w, h, col, r, n, size) { g.fillStyle = col; for (let k = 0; k < n; k++) { const x = r() * w, y = h * 0.15 + r() * h * 0.7; for (let j = 0; j < 6; j++) { g.beginPath(); g.arc(x + (r() - 0.5) * size, y + (r() - 0.5) * size * 0.6, size * (0.2 + r() * 0.3), 0, 7); g.fill(); } } }
+const TEX = {
+  Mercury: r => canvasTex(256, 128, (g, w, h) => craters(g, w, h, '#B9B2C9', '#6E6680', r, 70)),
+  Moon: r => canvasTex(256, 128, (g, w, h) => craters(g, w, h, '#DCD8EA', '#8B86A3', r, 60)),
+  Venus: r => canvasTex(256, 128, (g, w, h) => bands(g, w, h, ['#FFD48A', '#FFB45C', '#FFE2A8', '#F59E4A'], r)),
+  Earth: r => canvasTex(256, 128, (g, w, h) => { g.fillStyle = '#1E7BFF'; g.fillRect(0, 0, w, h); blobs(g, w, h, '#2ED15A', r, 7, 40); blobs(g, w, h, '#E8C46A', r, 3, 18); g.fillStyle = '#fff'; g.fillRect(0, 0, w, 9); g.fillRect(0, h - 9, w, 9); g.globalAlpha = 0.55; for (let k = 0; k < 30; k++) { g.beginPath(); g.ellipse(r() * w, r() * h, 14 + r() * 20, 3, 0, 0, 7); g.fill(); } g.globalAlpha = 1; }),
+  Mars: r => canvasTex(256, 128, (g, w, h) => { g.fillStyle = '#FF6A3D'; g.fillRect(0, 0, w, h); blobs(g, w, h, '#C2410C', r, 8, 30); g.fillStyle = '#fff'; g.fillRect(0, 0, w, 7); g.fillRect(0, h - 6, w, 6); }),
+  Jupiter: r => canvasTex(256, 128, (g, w, h) => { bands(g, w, h, ['#F7E1B5', '#E9A15B', '#C9733A', '#FFF1D6', '#D98A4B'], r); g.fillStyle = '#E2452B'; g.beginPath(); g.ellipse(170, 82, 18, 9, 0, 0, 7); g.fill(); }),
+  Saturn: r => canvasTex(256, 128, (g, w, h) => bands(g, w, h, ['#F7D27A', '#FFE6A8', '#E8B95C', '#FFF0C8'], r)),
+  Uranus: r => canvasTex(256, 128, (g, w, h) => bands(g, w, h, ['#7FF0F0', '#9CF7F2', '#6FE0E8'], r)),
+  Neptune: r => canvasTex(256, 128, (g, w, h) => { bands(g, w, h, ['#3F5BFF', '#4C6BFF', '#2F49E0', '#6A86FF'], r); g.fillStyle = '#1A2A9A'; g.beginPath(); g.ellipse(90, 70, 14, 7, 0, 0, 7); g.fill(); }),
+};
+function labelTex(txt) {
+  return canvasTex(256, 64, (g, w, h) => { g.font = '900 34px Segoe UI, sans-serif'; const tw = g.measureText(txt).width + 30; g.fillStyle = '#fff'; g.strokeStyle = '#2B2140'; g.lineWidth = 5; const x = (w - tw) / 2; g.beginPath(); if (g.roundRect) g.roundRect(x, 8, tw, 48, 24); else g.rect(x, 8, tw, 48); g.fill(); g.stroke(); g.fillStyle = '#2B2140'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(txt, w / 2, 34); });
+}
+function glowTex(inner, outer) { return canvasTex(128, 128, (g) => { const r = g.createRadialGradient(64, 64, 4, 64, 64, 64); r.addColorStop(0, inner); r.addColorStop(0.3, outer); r.addColorStop(1, 'rgba(0,0,0,0)'); g.fillStyle = r; g.fillRect(0, 0, 128, 128); }); }
+function ringTex() { return canvasTex(256, 8, (g, w) => { for (let x = 0; x < w; x++) { const a = 0.25 + 0.6 * Math.abs(Math.sin(x * 0.21) * Math.cos(x * 0.05)); g.fillStyle = 'rgba(255,' + (210 + (x % 30)) + ',150,' + a.toFixed(2) + ')'; g.fillRect(x, 0, 1, 8); } }); }
+
+// ---------------------------------------------------------------------------
+// 3D: scene
+// ---------------------------------------------------------------------------
+const canvas = $('gl');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+const scene = new THREE.Scene();
+const SPACE_BG = new THREE.Color(0x0A0630);
+scene.background = SPACE_BG.clone();
+const camera = new THREE.PerspectiveCamera(45, 1, 0.05, 400);
+const ambient = new THREE.AmbientLight(0xB8ACFF, 0.5); scene.add(ambient);
+const sunLight = new THREE.PointLight(0xFFF2D6, 1.6, 0, 0); scene.add(sunLight);
+const space = new THREE.Group(); scene.add(space);
+
+// Stars.
+{
+  const n = 1500, pos = new Float32Array(n * 3), col = new Float32Array(n * 3), c = new THREE.Color();
+  for (let i = 0; i < n; i++) { const v = new THREE.Vector3().randomDirection().multiplyScalar(140 + Math.random() * 60); pos.set([v.x, v.y, v.z], i * 3); c.setHSL(Math.random(), 0.8, 0.85); col.set([c.r, c.g, c.b], i * 3); }
+  const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  scene.add(new THREE.Points(g, new THREE.PointsMaterial({ size: 1.1, vertexColors: true })));
+}
+const sun = new THREE.Mesh(new THREE.SphereGeometry(3, 40, 24), new THREE.MeshBasicMaterial({ color: 0xFFD23C })); space.add(sun);
+const sunGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex('rgba(255,240,180,1)', 'rgba(255,150,40,0.6)'), blending: THREE.AdditiveBlending, depthWrite: false })); sunGlow.scale.set(16, 16, 1); space.add(sunGlow);
+
+const SPHERE = new THREE.SphereGeometry(1, 40, 24);
+const spaceR = w => 0.6 + 0.5 * Math.sqrt(DATA[w].d / DATA.Earth.d);   // enlarged for tapping, order of size kept
+const orbitR = w => { const i = PLANETS.indexOf(w); return 6.5 + 3.3 * i + 3.6 * Math.max(0, i - 3); };
+const BODY = {};
+function makeWorld(w, r) {
+  const holder = new THREE.Group(), tilt = new THREE.Group(); holder.add(tilt);
+  tilt.rotation.z = -DATA[w].tilt * Math.PI / 180;
+  const m = new THREE.Mesh(SPHERE, new THREE.MeshStandardMaterial({ map: TEX[w](seeded(w.length * 7 + w.charCodeAt(0))), roughness: 0.85, metalness: 0 })); m.scale.setScalar(r); tilt.add(m);
+  const axis = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 1, 6), new THREE.MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.7 })); axis.scale.set(r, r * 2.8, r); tilt.add(axis);
+  if (w === 'Saturn' || w === 'Uranus') {
+    const rg = new THREE.RingGeometry(r * 1.3, r * (w === 'Saturn' ? 2.3 : 1.6), 64, 1); const uv = rg.attributes.uv, p = rg.attributes.position, v3 = new THREE.Vector3();
+    for (let i = 0; i < p.count; i++) { v3.fromBufferAttribute(p, i); uv.setXY(i, (v3.length() - r * 1.3) / (r * (w === 'Saturn' ? 1.0 : 0.3)), 0.5); }
+    const ring = new THREE.Mesh(rg, new THREE.MeshBasicMaterial({ map: ringTex(), transparent: true, side: THREE.DoubleSide, opacity: w === 'Saturn' ? 1 : 0.35, depthWrite: false })); ring.rotation.x = -Math.PI / 2; tilt.add(ring);
+  }
+  return { holder, tilt, mesh: m, axis, r };
+}
+const labels = {};
+for (const w of WORLDS) {
+  const r = w === 'Moon' ? 0.3 : spaceR(w), b = makeWorld(w, r); BODY[w] = b; b.angle = Math.random() * Math.PI * 2;
+  if (w === 'Moon') BODY.Earth.holder.add(b.holder); else space.add(b.holder);
+  const lab = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTex(w), depthTest: false, sizeAttenuation: false })); lab.scale.set(0.16, 0.04, 1); lab.renderOrder = 10; lab.position.y = r + (w === 'Moon' ? 1.7 : 0.7); b.holder.add(lab); labels[w] = lab;
+  if (w !== 'Moon') { const o = new THREE.Mesh(new THREE.RingGeometry(orbitR(w) - 0.03, orbitR(w) + 0.03, 128), new THREE.MeshBasicMaterial({ color: 0x8E7CFF, transparent: true, opacity: 0.35, side: THREE.DoubleSide })); o.rotation.x = -Math.PI / 2; space.add(o); }
+}
+labels.Moon.scale.set(0.12, 0.03, 1);
+
+// Look closer: two worlds at their true relative size.
+const compare = new THREE.Group(); compare.visible = false; scene.add(compare);
+// Surface: ground, astronaut and a ruler marked in feet.
+const surface = new THREE.Group(); surface.visible = false; surface.position.set(0, -300, 0); scene.add(surface);
+const FT = 0.55;
+const groundM = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 });
+const ground = new THREE.Mesh(new THREE.CylinderGeometry(30, 30, 0.4, 48), groundM); ground.position.y = -0.2; surface.add(ground);
+const rocks = []; for (let k = 0; k < 26; k++) { const r = new THREE.Mesh(new THREE.DodecahedronGeometry(0.2 + Math.random() * 0.5, 0), new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 })); r.position.set((Math.random() - 0.5) * 30, 0, -3 - Math.random() * 14); surface.add(r); rocks.push(r); }
+const ruler = new THREE.Group(); ruler.position.set(-1.6, 0, 0); surface.add(ruler);
+{
+  const pole = new THREE.Mesh(new THREE.BoxGeometry(0.12, 7 * FT, 0.12), new THREE.MeshStandardMaterial({ color: 0xFFFFFF })); pole.position.y = 3.5 * FT; ruler.add(pole);
+  for (let f = 0; f <= 7; f++) {
+    const tick = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.06, 0.14), new THREE.MeshStandardMaterial({ color: f % 2 ? 0xFF4F8B : 0xFFC93C })); tick.position.set(0.2, f * FT, 0); ruler.add(tick);
+    const l = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTex(f + ' ft'), depthTest: false })); l.scale.set(1.3, 0.33, 1); l.position.set(-0.75, f * FT, 0); ruler.add(l);
+  }
+}
+const astro = new THREE.Group(); surface.add(astro);
+{
+  const white = new THREE.MeshStandardMaterial({ color: 0xFFFFFF, roughness: 0.5 }), accent = new THREE.MeshStandardMaterial({ color: 0xFF4F8B, roughness: 0.5 });
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.46, 0.95, 20), white); body.position.y = 1.05; astro.add(body);
+  const belt = new THREE.Mesh(new THREE.CylinderGeometry(0.47, 0.47, 0.12, 20), accent); belt.position.y = 0.7; astro.add(belt);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.48, 24, 16), white); head.position.y = 1.85; astro.add(head);
+  const visor = new THREE.Mesh(new THREE.SphereGeometry(0.36, 24, 16), new THREE.MeshStandardMaterial({ color: 0xFFB02E, metalness: 0.6, roughness: 0.15, emissive: 0x7A3A00, emissiveIntensity: 0.3 })); visor.scale.set(1, 0.8, 0.6); visor.position.set(0, 1.88, 0.3); astro.add(visor);
+  const pack = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.7, 0.3), accent); pack.position.set(0, 1.15, -0.45); astro.add(pack);
+  for (const s of [1, -1]) {
+    const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.17, 0.6, 12), white); leg.position.set(0.2 * s, 0.32, 0); astro.add(leg);
+    const boot = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.14, 0.4), accent); boot.position.set(0.2 * s, 0.05, 0.06); astro.add(boot);
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.7, 12), white); arm.position.set(0.55 * s, 1.1, 0); arm.rotation.z = 0.35 * s; astro.add(arm); astro.userData['arm' + s] = arm;
+  }
+}
+const platform = new THREE.Mesh(new THREE.CylinderGeometry(1.6, 1.8, 0.3, 32), new THREE.MeshStandardMaterial({ color: 0x9B6BFF, metalness: 0.4, roughness: 0.4 })); platform.position.y = -0.15; surface.add(platform);
+const dust = []; const dustG = new THREE.SphereGeometry(0.08, 6, 4);
+const surfLight = new THREE.DirectionalLight(0xffffff, 1.0); surfLight.position.set(5, 10, 8); surface.add(surfLight); surface.add(surfLight.target);
+const surfAmb = new THREE.HemisphereLight(0xffffff, 0x444466, 0.6); surface.add(surfAmb);
+const SKY = { Mercury: 0x05030F, Moon: 0x05030F, Venus: 0xE89A3C, Earth: 0x58C7F0, Mars: 0xE8A36A, Jupiter: 0xC77A3E, Saturn: 0xE8C77A, Uranus: 0x6FD6E0, Neptune: 0x2F4FD6 };
+const GROUND = { Mercury: 0x9C95AE, Moon: 0xC9C5D6, Venus: 0xC77A3A, Earth: 0x4FCB5A, Mars: 0xD9542A, Jupiter: 0xF0C08A, Saturn: 0xFFF0C8, Uranus: 0xD8FBFF, Neptune: 0x9FB4FF };
+
+// ---------------------------------------------------------------------------
+// Views and camera
+// ---------------------------------------------------------------------------
+let mode = 'space', focus = null, compareWorlds = [], camAnim = null, yaw = 0.5, timeOn = true, jump = null, jumpsSeen = {};
+const camTarget = new THREE.Vector3();
+function spaceCam() { const k = Math.max(1, 1.5 / camera.aspect), d = 54 * k; return { pos: new THREE.Vector3(Math.sin(yaw) * d, 32 * k, Math.cos(yaw) * d), look: new THREE.Vector3(0, -2, 0) }; }
+function worldPos(w) { return BODY[w].mesh.getWorldPosition(new THREE.Vector3()); }
+function planetCam(w) { const p = worldPos(w), r = BODY[w].r * (w === 'Saturn' ? 1.8 : 1), dir = p.clone().setY(0).normalize(); if (!dir.lengthSq()) dir.set(0, 0, 1); const side = new THREE.Vector3(-dir.z, 0, dir.x); return { pos: p.clone().addScaledVector(dir, -r * 2.6).addScaledVector(side, r * 3.6).add(new THREE.Vector3(0, r * 1.5, 0)), look: p.clone().addScaledVector(side, -r * 0.6) }; }
+function flyCam(to, ms = 1300) { camAnim = { from: camera.position.clone(), fromLook: camTarget.clone(), to, t0: performance.now(), ms }; SND.whoosh(); }
+function setMode(m) {
+  mode = m; space.visible = m === 'space' || m === 'planet'; compare.visible = m === 'compare'; surface.visible = m === 'surface';
+  for (const w of WORLDS) labels[w].visible = m === 'space';
+  scene.background = m === 'surface' ? new THREE.Color(SKY[focus]) : SPACE_BG.clone();
+  $('info').classList.toggle('on', m === 'planet' || m === 'surface'); $('jumps').style.display = (m === 'surface' || (task && task.topic === 'jump')) ? 'flex' : 'none';
+  $('hint').textContent = m === 'space' ? 'Tap a planet to fly there. Drag to turn.' : '';
+  $('peak').style.display = 'none';
+  renderBottom();
+}
+function goSpace() { focus = null; timeOn = true; setMode('space'); flyCam(spaceCam()); }
+function visit(w) {
+  focus = w; timeOn = false; setMode('planet'); flyCam(planetCam(w)); showInfo(w); SND.tap();
+}
+function showInfo(w) {
+  const d = DATA[w];
+  $('info').innerHTML = '<h2><span style="color:' + d.col + ';text-shadow:0 2px 0 #2B2140">●</span> ' + isWorld(w) + '</h2>' +
+    '<div>🦘 Jump: ' + ftText(jumpFt(w)) + '</div><div>☀️ Day: ' + dayText(w) + '</div><div>🔄 Year: ' + yearText(w) + '</div>' +
+    '<div>📏 Wide: ' + d.d.toLocaleString('en-US') + ' km</div><div>↗️ Tipped: ' + Math.round(seasonTilt(w)) + '°' + (d.spin < 0 ? ', spins backwards' : '') + '</div>' +
+    (d.solid ? '' : '<div>☁️ No solid ground!</div>');
+}
+function showCompare(ws) {
+  compareWorlds = ws; while (compare.children.length) compare.remove(compare.children[0]);
+  const maxD = Math.max(...ws.map(w => DATA[w].d)), n = ws.length;
+  ws.forEach((w, i) => {
+    const r = 2.4 * DATA[w].d / maxD, b = makeWorld(w, Math.max(r, 0.02)); b.holder.position.set((i - (n - 1) / 2) * 6.2, 0, 0); compare.add(b.holder); b.w = w;
+    const lab = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTex(isWorld(w)), depthTest: false })); lab.scale.set(3.2, 0.8, 1); lab.position.set(b.holder.position.x, -2.9, 0); compare.add(lab);
+    if (r < 0.15) { const ring = new THREE.Mesh(new THREE.RingGeometry(0.35, 0.45, 32), new THREE.MeshBasicMaterial({ color: 0xFFC93C })); ring.position.copy(b.holder.position); compare.add(ring); }
+    compare.userData['b' + i] = b;
+  });
+  const cl = new THREE.PointLight(0xffffff, 1.4, 0, 0); cl.position.set(0, 4, 12); compare.add(cl);
+  compare.position.set(0, 0, 0); setMode('compare');
+  const cp = new THREE.Vector3(0, 60, 0); compare.position.copy(cp);
+  flyCam({ pos: cp.clone().add(new THREE.Vector3(0, 0.5, 11 * Math.max(1, 1.4 / camera.aspect))), look: cp.clone().add(new THREE.Vector3(0, -0.6, 0)) }, 900);
+}
+function land(w) {
+  focus = w; setMode('surface'); groundM.color.setHex(GROUND[w]); rocks.forEach(r => { r.material.color.setHex(GROUND[w]).offsetHSL(0, 0, -0.12); r.visible = DATA[w].solid; });
+  ground.visible = !!DATA[w].solid; platform.visible = !DATA[w].solid; astro.position.set(0.4, 0, 0); showInfo(w);
+  const base = surface.position; camAnim = null;
+  camera.position.copy(base).add(new THREE.Vector3(0.6, 2.4, 8.6)); camTarget.copy(base).add(new THREE.Vector3(0, 2.0, 0)); camera.lookAt(camTarget);
+  say(DATA[w].solid ? 'You landed on ' + isWorld(w) + '. Tap jump!' : w + ' has no solid ground. You are on a floating platform in the clouds. Tap jump!');
+}
+function doJump() {
+  if (mode !== 'surface' || jump) return; ac();
+  const j = jumpPlan(focus); jump = Object.assign({ t0: performance.now(), w: focus }, j); SND.boing(j.T / 1000);
+}
+// Same push on every world: height is 1 foot times 9.8 / g, time in the air is 2 * sqrt(2h / g), shown twice as slow.
+function jumpPlan(w) { const ft = jumpFt(w), hM = 0.3048 * ft; return { ft, h: ft * FT, T: 2 * Math.sqrt(2 * hM / DATA[w].g) * 2 * 1000 }; }
+function screenOf(v3) { const r = canvas.getBoundingClientRect(), v = v3.clone().project(camera); return { x: (v.x + 1) / 2 * r.width + r.left, y: (1 - v.y) / 2 * r.height + r.top, z: v.z }; }
+function planetScreen(w) { return screenOf(worldPos(w)); }
+
+// Tap a planet in space, or drag to turn the view.
+let ptr = null;
+canvas.addEventListener('pointerdown', ev => { ac(); ptr = { x: ev.clientX, y: ev.clientY, yaw, moved: false }; });
+window.addEventListener('pointermove', ev => { if (!ptr || mode !== 'space') return; const dx = ev.clientX - ptr.x; if (Math.abs(dx) > 10) ptr.moved = true; if (ptr.moved) { yaw = ptr.yaw - dx * 0.006; camAnim = null; const c = spaceCam(); camera.position.copy(c.pos); camTarget.copy(c.look); camera.lookAt(camTarget); } });
+window.addEventListener('pointerup', ev => {
+  if (!ptr) return; const p = ptr; ptr = null; if (p.moved || mode !== 'space') return;
+  let best = null, bd = 1e9;
+  for (const w of WORLDS) { const s = planetScreen(w), d = Math.hypot(s.x - ev.clientX, s.y - ev.clientY), rad = 48 + (w === 'Moon' ? -18 : 0); if (s.z < 1 && d < rad && d < bd) { bd = d; best = w; } }
+  if (best) tapPlanet(best);
+});
+
+// ---------------------------------------------------------------------------
+// Rounds
+// ---------------------------------------------------------------------------
+let task = null, missed = false, won = false, nextTimer = null;
+function newRound(speak = true) {
+  clearTimeout(nextTimer); nextTimer = null; hideCard(); missed = false; won = false; jump = null; jumpsSeen = {};
+  task = genLevel(P.lv); $('ask').textContent = task.text; $('jumps').innerHTML = '';
+  $('badge').textContent = 'Level ' + (P.lv + 1) + ': ' + LEVELS[P.lv].name; $('stars').textContent = '⭐ ' + P.stars;
+  fit(); goSpace(); if (speak) say(task.text);
+}
+function dot(w) { return DATA[w] ? '<i style="background:' + DATA[w].col + '"></i>' : ''; }
+function renderBottom() {
+  const b = $('bottom'); b.innerHTML = ''; if (!task) return;
+  const add = (cls, html, fn, extra) => { const e = document.createElement('button'); e.className = cls; e.innerHTML = html; e.onclick = fn; if (extra) Object.assign(e.dataset, extra); b.appendChild(e); return e; };
+  if (mode !== 'space') add('tool', '🌌 Back to space', goSpace);
+  if (mode === 'planet') add('tool', '🚀 Land and jump', () => land(focus));
+  if (mode === 'surface') add('tool big', '🦘 Jump!', doJump);
+  if (task.kind === 'choice') {
+    if (mode === 'space' && task.worlds.length === 2 && ['size', 'day', 'seasons', 'year'].includes(task.topic)) add('tool', '👀 Look closer', () => showCompare(task.worlds));
+    if (mode === 'space' && task.topic === 'jump') task.worlds.forEach(w => add('tool', '🚀 Land on ' + isWorld(w), () => { focus = w; land(w); }));
+    task.choices.forEach(c => { const e = add('ans', dot(c) + (DATA[c] ? isWorld(c) : c), () => answer(c), { a: c }); if (task.tried && task.tried.includes(c)) e.classList.add('no'); });
+  }
+}
+function tapPlanet(w) {
+  if (!task) return; visit(w);
+  if (task.kind === 'fly' && !won) {
+    if (w === task.ans) win();
+    else { SND.miss(); if (!missed) { missed = true; record(false); } const t = 'That is ' + isWorld(w) + '. Look again for ' + (/Fly to (\w+)!/.test(task.text) ? task.ans : 'the right one') + '!'; showCard('Not that one!', t, true); say(t); }
+  }
+}
+function answer(c) {
+  if (!task || task.kind !== 'choice' || won) return;
+  if (c === task.ans) { win(); return; }
+  task.tried = (task.tried || []).concat(c); SND.miss();
+  if (!missed) { missed = true; record(false); }
+  const t = 'Not quite. Explore and try again!'; showCard('Hmm!', t, true); say(t); renderBottom();
+}
+function win() {
+  won = true; const right = !missed; let ch = 0; if (right) ch = record(true);
+  P.stars++; persist(); $('stars').textContent = '⭐ ' + P.stars; SND.win(); confetti();
+  document.querySelectorAll('.ans').forEach(e => { if (e.dataset.a === task.ans) e.classList.add('yes'); });
+  const msg = pick(['Out of this world!', 'Stellar!', 'You got it!', 'Super explorer!']);
+  showCard(msg + ' ⭐', task.why + (ch > 0 ? ' Level up!' : ''), false, true); say(msg + ' ' + task.why);
+  nextTimer = setTimeout(() => newRound(), 7000);
+}
+function showCard(t, sub, bad, next) {
+  const c = $('card'); c.className = 'on' + (bad ? ' bad' : next ? ' win' : '');
+  c.innerHTML = '<div class="c">' + t + (sub ? '<small>' + sub + '</small>' : '') + (next ? '<button class="pill" id="nextBtn">Next ▶</button>' : '') + '</div>';
+  if (next) $('nextBtn').onclick = () => newRound(); else setTimeout(() => { if (c.classList.contains('bad')) hideCard(); }, 2400);
+}
+function hideCard() { $('card').className = ''; $('card').innerHTML = ''; }
+function confetti() {
+  const m = $('main'), cols = ['#FF4F8B', '#FFC93C', '#58C7F0', '#5CD38B', '#9B6BFF'];
+  for (let k = 0; k < 40; k++) {
+    const d = document.createElement('div'); d.className = 'conf'; d.style.background = pick(cols); d.style.left = (Math.random() * 100) + '%'; d.style.top = '-30px'; m.appendChild(d);
+    const dx = (Math.random() - 0.5) * 200, rot = Math.random() * 720;
+    d.animate([{ transform: 'translate(0,0) rotate(0)' }, { transform: 'translate(' + dx + 'px,' + (m.clientHeight + 60) + 'px) rotate(' + rot + 'deg)' }], { duration: 1800 + Math.random() * 1200, easing: 'cubic-bezier(.3,.6,.6,1)' }).onfinish = () => d.remove();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Layout and loop
+// ---------------------------------------------------------------------------
+function fit() {
+  const r = $('main').getBoundingClientRect(), w = Math.max(1, r.width), h = Math.max(1, r.height);
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', () => { fit(); if (mode === 'space') { const c = spaceCam(); camera.position.copy(c.pos); camTarget.copy(c.look); camera.lookAt(camTarget); } });
+const ORBIT_SEC = 20;   // Mercury goes around in 20 seconds; the rest keep their true ratio.
+const SPIN_SEC = 8;     // Earth spins once in 8 seconds; the rest keep their true ratio.
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; const t = now / 1000;
+  if (timeOn) for (const w of PLANETS) { BODY[w].angle += dt * 2 * Math.PI / (ORBIT_SEC * DATA[w].year / DATA.Mercury.year); }
+  for (const w of PLANETS) { const b = BODY[w], R = orbitR(w); b.holder.position.set(Math.cos(b.angle) * R, 0, -Math.sin(b.angle) * R); }
+  BODY.Moon.angle += timeOn ? dt * 2 * Math.PI / (ORBIT_SEC * 27.3 / DATA.Mercury.year) : 0; BODY.Moon.holder.position.set(Math.cos(BODY.Moon.angle) * 1.8, 0, -Math.sin(BODY.Moon.angle) * 1.8);
+  for (const w of WORLDS) BODY[w].mesh.rotation.y += dt * 2 * Math.PI / (SPIN_SEC * DATA[w].spin / DATA.Earth.spin);
+  compareWorlds.forEach((w, i) => { const b = compare.userData['b' + i]; if (b) b.mesh.rotation.y += dt * 2 * Math.PI / (SPIN_SEC * DATA[w].spin / DATA.Earth.spin); });
+  sunGlow.material.rotation = t * 0.05; sun.scale.setScalar(1 + Math.sin(t * 2) * 0.01);
+  if (camAnim) {
+    const u = Math.min(1, (now - camAnim.t0) / camAnim.ms), e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+    camera.position.lerpVectors(camAnim.from, camAnim.to.pos, e); camTarget.lerpVectors(camAnim.fromLook, camAnim.to.look, e);
+    if (u >= 1) camAnim = null;
+  } else if (mode === 'planet' && focus) { const c = planetCam(focus); camera.position.copy(c.pos); camTarget.copy(c.look); }
+  camera.lookAt(camTarget);
+  if (jump) {
+    const u = (now - jump.t0) / jump.T;
+    if (u >= 1) {
+      astro.position.y = 0; SND.thud(); for (let k = 0; k < 14; k++) { const m = new THREE.Mesh(dustG, new THREE.MeshBasicMaterial({ color: GROUND[jump.w] })); m.position.set(astro.position.x, 0.1, 0); m.userData.v = new THREE.Vector3((Math.random() - 0.5) * 3, Math.random() * 1.5, (Math.random() - 0.5) * 2); surface.add(m); dust.push({ m, life: 1 }); }
+      jumpsSeen[jump.w] = jump.ft; $('jumps').innerHTML = Object.keys(jumpsSeen).map(w => '<div>🦘 ' + isWorld(w) + ': ' + ftText(jumpsSeen[w]) + '</div>').join('');
+      $('jumps').style.display = 'flex'; setTimeout(() => { if (!jump) $('peak').style.display = 'none'; }, 1500); jump = null;
+    } else {
+      astro.position.y = 4 * jump.h * u * (1 - u); astro.userData['arm1'].rotation.z = 0.35 + Math.sin(u * Math.PI) * 1.8; astro.userData['arm-1'].rotation.z = -0.35 - Math.sin(u * Math.PI) * 1.8;
+      if (u > 0.5 && $('peak').style.display !== 'block') { const s = screenOf(astro.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 2.6, 0))), r = $('main').getBoundingClientRect(); $('peak').style.left = (s.x - r.left + 120) + 'px'; $('peak').style.top = (s.y - r.top) + 'px'; $('peak').textContent = ftText(jump.ft) + '!'; $('peak').style.display = 'block'; say(ftText(jump.ft)); }
+    }
+  }
+  for (let k = dust.length - 1; k >= 0; k--) { const d = dust[k]; d.life -= dt * 1.5; d.m.userData.v.y -= (focus && DATA[focus] ? DATA[focus].g : 9.8) * 0.2 * dt; d.m.position.addScaledVector(d.m.userData.v, dt); d.m.scale.setScalar(Math.max(0.01, d.life)); if (d.life <= 0 || d.m.position.y < 0) { surface.remove(d.m); dust.splice(k, 1); } }
+  renderer.render(scene, camera); requestAnimationFrame(frame);
+}
+$('hear').onclick = () => say(task.text);
+$('skip').onclick = () => newRound();
+
+window.PLANET_EXPLORER = {
+  stay() { clearTimeout(nextTimer); nextTimer = null; },
+  DATA, PLANETS, WORLDS, LEVELS, START, jumpFt, weightOn, seasonTilt, catOf, recheck, CLUES, record, gen: genLevel, newRound,
+  tapPlanet, answer, land, doJump, jumpPlan, visit, goSpace, showCompare, planetScreen,
+  setLevel(i) { P.lv = i; P.st = { streak: 0, miss: 0 }; persist(); newRound(false); },
+  get state() { return { level: P.lv, streak: P.st.streak, miss: P.st.miss, stars: P.stars, task, missed, won, mode, focus, jumping: !!jump, jumpsSeen: Object.assign({}, jumpsSeen), astroY: astro.position.y }; },
+};
+fit(); { const c = spaceCam(); camera.position.copy(c.pos); camTarget.copy(c.look); camera.lookAt(camTarget); }
+newRound(false); requestAnimationFrame(frame);
+setTimeout(() => say(task.text), 600);
+</script>
+</body>
+</html>

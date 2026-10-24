@@ -1,0 +1,783 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Circuit Lab</title>
+<!--
+  Circuit Lab. Drag batteries, wires, bulbs, switches and buzzers onto a 3D board to light up a house.
+  One file, offline, no network.
+  A real circuit solver (nodal analysis) decides what lights up. Each battery is 3 volts with a small inside
+  resistance, every bulb and buzzer is 4 ohms, and wires are almost 0 ohms. Bulb brightness is the power in the
+  bulb compared with one bulb on one battery, so two bulbs in a row really glow dim and two side by side really
+  glow bright. A shortcut with no bulb in it makes a short circuit.
+  The ladder of levels goes from closing one gap, to switches and buzzers, to series and parallel, to puzzle houses.
+  Four right first try in a row moves up a level; two missed puzzles in a row moves down.
+  Progress is kept in localStorage (key circuit-lab-v1). New players start at a 2nd grade level.
+  Test hook: window.CIRCUIT_LAB.
+  three.js r149 is inlined below under its MIT License (Copyright 2010-2023 three.js authors).
+-->
+<style>
+  :root { --ink: #2B2140; --paper: #FFF9F0; --pink: #FF4F8B; --sun: #FFC93C; --sky: #58C7F0; --leaf: #5CD38B; --grape: #9B6BFF; }
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); background: #1E1446; }
+  body { touch-action: none; user-select: none; -webkit-user-select: none; }
+  button { font-family: inherit; color: var(--ink); }
+  #app { position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr; grid-template-columns: minmax(0, 1fr); }
+  /* The right 210px of the header stays clear: the Home pill sits there. */
+  header { display: flex; align-items: center; gap: 10px; padding: 10px 210px 10px 14px; background: linear-gradient(90deg, #FFC93C, #FF8A3D); border-bottom: 4px solid var(--ink); z-index: 3; }
+  header h1 { font-size: 26px; margin: 0; font-weight: 900; white-space: nowrap; }
+  #badge { font-size: 17px; font-weight: 800; background: #fff; border: 3px solid var(--ink); border-radius: 999px; padding: 5px 12px; margin-right: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  header > :not(#badge) { flex: none; }
+  #stars { font-size: 22px; font-weight: 900; white-space: nowrap; }
+  .pill { border: 3px solid var(--ink); background: #fff; border-radius: 999px; padding: 8px 14px; font-size: 19px; font-weight: 800; cursor: pointer; }
+  main { position: relative; min-height: 0; overflow: hidden; }
+  canvas#gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #askRow { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); display: flex; gap: 10px; align-items: center; z-index: 2; max-width: 94%; }
+  #ask { font-size: 25px; font-weight: 900; background: #fff; border: 4px solid var(--ink); border-radius: 26px; padding: 8px 20px; text-align: center; box-shadow: 0 6px 0 var(--grape); }
+  #hear { flex: none; width: 64px; height: 64px; border-radius: 50%; border: 4px solid var(--ink); background: var(--sky); font-size: 30px; cursor: pointer; }
+  #tray { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; gap: 12px; z-index: 2; padding: 10px 14px; background: #ffffffd9; border: 4px solid var(--ink); border-radius: 30px; }
+  .part { position: relative; width: 104px; height: 96px; border: 4px solid var(--ink); border-radius: 22px; background: #fff; cursor: grab; display: grid; place-items: center; touch-action: none; }
+  .part svg { width: 74px; height: 58px; pointer-events: none; }
+  .part .n { position: absolute; top: -12px; right: -12px; min-width: 38px; height: 38px; border-radius: 19px; background: var(--sun); border: 3px solid var(--ink); font-size: 21px; font-weight: 900; display: grid; place-items: center; }
+  .part.empty { opacity: .35; }
+  .part:active { transform: scale(.95); }
+  #done { position: absolute; right: 18px; bottom: 18px; width: 110px; height: 110px; border-radius: 50%; border: 5px solid var(--ink); background: var(--leaf); font-size: 54px; font-weight: 900; cursor: pointer; z-index: 2; box-shadow: 0 7px 0 var(--ink); }
+  #done:active { transform: translateY(4px); box-shadow: 0 3px 0 var(--ink); }
+  #quiz { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: none; gap: 24px; z-index: 2; }
+  #quiz.on { display: flex; }
+  #quiz button { border: 5px solid var(--ink); border-radius: 26px; padding: 16px 30px; font-size: 30px; font-weight: 900; cursor: pointer; box-shadow: 0 7px 0 var(--ink); }
+  #qa { background: var(--pink); color: #fff; } #qb { background: var(--sky); }
+  #quiz button.no { background: #ddd; animation: shake .4s; }
+  #ghost { position: absolute; width: 84px; height: 70px; pointer-events: none; display: none; z-index: 4; transform: translate(-50%, -60%); filter: drop-shadow(0 6px 4px #0006); }
+  #ghost svg { width: 100%; height: 100%; }
+  #card { position: absolute; inset: 0; display: none; place-items: center; z-index: 5; pointer-events: none; }
+  #card.on { display: grid; }
+  /* A win card sits low, so the solved board, tank or planet stays in view behind it. */
+  #card.on.win { place-items: end center; padding-bottom: 12px; box-sizing: border-box; }
+  #card.win .c { display: flex; align-items: center; gap: 18px; padding: 10px 22px; font-size: 28px; max-width: 92%; box-shadow: 0 8px 0 var(--pink); text-align: left; }
+  #card.win .c small { font-size: 18px; margin: 0; max-width: 560px; }
+  #card.win .c button { margin: 0; flex: none; }
+  #card .c { background: #fff; border: 5px solid var(--ink); border-radius: 30px; padding: 22px 34px; font-size: 34px; font-weight: 900; text-align: center; box-shadow: 0 12px 0 var(--pink); animation: pop .4s cubic-bezier(.2,1.6,.4,1); max-width: 78%; pointer-events: auto; }
+  #card .c small { display: block; font-size: 22px; font-weight: 700; margin-top: 8px; }
+  #card .c button { margin-top: 14px; font-size: 26px; padding: 10px 26px; background: var(--leaf); }
+  #card.bad .c { box-shadow: 0 12px 0 var(--sun); }
+  @keyframes pop { from { transform: scale(.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+  @keyframes shake { 25% { transform: translateX(-8px); } 75% { transform: translateX(8px); } }
+  @media (max-height: 760px) { .part { width: 86px; height: 78px; } .part svg { width: 62px; height: 48px; } #done { width: 92px; height: 92px; font-size: 44px; } #ask { font-size: 21px; } }
+  .conf { position: absolute; width: 14px; height: 20px; z-index: 6; pointer-events: none; border-radius: 3px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>⚡ Circuit Lab</h1>
+    <span id="badge"></span>
+    <span id="stars">⭐ 0</span>
+    <button class="pill" id="skip" title="New puzzle">🔀 New</button>
+  </header>
+  <main id="main">
+    <canvas id="gl"></canvas>
+    <div id="askRow"><div id="ask"></div><button id="hear" title="Hear it again">🔈</button></div>
+    <div id="tray"></div>
+    <div id="quiz"><button id="qa">⬅ Left house</button><button id="qb">Right house ➡</button></div>
+    <button id="done" title="Done">✓</button>
+    <div id="ghost"></div>
+    <div id="card"></div>
+  </main>
+</div>
+<script>/*@@THREE@@*/</script>
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+const rnd = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+const range = n => Array.from({ length: n }, (_, i) => i);
+
+// ---------------------------------------------------------------------------
+// Circuit model and solver
+// ---------------------------------------------------------------------------
+// A board is a grid of nodes. A part sits on the edge between two neighbor nodes.
+// Edge ids: 'h,i,j' joins node (i,j) to (i+1,j). 'v,i,j' joins (i,j) to (i,j+1).
+// circ = { cols, rows, parts: { edge: { t, fixed, on, dir } } }
+const PHYS = { V: 3, r: 0.2, wire: 0.01, load: 4 };
+const P0 = Math.pow(PHYS.V / (PHYS.r + PHYS.load), 2) * PHYS.load; // one bulb on one battery
+const LIT = 0.12, DIM_MAX = 0.5, SUPER = 2, BUZZ = 0.15, SHORT = 5;
+
+function ends(e) { const s = e.split(','), i = +s[1], j = +s[2]; return s[0] === 'h' ? [[i, j], [i + 1, j]] : [[i, j], [i, j + 1]]; }
+function allEdges(cols, rows) {
+  const out = [];
+  for (let j = 0; j < rows; j++) for (let i = 0; i < cols - 1; i++) out.push('h,' + i + ',' + j);
+  for (let j = 0; j < rows - 1; j++) for (let i = 0; i < cols; i++) out.push('v,' + i + ',' + j);
+  return out;
+}
+function gauss(A, b) {
+  const n = b.length, x = new Float64Array(n);
+  for (let c = 0; c < n; c++) {
+    let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+    if (p !== c) { const t = A[p]; A[p] = A[c]; A[c] = t; const tb = b[p]; b[p] = b[c]; b[c] = tb; }
+    const d = A[c][c]; if (Math.abs(d) < 1e-15) continue;
+    for (let r = c + 1; r < n; r++) { const f = A[r][c] / d; if (!f) continue; for (let k = c; k < n; k++) A[r][k] -= f * A[c][k]; b[r] -= f * b[c]; }
+  }
+  for (let r = n - 1; r >= 0; r--) { let s = b[r]; for (let k = r + 1; k < n; k++) s -= A[r][k] * x[k]; x[r] = Math.abs(A[r][r]) < 1e-15 ? 0 : s / A[r][r]; }
+  return x;
+}
+// Nodal analysis. Each battery is a Norton source (V/r in parallel with 1/r). over = { edge: switchOn } for what-if tests.
+function solve(circ, over) {
+  const n = circ.cols * circ.rows, id = p => p[1] * circ.cols + p[0];
+  const G = range(n).map(() => new Float64Array(n)), I = new Float64Array(n), st = [];
+  for (const e in circ.parts) {
+    const p = circ.parts[e], [A, B] = ends(e), a = id(A), b = id(B);
+    const on = over && (e in over) ? over[e] : p.on;
+    let g = 0, J = 0;
+    if (p.t === 'wire') g = 1 / PHYS.wire;
+    else if (p.t === 'switch') { if (!on) { st.push([e, p, a, b, 0, 0]); continue; } g = 1 / PHYS.wire; }
+    else if (p.t === 'bulb' || p.t === 'buzzer') g = 1 / PHYS.load;
+    else if (p.t === 'battery') { g = 1 / PHYS.r; J = PHYS.V / PHYS.r * (p.dir || 1); }
+    G[a][a] += g; G[b][b] += g; G[a][b] -= g; G[b][a] -= g; I[b] += J; I[a] -= J;
+    st.push([e, p, a, b, g, J]);
+  }
+  for (let i = 0; i < n; i++) G[i][i] += 1e-6;
+  const v = gauss(G, I), cur = {}, bright = {};
+  let batt = 0;
+  for (const [e, p, a, b, g, J] of st) {
+    const i = (v[a] - v[b]) * g + J; // current from node a to node b through the part
+    cur[e] = i;
+    if (p.t === 'bulb') bright[e] = i * i * PHYS.load / P0;
+    if (p.t === 'battery') batt = Math.max(batt, Math.abs(i));
+  }
+  return { v, cur, bright, batt, short: batt > SHORT };
+}
+function cls(br) { return br < LIT ? 'dark' : br < DIM_MAX ? 'dim' : br < SUPER ? 'bright' : 'super'; }
+function meets(br, want) { const c = cls(br); if (want === 'lit') return c !== 'dark'; if (want === 'bright') return c === 'bright' || c === 'super'; return c === want; }
+const ofType = (circ, t) => Object.keys(circ.parts).filter(e => circ.parts[e].t === t);
+const loadsOf = circ => Object.keys(circ.parts).filter(e => circ.parts[e].t === 'bulb' || circ.parts[e].t === 'buzzer');
+function loadOn(circ, s, e) { return circ.parts[e].t === 'bulb' ? s.bright[e] >= LIT : Math.abs(s.cur[e]) >= BUZZ; }
+function loadGood(circ, s, e, goal) { return circ.parts[e].t === 'bulb' ? meets(s.bright[e], goal.bright) : Math.abs(s.cur[e]) >= BUZZ; }
+
+// Does the board meet the goal? goal = { bulbs, bright, buzzer, ctrl: 'any' | 'each' }
+function evaluate(circ, goal) {
+  const s = solve(circ);
+  if (s.short) return { ok: false, why: 'short', s };
+  const bulbs = ofType(circ, 'bulb'), buzz = ofType(circ, 'buzzer'), sw = ofType(circ, 'switch');
+  if (bulbs.length < goal.bulbs) return { ok: false, why: 'bulbs', s };
+  const offSwitch = sw.some(w => !circ.parts[w].on);
+  for (const e of bulbs) if (!meets(s.bright[e], goal.bright)) return { ok: false, why: cls(s.bright[e]) === 'dark' ? (offSwitch ? 'off' : 'dark') : 'level', got: cls(s.bright[e]), s };
+  if (goal.buzzer && (!buzz.length || buzz.some(e => Math.abs(s.cur[e]) < BUZZ))) return { ok: false, why: offSwitch ? 'off' : 'buzz', s };
+  const ld = loadsOf(circ);
+  if (goal.ctrl === 'any') {
+    const ok = sw.some(w => { const t = solve(circ, { [w]: false }); return ld.every(e => !loadOn(circ, t, e)); });
+    if (!ok) return { ok: false, why: 'ctrl', s };
+  } else if (goal.ctrl === 'each') {
+    for (const L of ld) {
+      const ok = sw.some(w => { const t = solve(circ, { [w]: false }); return !t.short && !loadOn(circ, t, L) && ld.every(o => o === L || loadGood(circ, t, o, goal)); });
+      if (!ok) return { ok: false, why: 'ctrlEach', s };
+    }
+  }
+  return { ok: true, s };
+}
+
+// ---------------------------------------------------------------------------
+// Level generators. Each returns fixed parts, a tray inventory, a goal and one known solution.
+// ---------------------------------------------------------------------------
+const COLS = 8, ROWS = 5;
+const part = (e, t, o) => Object.assign({ e, t, on: true, dir: 1 }, o || {});
+function rectLoop(x0, y0, w, h) {
+  const e = [];
+  for (let i = 0; i < w; i++) e.push('h,' + (x0 + i) + ',' + y0);
+  for (let j = 0; j < h; j++) e.push('v,' + (x0 + w) + ',' + (y0 + j));
+  for (let i = w - 1; i >= 0; i--) e.push('h,' + (x0 + i) + ',' + (y0 + h));
+  for (let j = h - 1; j >= 0; j--) e.push('v,' + x0 + ',' + (y0 + j));
+  return e;
+}
+const vcol = (x, y0, h) => range(h).map(j => 'v,' + x + ',' + (y0 + j));
+function ladder(xs, y0, h) {
+  const rails = [];
+  for (let i = xs[0]; i < xs[xs.length - 1]; i++) rails.push('h,' + i + ',' + y0, 'h,' + i + ',' + (y0 + h));
+  return { rails, rungs: xs.map(x => vcol(x, y0, h)) };
+}
+const spot = (w, h, cols = COLS, rows = ROWS) => [rnd(0, cols - 1 - w), rnd(0, rows - 1 - h)];
+const without = (a, ...xs) => a.filter(e => !xs.flat().includes(e));
+function lvl(o) { return Object.assign({ cols: COLS, rows: ROWS, inv: {}, fixed: [], solution: [] }, o); }
+
+// Simple loop with a battery on the left side and one load somewhere else.
+function loopWithLoad(load, wMin, wMax) {
+  const w = rnd(wMin, wMax), h = rnd(1, 2), [x0, y0] = spot(w, h), loop = rectLoop(x0, y0, w, h);
+  const left = vcol(x0, y0, h), bat = pick(left), ld = pick(without(loop, left));
+  return { loop, bat, ld, wires: without(loop, bat, ld), x0, y0, w, h };
+}
+
+const LEVELS = [
+  { name: 'Close the gap', gen() {
+    const w = rnd(2, 3), [x0, y0] = spot(w, 1), loop = rectLoop(x0, y0, w, 1);
+    const bat = 'v,' + x0 + ',' + y0, bulb = 'v,' + (x0 + w) + ',' + y0, wires = shuffle(without(loop, bat, bulb));
+    const gaps = wires.slice(0, rnd(1, 2));
+    return lvl({ text: 'Drag a wire into the gap to light the room!', goal: { bulbs: 1, bright: 'lit' },
+      fixed: [part(bat, 'battery'), part(bulb, 'bulb'), ...without(wires, gaps).map(e => part(e, 'wire'))],
+      solution: gaps.map(e => part(e, 'wire')), inv: { wire: gaps.length + 1 } });
+  } },
+  { name: 'Make a loop', gen() {
+    const L = loopWithLoad('bulb', 2, 4);
+    return lvl({ text: 'Connect the battery to the bulb with wires. Make a full loop!', goal: { bulbs: 1, bright: 'lit' },
+      fixed: [part(L.bat, 'battery'), part(L.ld, 'bulb')], solution: L.wires.map(e => part(e, 'wire')), inv: { wire: L.wires.length + 2 } });
+  } },
+  { name: 'Switch it on', gen() {
+    const L = loopWithLoad('bulb', 2, 4), wires = shuffle(L.wires.slice()), sw = wires[0], gaps = wires.slice(1, 1 + rnd(1, 2));
+    return lvl({ text: 'Add a switch to the loop, then tap it to turn the light on.', goal: { bulbs: 1, bright: 'lit', ctrl: 'any' },
+      fixed: [part(L.bat, 'battery'), part(L.ld, 'bulb'), ...without(wires, sw, gaps).map(e => part(e, 'wire'))],
+      solution: [part(sw, 'switch'), ...gaps.map(e => part(e, 'wire'))], inv: { wire: gaps.length + 1, switch: 1 } });
+  } },
+  { name: 'Doorbell', gen() {
+    const L = loopWithLoad('buzzer', 2, 4), wires = shuffle(L.wires.slice()), sw = wires[0], gaps = wires.slice(1, 1 + rnd(1, 2));
+    return lvl({ text: 'Build a doorbell! Add a switch so the buzzer can ring.', goal: { bulbs: 0, buzzer: true, ctrl: 'any' },
+      fixed: [part(L.bat, 'battery'), part(L.ld, 'buzzer'), ...without(wires, sw, gaps).map(e => part(e, 'wire'))],
+      solution: [part(sw, 'switch'), ...gaps.map(e => part(e, 'wire'))], inv: { wire: gaps.length + 1, switch: 1 } });
+  } },
+  { name: 'Two in a row', gen() {
+    const w = rnd(3, 4), h = rnd(1, 2), [x0, y0] = spot(w, h), loop = rectLoop(x0, y0, w, h), left = vcol(x0, y0, h);
+    const bat = pick(left), bulbs = shuffle(without(loop, left)).slice(0, 2), wires = shuffle(without(loop, bat, bulbs)), gaps = wires.slice(0, rnd(1, 2));
+    return lvl({ text: 'Put 2 bulbs in ONE loop, one after the other. How bright are they?', goal: { bulbs: 2, bright: 'dim' },
+      fixed: [part(bat, 'battery'), ...without(wires, gaps).map(e => part(e, 'wire'))],
+      solution: [...bulbs.map(e => part(e, 'bulb')), ...gaps.map(e => part(e, 'wire'))], inv: { bulb: 2, wire: gaps.length + 2 } });
+  } },
+  { name: 'Which is brighter?', quiz: true, gen() { return quizGen(); } },
+  { name: 'Bright rooms', gen() {
+    const a = rnd(1, 2), b = rnd(1, 2), h = rnd(1, 2), [x0, y0] = spot(a + b, h), xs = [x0, x0 + a, x0 + a + b], L = ladder(xs, y0, h);
+    const bat = pick(L.rungs[0]), bulbs = [pick(L.rungs[1]), pick(L.rungs[2])];
+    const wires = shuffle(without([...L.rails, ...L.rungs.flat()], bat, bulbs)), keep = wires.slice(0, Math.floor(wires.length / 2)), gaps = without(wires, keep);
+    return lvl({ text: 'Light 2 rooms, and make BOTH bulbs bright!', goal: { bulbs: 2, bright: 'bright' },
+      fixed: [part(bat, 'battery'), ...keep.map(e => part(e, 'wire'))],
+      solution: [...bulbs.map(e => part(e, 'bulb')), ...gaps.map(e => part(e, 'wire'))], inv: { bulb: 2, wire: gaps.length + 2 } });
+  } },
+  { name: 'Double power', gen() {
+    const L = loopWithLoad('bulb', 2, 4), right = vcol(L.x0 + L.w, L.y0, L.h), bulb = pick(right);
+    const wires = shuffle(without(L.loop, L.bat, bulb)), slot = wires.find(e => e[0] === 'h'), rest = without(wires, slot), gaps = rest.slice(0, rnd(1, 2));
+    const fixed = [part(L.bat, 'battery'), part(bulb, 'bulb'), ...without(rest, gaps).map(e => part(e, 'wire'))];
+    const sol = [part(slot, 'battery', { dir: 1 }), ...gaps.map(e => part(e, 'wire'))];
+    const goal = { bulbs: 1, bright: 'super' };
+    if (!evaluate(build(fixed, sol), goal).ok) sol[0].dir = -1;
+    return lvl({ text: 'Add a second battery to make the bulb SUPER bright!', goal, fixed, solution: sol, inv: { battery: 1, wire: gaps.length + 1 } });
+  } },
+  { name: 'A switch for each room', gen() {
+    const a = rnd(1, 2), b = rnd(1, 2), [x0, y0] = spot(a + b, 2), xs = [x0, x0 + a, x0 + a + b], L = ladder(xs, y0, 2);
+    const bat = pick(L.rungs[0]), bulbs = [], sws = [];
+    for (const k of [1, 2]) { const r = shuffle(L.rungs[k].slice()); bulbs.push(r[0]); sws.push(r[1]); }
+    const wires = shuffle(without([...L.rails, ...L.rungs[0]], bat)), keep = wires.slice(0, Math.ceil(wires.length / 2)), gaps = without(wires, keep);
+    return lvl({ text: 'Light both rooms bright. Give each room its own switch!', goal: { bulbs: 2, bright: 'bright', ctrl: 'each' },
+      fixed: [part(bat, 'battery'), ...bulbs.map(e => part(e, 'bulb')), ...keep.map(e => part(e, 'wire'))],
+      solution: [...sws.map(e => part(e, 'switch')), ...gaps.map(e => part(e, 'wire'))], inv: { switch: 2, wire: gaps.length + 1 } });
+  } },
+  { name: 'Puzzle house', gen() {
+    const sp = [rnd(1, 2), rnd(1, 2), rnd(1, 2)], h = rnd(1, 2), [x0, y0] = spot(sp[0] + sp[1] + sp[2], h);
+    const xs = [x0, x0 + sp[0], x0 + sp[0] + sp[1], x0 + sp[0] + sp[1] + sp[2]], L = ladder(xs, y0, h);
+    const bat = pick(L.rungs[0]), bulbs = [1, 2, 3].map(k => pick(L.rungs[k])), rungWires = without(L.rungs.flat(), bat, bulbs);
+    return lvl({ text: 'Puzzle house! Light all 3 rooms bright with just these wires.', goal: { bulbs: 3, bright: 'bright' },
+      fixed: [part(bat, 'battery'), ...bulbs.map(e => part(e, 'bulb')), ...rungWires.map(e => part(e, 'wire'))],
+      solution: L.rails.map(e => part(e, 'wire')), inv: { wire: L.rails.length + rnd(0, 1) } });
+  } },
+  { name: 'Doorbell house', gen() {
+    const sp = [rnd(1, 2), rnd(1, 2), rnd(1, 2)], [x0, y0] = spot(sp[0] + sp[1] + sp[2], 2);
+    const xs = [x0, x0 + sp[0], x0 + sp[0] + sp[1], x0 + sp[0] + sp[1] + sp[2]], L = ladder(xs, y0, 2);
+    const bat = pick(L.rungs[0]), kinds = shuffle(['bulb', 'bulb', 'buzzer']), loads = [], sws = [];
+    [1, 2, 3].forEach((k, n) => { const r = shuffle(L.rungs[k].slice()); loads.push(part(r[0], kinds[n])); sws.push(r[1]); });
+    const wires = shuffle(without([...L.rails, ...L.rungs[0]], bat)), keep = wires.slice(0, Math.ceil(wires.length / 2)), gaps = without(wires, keep);
+    return lvl({ text: 'Light 2 rooms bright and wire the doorbell. Each one gets its own switch!', goal: { bulbs: 2, bright: 'bright', buzzer: true, ctrl: 'each' },
+      fixed: [part(bat, 'battery'), ...loads, ...keep.map(e => part(e, 'wire'))],
+      solution: [...sws.map(e => part(e, 'switch')), ...gaps.map(e => part(e, 'wire'))], inv: { switch: 3, wire: gaps.length + 1 } });
+  } },
+];
+const START = 2;
+
+function build(fixed, extra) {
+  const c = { cols: COLS, rows: ROWS, parts: {} };
+  for (const p of fixed) c.parts[p.e] = Object.assign({}, p, { fixed: true });
+  for (const p of extra || []) c.parts[p.e] = Object.assign({}, p, { fixed: false });
+  return c;
+}
+
+// Quiz: two small houses, guess which glows brighter before the lights come on.
+function smallCirc(kind) {
+  const c = { cols: 5, rows: 3, parts: {} }, add = (e, t, o) => { c.parts[e] = part(e, t, Object.assign({ fixed: true }, o)); };
+  const loop = rectLoop(1, 0, 2, 1);
+  if (kind === 'one') { loop.forEach(e => add(e, 'wire')); add('v,1,0', 'battery'); add('v,3,0', 'bulb'); }
+  if (kind === 'series') { loop.forEach(e => add(e, 'wire')); add('v,1,0', 'battery'); add('v,3,0', 'bulb'); add('h,2,0', 'bulb'); }
+  if (kind === 'parallel') { const L = ladder([1, 2, 3], 0, 1); L.rails.forEach(e => add(e, 'wire')); add('v,1,0', 'battery'); add('v,2,0', 'bulb'); add('v,3,0', 'bulb'); }
+  if (kind === 'two') {
+    loop.forEach(e => add(e, 'wire')); add('v,1,0', 'battery'); add('v,3,0', 'bulb'); add('h,1,1', 'battery', { dir: 1 });
+    if (cls(solve(c).bright['v,3,0']) !== 'super') c.parts['h,1,1'].dir = -1;
+  }
+  return c;
+}
+const QUIZ = [
+  { a: 'one', b: 'series', why: 'One bulb gets all the push. Two bulbs in a row share it, so they glow dim.' },
+  { a: 'parallel', b: 'series', why: 'Side by side, each bulb has its own path, so both glow bright. In a row, they share and glow dim.' },
+  { a: 'two', b: 'one', why: 'Two batteries stacked the same way give more push, so the bulb glows brighter.' },
+];
+function maxBright(c) { const s = solve(c); return Math.max(0, ...Object.values(s.bright)); }
+function quizGen() {
+  const q = pick(QUIZ), flip = Math.random() < 0.5;
+  const A = smallCirc(flip ? q.b : q.a), B = smallCirc(flip ? q.a : q.b);
+  return { quiz: true, text: 'Which house will glow brighter? Guess before the lights come on!', A, B, ans: maxBright(A) > maxBright(B) ? 'A' : 'B', why: q.why, kinds: flip ? [q.b, q.a] : [q.a, q.b] };
+}
+
+// Checks that a generated level is a real puzzle: not solved at the start, solved by its solution, tray big enough.
+function validate(L) {
+  if (L.quiz) { const a = maxBright(L.A), b = maxBright(L.B), hi = Math.max(a, b), lo = Math.min(a, b); return { ok: hi > lo * 1.5 && (a > b ? 'A' : 'B') === L.ans && !solve(L.A).short && !solve(L.B).short }; }
+  const edges = new Set(allEdges(L.cols, L.rows)), seen = new Set();
+  for (const p of [...L.fixed, ...L.solution]) { if (!edges.has(p.e) || seen.has(p.e)) return { ok: false, why: 'edge ' + p.e }; seen.add(p.e); }
+  const need = {}; for (const p of L.solution) need[p.t] = (need[p.t] || 0) + 1;
+  for (const t in need) if ((L.inv[t] || 0) < need[t]) return { ok: false, why: 'inventory' };
+  const start = evaluate(build(L.fixed), L.goal); if (start.ok || start.why === 'short') return { ok: false, why: 'start' };
+  const end = evaluate(build(L.fixed, L.solution), L.goal); if (!end.ok) return { ok: false, why: 'solution ' + end.why };
+  return { ok: true };
+}
+function genLevel(i) {
+  for (let k = 0; k < 60; k++) { const L = LEVELS[i].gen(); L.level = i; if (validate(L).ok) return L; }
+  throw new Error('no valid puzzle for level ' + i);
+}
+
+// ---------------------------------------------------------------------------
+// Progress
+// ---------------------------------------------------------------------------
+const KEY = 'circuit-lab-v1';
+let P = { stars: 0, lv: START, st: { streak: 0, miss: 0 } };
+try { const s = JSON.parse(localStorage.getItem(KEY) || 'null'); if (s) P = Object.assign(P, s, { st: Object.assign({ streak: 0, miss: 0 }, s.st || {}) }); } catch (e) {}
+P.lv = Math.max(0, Math.min(LEVELS.length - 1, P.lv | 0));
+function persist() { try { localStorage.setItem(KEY, JSON.stringify(P)); } catch (e) {} }
+// One result per puzzle: right first try, or missed. Returns +1, -1 or 0 for a level change.
+function record(right) {
+  const s = P.st; let change = 0;
+  if (right) { s.miss = 0; s.streak++; if (s.streak >= 4 && P.lv < LEVELS.length - 1) { P.lv++; s.streak = 0; change = 1; } }
+  else { s.streak = 0; s.miss++; if (s.miss >= 2 && P.lv > 0) { P.lv--; s.miss = 0; change = -1; } }
+  persist(); return change;
+}
+
+// ---------------------------------------------------------------------------
+// Sound and speech
+// ---------------------------------------------------------------------------
+function say(t) { try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(t); u.rate = 0.92; u.pitch = 1.1; speechSynthesis.speak(u); } catch (e) {} }
+let AC = null;
+function ac() { if (!AC) { try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { AC = null; } } if (AC && AC.state === 'suspended') AC.resume(); return AC; }
+function tone(f, d = 0.15, type = 'sine', vol = 0.18, when = 0) {
+  const c = ac(); if (!c) return; const t = c.currentTime + when, o = c.createOscillator(), g = c.createGain();
+  o.type = type; o.frequency.setValueAtTime(f, t); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+  o.connect(g); g.connect(c.destination); o.start(t); o.stop(t + d + 0.05);
+}
+const SND = {
+  snap() { tone(880, 0.06, 'square', 0.08); tone(1320, 0.05, 'sine', 0.08, 0.03); },
+  pick() { tone(520, 0.06, 'triangle', 0.1); },
+  click() { tone(300, 0.04, 'square', 0.1); tone(200, 0.05, 'square', 0.08, 0.04); },
+  light() { tone(660, 0.12, 'sine', 0.12); tone(990, 0.2, 'sine', 0.1, 0.06); },
+  win() { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.28, 'triangle', 0.16, i * 0.09)); },
+  miss() { tone(330, 0.18, 'sawtooth', 0.08); tone(247, 0.25, 'sawtooth', 0.08, 0.14); },
+  zap() { for (let i = 0; i < 6; i++) tone(120 + Math.random() * 900, 0.05, 'sawtooth', 0.08, i * 0.04); },
+};
+let buzzOsc = null;
+function buzzer(on) {
+  const c = ac(); if (!c) return;
+  if (on && !buzzOsc) {
+    const o = c.createOscillator(), lfo = c.createOscillator(), g = c.createGain(), lg = c.createGain();
+    o.type = 'square'; o.frequency.value = 330; lfo.type = 'square'; lfo.frequency.value = 9; lg.gain.value = 0.05; g.gain.value = 0.05;
+    lfo.connect(lg); lg.connect(g.gain); o.connect(g); g.connect(c.destination); o.start(); lfo.start(); buzzOsc = { o, lfo, g };
+  } else if (!on && buzzOsc) { try { buzzOsc.o.stop(); buzzOsc.lfo.stop(); } catch (e) {} buzzOsc = null; }
+}
+
+// ---------------------------------------------------------------------------
+// 3D scene
+// ---------------------------------------------------------------------------
+const canvas = $('gl');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x2A1B6E);
+scene.fog = new THREE.Fog(0x2A1B6E, 18, 34);
+const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 100);
+scene.add(new THREE.HemisphereLight(0xFFF2FF, 0x5B3FA0, 0.85));
+const sunL = new THREE.DirectionalLight(0xffffff, 0.9); sunL.position.set(4, 10, 6); scene.add(sunL);
+const fillL = new THREE.DirectionalLight(0x9BE7FF, 0.35); fillL.position.set(-6, 4, -4); scene.add(fillL);
+
+const mat = (c, o) => new THREE.MeshStandardMaterial(Object.assign({ color: c, roughness: 0.45, metalness: 0.05 }, o || {}));
+const MT = {
+  board: mat(0x7B3FF2, { roughness: 0.6 }), edge: mat(0x9E7BFF, { roughness: 0.7 }), peg: mat(0xFFC93C, { metalness: 0.3, roughness: 0.3 }),
+  wire: mat(0xFF7A1A, { metalness: 0.35, roughness: 0.35 }), plate: mat(0x2B2140, { roughness: 0.8 }), ink: mat(0x2B2140),
+  cell: mat(0x1FB5FF), cap: mat(0xFFC93C, { metalness: 0.4, roughness: 0.3 }), metal: mat(0xD8D3E8, { metalness: 0.7, roughness: 0.25 }),
+  sw: mat(0xFF4F8B), buzz: mat(0x33285A), buzzTop: mat(0x5CD38B), white: mat(0xffffff), roof: mat(0xFF4F8B), house: mat(0xFFE066),
+  door: mat(0x58C7F0), floor: mat(0x3A2A88, { roughness: 0.9 }), hi: new THREE.MeshBasicMaterial({ color: 0xFFF27A, transparent: true, opacity: 0.55, depthWrite: false }),
+};
+const GEO = {
+  wire: new THREE.CylinderGeometry(0.075, 0.075, 1, 12).rotateZ(Math.PI / 2),
+  stub: new THREE.CylinderGeometry(0.06, 0.06, 1, 10).rotateZ(Math.PI / 2),
+  cell: new THREE.CylinderGeometry(0.2, 0.2, 0.62, 20).rotateZ(Math.PI / 2),
+  capG: new THREE.CylinderGeometry(0.21, 0.21, 0.12, 20).rotateZ(Math.PI / 2),
+  nub: new THREE.CylinderGeometry(0.08, 0.08, 0.08, 12).rotateZ(Math.PI / 2),
+  peg: new THREE.CylinderGeometry(0.11, 0.13, 0.12, 14),
+  glass: new THREE.SphereGeometry(0.27, 20, 16), socket: new THREE.CylinderGeometry(0.15, 0.13, 0.22, 16),
+  plate: new THREE.BoxGeometry(0.86, 0.04, 0.3), box: new THREE.BoxGeometry(1, 1, 1),
+  buzz: new THREE.CylinderGeometry(0.25, 0.27, 0.18, 24), buzzTop: new THREE.CylinderGeometry(0.2, 0.2, 0.04, 24),
+  ring: new THREE.TorusGeometry(0.3, 0.025, 8, 32).rotateX(Math.PI / 2), dot: new THREE.SphereGeometry(0.06, 8, 6),
+};
+function glowTex() {
+  const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+  const r = g.createRadialGradient(64, 64, 4, 64, 64, 64); r.addColorStop(0, 'rgba(255,250,200,1)'); r.addColorStop(0.35, 'rgba(255,220,90,0.55)'); r.addColorStop(1, 'rgba(255,200,60,0)');
+  g.fillStyle = r; g.fillRect(0, 0, 128, 128); const t = new THREE.CanvasTexture(c); return t;
+}
+function textTex(txt, color, bg) {
+  const c = document.createElement('canvas'); c.width = c.height = 128; const g = c.getContext('2d');
+  if (bg) { g.fillStyle = bg; g.beginPath(); g.arc(64, 64, 58, 0, 7); g.fill(); g.lineWidth = 8; g.strokeStyle = '#2B2140'; g.stroke(); }
+  g.fillStyle = color; g.font = '900 92px Segoe UI, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(txt, 64, 70);
+  const t = new THREE.CanvasTexture(c); return t;
+}
+const GLOW = glowTex(), PLUS = textTex('+', '#2B2140', '#FFC93C');
+
+// Floor under everything.
+const floor = new THREE.Mesh(new THREE.CircleGeometry(30, 48), MT.floor); floor.rotation.x = -Math.PI / 2; floor.position.y = -0.32; scene.add(floor);
+
+function makePart(p) {
+  const g = new THREE.Group(), add = (geo, m, x = 0, y = 0, z = 0, sx = 1, sy = 1, sz = 1) => { const o = new THREE.Mesh(geo, m); o.position.set(x, y, z); o.scale.set(sx, sy, sz); g.add(o); return o; };
+  const y = 0.2;
+  if (p.fixed) add(GEO.plate, MT.plate, 0, 0.03, 0);
+  if (p.t === 'wire') { add(GEO.wire, MT.wire, 0, y, 0, 0.92, 1, 1); return g; }
+  add(GEO.stub, MT.wire, -0.36, y, 0, 0.28, 1, 1); add(GEO.stub, MT.wire, 0.36, y, 0, 0.28, 1, 1);
+  if (p.t === 'battery') {
+    add(GEO.cell, MT.cell, 0, y + 0.05, 0); const d = p.dir || 1;
+    add(GEO.capG, MT.cap, 0.25 * d, y + 0.05, 0); add(GEO.nub, MT.metal, 0.34 * d, y + 0.05, 0);
+    const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: PLUS, depthTest: false })); s.position.set(0.3 * d, y + 0.48, 0); s.scale.set(0.34, 0.34, 1); s.renderOrder = 5; g.add(s);
+  } else if (p.t === 'bulb') {
+    add(GEO.socket, MT.metal, 0, y + 0.05, 0);
+    const gm = new THREE.MeshStandardMaterial({ color: 0xFFFFFF, emissive: 0xFFC93C, emissiveIntensity: 0, transparent: true, opacity: 0.85, roughness: 0.1 });
+    const glass = add(GEO.glass, gm, 0, y + 0.4, 0); g.userData.glass = glass;
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW, color: 0xFFD23C, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }));
+    halo.position.set(0, y + 0.42, 0); halo.scale.set(0.01, 0.01, 1); g.add(halo); g.userData.halo = halo;
+  } else if (p.t === 'switch') {
+    add(GEO.box, MT.sw, 0, y - 0.05, 0, 0.56, 0.1, 0.3); add(GEO.box, MT.metal, 0.22, y + 0.03, 0, 0.08, 0.1, 0.16);
+    const piv = new THREE.Group(); piv.position.set(-0.22, y + 0.06, 0); g.add(piv);
+    const lever = new THREE.Mesh(GEO.box, MT.metal); lever.scale.set(0.46, 0.05, 0.08); lever.position.x = 0.23; piv.add(lever);
+    const knob = new THREE.Mesh(GEO.nub, MT.sw); knob.rotation.y = Math.PI / 2; knob.scale.set(1.4, 1.4, 1.4); knob.position.set(0.3, 0.06, 0); piv.add(knob);
+    piv.rotation.z = p.on ? 0 : 0.65; g.userData.piv = piv;
+  } else if (p.t === 'buzzer') {
+    const body = add(GEO.buzz, MT.buzz, 0, y + 0.02, 0); add(GEO.buzzTop, MT.buzzTop, 0, y + 0.12, 0); g.userData.body = body;
+    const ring = add(GEO.ring, new THREE.MeshBasicMaterial({ color: 0x5CD38B, transparent: true, opacity: 0 }), 0, y + 0.15, 0); g.userData.ring = ring;
+  }
+  return g;
+}
+
+// A board draws one circuit and its house.
+class Board {
+  constructor(circ, opt) {
+    this.circ = circ; this.S = opt.S || 1; this.rooms = opt.rooms || 1; this.group = new THREE.Group(); this.group.position.set(opt.x || 0, 0, opt.z || 0); scene.add(this.group);
+    this.meshes = {}; this.lightsOn = opt.lightsOn !== false; this.sol = null;
+    const { cols, rows } = circ, S = this.S, W = (cols - 1) * S, D = (rows - 1) * S;
+    const slab = new THREE.Mesh(GEO.box, MT.board); slab.scale.set(W + 1.1 * S, 0.3, D + 1.1 * S); slab.position.y = -0.15; this.group.add(slab);
+    const rim = new THREE.Mesh(GEO.box, MT.ink); rim.scale.set(W + 1.25 * S, 0.22, D + 1.25 * S); rim.position.y = -0.22; this.group.add(rim);
+    this.slotMeshes = {};
+    for (const e of allEdges(cols, rows)) { const m = new THREE.Mesh(GEO.box, MT.edge); m.scale.set(0.62 * S, 0.02, 0.07 * S); this.placeOnEdge(m, e); m.position.y = 0.01; this.group.add(m); this.slotMeshes[e] = m; }
+    for (let j = 0; j < rows; j++) for (let i = 0; i < cols; i++) { const m = new THREE.Mesh(GEO.peg, MT.peg); m.scale.setScalar(S); const p = this.node(i, j); m.position.set(p.x, 0.06, p.z); this.group.add(m); }
+    this.hi = new THREE.Mesh(GEO.box, MT.hi); this.hi.scale.set(0.95 * S, 0.5, 0.36 * S); this.hi.visible = false; this.group.add(this.hi);
+    this.dots = new THREE.InstancedMesh(GEO.dot, new THREE.MeshBasicMaterial({ color: 0xFFF6A8 }), 400); this.dots.count = 0; this.dots.scale.setScalar(1); this.group.add(this.dots);
+    this.phase = 0; this.makeHouse(W, D);
+    this.sync();
+  }
+  node(i, j) { return { x: (i - (this.circ.cols - 1) / 2) * this.S, z: (j - (this.circ.rows - 1) / 2) * this.S }; }
+  mid(e) { const [a, b] = ends(e), p = this.node(...a), q = this.node(...b); return new THREE.Vector3((p.x + q.x) / 2, 0.2, (p.z + q.z) / 2); }
+  placeOnEdge(obj, e) { const m = this.mid(e); obj.position.set(m.x, 0, m.z); obj.rotation.y = e[0] === 'v' ? -Math.PI / 2 : 0; }
+  makeHouse(W, D) {
+    const n = this.rooms, S = this.S, hw = Math.max(2.4, n * 1.15 + 0.5) * S, hh = 1.5 * S, hd = 1.1 * S, z = -(D / 2 + 0.55 * S + hd / 2 + 0.25 * S);
+    const h = new THREE.Group(); h.position.set(0, 0, z); this.group.add(h); this.house = h;
+    const body = new THREE.Mesh(GEO.box, MT.house); body.scale.set(hw, hh, hd); body.position.y = hh / 2 - 0.3; h.add(body);
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(Math.SQRT1_2, 1, 4).rotateY(Math.PI / 4), MT.roof); roof.scale.set(hw + 0.35 * S, 0.9 * S, hd + 0.35 * S); roof.position.y = hh - 0.3 + 0.45 * S; h.add(roof);
+    const chim = new THREE.Mesh(GEO.box, MT.door); chim.scale.set(0.3 * S, 0.6 * S, 0.3 * S); chim.position.set(hw * 0.3, hh + 0.2 * S, 0); h.add(chim);
+    this.windows = [];
+    for (let k = 0; k < n; k++) {
+      const x = (k - (n - 1) / 2) * 1.1 * S;
+      const fr = new THREE.Mesh(GEO.box, MT.ink); fr.scale.set(0.78 * S, 0.68 * S, 0.06); fr.position.set(x, hh * 0.55 - 0.3, hd / 2 + 0.02); h.add(fr);
+      const wm = new THREE.MeshStandardMaterial({ color: 0x3B3470, emissive: 0xFFD54A, emissiveIntensity: 0 });
+      const w = new THREE.Mesh(GEO.box, wm); w.scale.set(0.62 * S, 0.52 * S, 0.06); w.position.set(x, hh * 0.55 - 0.3, hd / 2 + 0.05); h.add(w);
+      const halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: GLOW, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, opacity: 0 }));
+      halo.position.set(x, hh * 0.55 - 0.3, hd / 2 + 0.25); halo.scale.set(1.6 * S, 1.4 * S, 1); h.add(halo);
+      this.windows.push({ w, halo });
+    }
+    if (n === 0) { const d = new THREE.Mesh(GEO.box, MT.door); d.scale.set(0.5 * S, 0.8 * S, 0.06); d.position.set(0, 0.1, hd / 2 + 0.03); h.add(d); }
+    const bell = new THREE.Mesh(new THREE.ConeGeometry(0.16 * S, 0.26 * S, 16), MT.cap); bell.position.set(-hw / 2 + 0.25 * S, hh - 0.55, hd / 2 + 0.12); h.add(bell); this.bell = bell;
+  }
+  dispose() { scene.remove(this.group); }
+  sync() {
+    const parts = this.circ.parts;
+    for (const e in this.meshes) { const p = parts[e]; if (!p || this.meshes[e].key !== key(p)) { this.group.remove(this.meshes[e].g); delete this.meshes[e]; } }
+    for (const e in parts) {
+      if (this.meshes[e]) continue; const g = makePart(parts[e]); g.scale.setScalar(this.S); this.placeOnEdge(g, e); this.group.add(g); this.meshes[e] = { g, key: key(parts[e]), pop: 0 };
+    }
+    for (const e in this.slotMeshes) this.slotMeshes[e].visible = !parts[e];
+    this.sol = solve(this.circ);
+  }
+  pop(e) { if (this.meshes[e]) this.meshes[e].pop = 1; }
+  bulbsInRoomOrder() { return ofType(this.circ, 'bulb').sort((a, b) => { const A = ends(a)[0], B = ends(b)[0]; return A[0] - B[0] || A[1] - B[1]; }); }
+  tick(dt, t) {
+    const s = this.sol, on = this.lightsOn && s && !s.short, parts = this.circ.parts;
+    for (const e in this.meshes) {
+      const m = this.meshes[e], p = parts[e]; if (!p) continue;
+      if (m.pop > 0) { m.pop = Math.max(0, m.pop - dt * 3); m.g.scale.setScalar(this.S * (1 + Math.sin(m.pop * Math.PI) * 0.35)); m.g.position.y = Math.sin(m.pop * Math.PI) * 0.25; }
+      if (p.t === 'bulb') { const br = on ? Math.min(3, s.bright[e] || 0) : 0, k = br < LIT ? 0 : Math.min(1.6, 0.1 + br * 1.0); m.g.userData.glass.material.emissiveIntensity = k * 1.4; const h = m.g.userData.halo; h.material.opacity = Math.min(1, k * 0.8); h.scale.setScalar(0.4 + k * 1.3 + Math.sin(t * 6) * 0.03 * k); }
+      if (p.t === 'buzzer') { const bz = on && Math.abs(s.cur[e] || 0) >= BUZZ; m.g.userData.body.position.x = bz ? Math.sin(t * 90) * 0.02 : 0; const r = m.g.userData.ring; const ph = (t * 1.6) % 1; r.material.opacity = bz ? 1 - ph : 0; r.scale.setScalar(1 + ph * 1.4); }
+    }
+    const bulbs = this.bulbsInRoomOrder();
+    this.windows.forEach((w, k) => { const e = bulbs[k], br = on && e ? Math.min(3, s.bright[e] || 0) : 0, v = br < LIT ? 0 : Math.min(1.5, 0.1 + br * 1.0); w.w.material.emissiveIntensity = v * 1.4; w.w.material.color.setHex(0x3B3470).lerp(WARM, Math.min(1, v)); w.halo.material.opacity = Math.min(0.95, v * 0.7); });
+    const ringing = on && ofType(this.circ, 'buzzer').some(e => Math.abs(s.cur[e] || 0) >= BUZZ);
+    this.bell.rotation.z = ringing ? Math.sin(t * 40) * 0.5 : 0;
+    // Moving dots show the electricity flowing.
+    this.phase += dt; let n = 0; const M4 = new THREE.Matrix4();
+    if (on) for (const e in parts) {
+      const i = s.cur[e] || 0; if (Math.abs(i) < 0.03) continue; const [a, b] = ends(e), A = this.node(...a), B = this.node(...b), sp = Math.min(2.2, 0.35 + Math.abs(i) * 0.9);
+      for (let k = 0; k < 3 && n < 400; k++) { let f = (this.phase * sp + k / 3) % 1; if (i < 0) f = 1 - f; M4.makeTranslation(A.x + (B.x - A.x) * f, 0.34 * this.S, A.z + (B.z - A.z) * f); this.dots.setMatrixAt(n++, M4); }
+    }
+    this.dots.count = n; this.dots.instanceMatrix.needsUpdate = true;
+  }
+  showHi(e) { if (!e) { this.hi.visible = false; return; } this.placeOnEdge(this.hi, e); this.hi.position.y = 0.25; this.hi.visible = true; }
+}
+const WARM = new THREE.Color(0xFFF3B0);
+const key = p => p.t + (p.fixed ? 'F' : '') + (p.t === 'switch' ? (p.on ? 1 : 0) : '') + (p.t === 'battery' ? p.dir : '');
+
+// Sparks and confetti in 3D.
+const FX = [];
+const fxGeo = new THREE.BoxGeometry(0.09, 0.09, 0.09);
+function burst(pos, colors, n = 24, speed = 3) {
+  for (let k = 0; k < n; k++) {
+    const m = new THREE.Mesh(fxGeo, new THREE.MeshBasicMaterial({ color: pick(colors) })); m.position.copy(pos); scene.add(m);
+    FX.push({ m, v: new THREE.Vector3((Math.random() - 0.5) * speed, Math.random() * speed + 1.5, (Math.random() - 0.5) * speed), life: 1 });
+  }
+}
+function tickFX(dt) {
+  for (let k = FX.length - 1; k >= 0; k--) { const f = FX[k]; f.life -= dt * 1.1; f.v.y -= 6 * dt; f.m.position.addScaledVector(f.v, dt); f.m.rotation.x += dt * 8; f.m.scale.setScalar(Math.max(0.01, f.life)); if (f.life <= 0) { scene.remove(f.m); f.m.material.dispose(); FX.splice(k, 1); } }
+}
+
+// ---------------------------------------------------------------------------
+// Tray icons
+// ---------------------------------------------------------------------------
+const ICON = {
+  wire: '<svg viewBox="0 0 80 60"><path d="M6 30 C 22 6, 36 54, 52 30 S 70 14, 74 30" fill="none" stroke="#2B2140" stroke-width="14" stroke-linecap="round"/><path d="M6 30 C 22 6, 36 54, 52 30 S 70 14, 74 30" fill="none" stroke="#FF7A1A" stroke-width="8" stroke-linecap="round"/></svg>',
+  bulb: '<svg viewBox="0 0 80 60"><circle cx="40" cy="24" r="19" fill="#FFE45C" stroke="#2B2140" stroke-width="5"/><rect x="30" y="40" width="20" height="14" rx="3" fill="#D8D3E8" stroke="#2B2140" stroke-width="5"/><path d="M33 26 l7 -7 l7 7" fill="none" stroke="#FF8A3D" stroke-width="4"/></svg>',
+  switch: '<svg viewBox="0 0 80 60"><rect x="8" y="38" width="64" height="14" rx="6" fill="#FF4F8B" stroke="#2B2140" stroke-width="5"/><line x1="18" y1="38" x2="62" y2="14" stroke="#2B2140" stroke-width="11" stroke-linecap="round"/><line x1="18" y1="38" x2="62" y2="14" stroke="#D8D3E8" stroke-width="5" stroke-linecap="round"/><circle cx="18" cy="38" r="6" fill="#2B2140"/></svg>',
+  buzzer: '<svg viewBox="0 0 80 60"><ellipse cx="40" cy="38" rx="24" ry="14" fill="#33285A" stroke="#2B2140" stroke-width="5"/><ellipse cx="40" cy="32" rx="18" ry="9" fill="#5CD38B" stroke="#2B2140" stroke-width="4"/><path d="M66 14 q8 8 0 16 M72 8 q12 14 0 28" fill="none" stroke="#2B2140" stroke-width="4" stroke-linecap="round"/></svg>',
+  battery: '<svg viewBox="0 0 80 60"><rect x="8" y="16" width="56" height="28" rx="7" fill="#1FB5FF" stroke="#2B2140" stroke-width="5"/><rect x="48" y="16" width="16" height="28" rx="4" fill="#FFC93C" stroke="#2B2140" stroke-width="5"/><rect x="64" y="24" width="8" height="12" rx="2" fill="#2B2140"/><text x="30" y="38" font-size="22" font-weight="900" font-family="Segoe UI" fill="#fff">+</text></svg>',
+};
+const ORDER = ['wire', 'bulb', 'switch', 'buzzer', 'battery'];
+
+// ---------------------------------------------------------------------------
+// Rounds
+// ---------------------------------------------------------------------------
+let task = null, circ = null, board = null, quizBoards = [], missed = false, won = false, busy = false, nextTimer = null, lastShort = false;
+
+function placedCount(t) { return Object.values(circ.parts).filter(p => !p.fixed && p.t === t).length; }
+function left(t) { return (task.inv[t] || 0) - placedCount(t); }
+
+function clearBoards() { if (board) board.dispose(); board = null; quizBoards.forEach(b => b.dispose()); quizBoards = []; }
+function newRound(speak = true) {
+  clearTimeout(nextTimer); nextTimer = null; hideCard(); buzzer(false);
+  missed = false; won = false; busy = false; lastShort = false;
+  task = genLevel(P.lv); clearBoards();
+  if (task.quiz) {
+    circ = null;
+    const nA = ofType(task.A, 'bulb').length, nB = ofType(task.B, 'bulb').length;
+    quizBoards = [new Board(task.A, { S: 0.9, x: -3.1, rooms: nA, lightsOn: false }), new Board(task.B, { S: 0.9, x: 3.1, rooms: nB, lightsOn: false })];
+  } else {
+    circ = build(task.fixed);
+    board = new Board(circ, { S: 1, rooms: task.goal.bulbs });
+  }
+  $('quiz').classList.toggle('on', !!task.quiz); $('qa').classList.remove('no'); $('qb').classList.remove('no');
+  $('tray').style.display = task.quiz ? 'none' : 'flex'; $('done').style.display = task.quiz ? 'none' : 'block';
+  $('ask').textContent = task.text;
+  $('badge').textContent = 'Level ' + (P.lv + 1) + ': ' + LEVELS[P.lv].name;
+  $('stars').textContent = '⭐ ' + P.stars;
+  renderTray(); fit();
+  if (speak) say(task.text);
+}
+function renderTray() {
+  const tr = $('tray'); tr.innerHTML = ''; if (task.quiz) return;
+  for (const t of ORDER) {
+    if (!task.inv[t]) continue;
+    const b = document.createElement('div'); b.className = 'part' + (left(t) <= 0 ? ' empty' : ''); b.dataset.t = t;
+    b.innerHTML = ICON[t] + '<span class="n">' + left(t) + '</span>';
+    b.addEventListener('pointerdown', ev => { if (left(t) > 0 && !won) startDrag(ev, t, null); });
+    tr.appendChild(b);
+  }
+}
+
+function changed(e) {
+  board.sync(); if (e) board.pop(e); renderTray();
+  const r = evaluate(circ, task.goal), s = board.sol;
+  const anyLit = Object.values(s.bright).some(b => b >= LIT);
+  buzzer(!s.short && ofType(circ, 'buzzer').some(x => Math.abs(s.cur[x]) >= BUZZ));
+  if (s.short && !lastShort) {
+    SND.zap(); const bat = ofType(circ, 'battery')[0]; if (bat) burst(board.mid(bat).add(board.group.position), [0xFFF27A, 0xFF8A3D, 0xffffff], 30, 4);
+    showCard('Short circuit! ⚡', 'The electricity found a shortcut with no bulb, and the battery gets hot. Take that wire away.', true);
+    miss();
+  } else if (!s.short && anyLit) SND.light();
+  lastShort = s.short;
+  if (r.ok && !won) { won = true; setTimeout(winRound, 650); }
+}
+function hintFor(r) {
+  const g = task.goal;
+  if (r.why === 'short') return 'There is a shortcut with no bulb. Take a wire away.';
+  if (r.why === 'bulbs') return 'Add ' + g.bulbs + (g.bulbs === 1 ? ' bulb.' : ' bulbs.');
+  if (r.why === 'off') return 'A switch is off. Tap the switch to turn it on.';
+  if (r.why === 'dark') return g.bright === 'super' ? 'If the light went out, tap the new battery to flip it around.' : 'Electricity needs a full loop: out of the battery, through the bulb, and back.';
+  if (r.why === 'buzz') return 'The buzzer needs a full loop back to the battery too.';
+  if (r.why === 'ctrl') return 'Put the switch in the loop, so it can stop the electricity.';
+  if (r.why === 'ctrlEach') return 'Each room needs its own switch on its own path.';
+  if (r.why === 'level') {
+    if (g.bright === 'dim') return 'These are bright. Put both bulbs in one loop, one after the other, so they share.';
+    if (g.bright === 'bright') return 'Dim! Give each bulb its own path back to the battery.';
+    if (g.bright === 'super') return 'Add the second battery in the loop. Point its + the same way as the first one.';
+  }
+  return 'Keep going!';
+}
+function doneTap() {
+  if (won || task.quiz) return;
+  const r = evaluate(circ, task.goal);
+  if (r.ok) { won = true; winRound(); return; }
+  SND.miss(); showCard('Not yet!', hintFor(r), true); say(hintFor(r)); miss();
+}
+function miss() { if (!missed) { missed = true; const ch = record(false); if (ch < 0) setTimeout(() => say('Let us try an easier one.'), 1800); } }
+function winRound() {
+  const right = !missed; let ch = 0; if (right) ch = record(true);
+  P.stars++; persist(); $('stars').textContent = '⭐ ' + P.stars; SND.win(); confetti();
+  const center = board ? board.house.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3(0, 1, 0);
+  burst(center.add(new THREE.Vector3(0, 1.5, 0)), [0xFF4F8B, 0xFFC93C, 0x58C7F0, 0x5CD38B, 0x9B6BFF], 50, 5);
+  let msg = pick(['Lights on!', 'You did it!', 'Super circuit!', 'Bright idea!']), sub = '';
+  if (task.goal && task.goal.bright === 'dim') sub = 'Two bulbs in a row share the battery, so each one glows dim.';
+  if (task.goal && task.goal.bright === 'bright' && task.goal.bulbs > 1) sub = 'Each bulb has its own path, so they all glow bright.';
+  if (task.goal && task.goal.bright === 'super') sub = 'Two batteries give double push!';
+  if (ch > 0) sub = (sub ? sub + ' ' : '') + 'Level up! ⭐';
+  $('tray').style.display = 'none'; $('done').style.display = 'none';
+  showCard(msg + ' ⭐', sub, false, true); say(msg + ' ' + sub);
+  nextTimer = setTimeout(() => newRound(), 6500);
+}
+function answer(side) {
+  if (!task.quiz || won) return;
+  const btn = side === 'A' ? $('qa') : $('qb');
+  if (side !== task.ans) { btn.classList.add('no'); SND.miss(); if (!missed) miss(); say('Look again. Then guess the other house!'); return; }
+  quizBoards.forEach(b => { b.lightsOn = true; }); SND.light(); won = true;
+  setTimeout(() => {
+    const right = !missed; let ch = 0; if (right) ch = record(true);
+    P.stars++; persist(); $('stars').textContent = '⭐ ' + P.stars; SND.win(); confetti();
+    $('quiz').classList.remove('on');
+    showCard((right ? 'Great guess!' : 'Now you know!') + ' ⭐', task.why + (ch > 0 ? ' Level up!' : ''), false, true); say(task.why);
+    nextTimer = setTimeout(() => newRound(), 5200);
+  }, 900);
+}
+function showCard(t, sub, bad, next) {
+  const c = $('card'); c.className = 'on' + (bad ? ' bad' : next ? ' win' : '');
+  c.innerHTML = '<div class="c">' + t + (sub ? '<small>' + sub + '</small>' : '') + (next ? '<button class="pill" id="nextBtn">Next ▶</button>' : '') + '</div>';
+  if (next) $('nextBtn').onclick = () => newRound(); else setTimeout(() => { if (c.classList.contains('bad')) hideCard(); }, 2600);
+}
+function hideCard() { $('card').className = ''; $('card').innerHTML = ''; }
+function confetti() {
+  const m = $('main'), cols = ['#FF4F8B', '#FFC93C', '#58C7F0', '#5CD38B', '#9B6BFF'];
+  for (let k = 0; k < 40; k++) {
+    const d = document.createElement('div'); d.className = 'conf'; d.style.background = pick(cols); d.style.left = (Math.random() * 100) + '%'; d.style.top = '-30px'; m.appendChild(d);
+    const dx = (Math.random() - 0.5) * 200, rot = Math.random() * 720;
+    d.animate([{ transform: 'translate(0,0) rotate(0)' }, { transform: 'translate(' + dx + 'px,' + (m.clientHeight + 60) + 'px) rotate(' + rot + 'deg)' }], { duration: 1800 + Math.random() * 1200, easing: 'cubic-bezier(.3,.6,.6,1)' }).onfinish = () => d.remove();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Drag and drop
+// ---------------------------------------------------------------------------
+let drag = null;
+function screenOf(v3) { const r = canvas.getBoundingClientRect(), v = v3.clone().project(camera); return { x: (v.x + 1) / 2 * r.width + r.left, y: (1 - v.y) / 2 * r.height + r.top }; }
+function slotScreen(e) { return screenOf(board.mid(e).add(board.group.position)); }
+function spacingPx() { const a = screenOf(new THREE.Vector3(0, 0.2, 0)), b = screenOf(new THREE.Vector3(1, 0.2, 0)); return Math.hypot(a.x - b.x, a.y - b.y); }
+function nearestEdge(x, y, filter, maxF) {
+  let best = null, bd = spacingPx() * maxF;
+  for (const e of allEdges(circ.cols, circ.rows)) { if (!filter(e)) continue; const s = slotScreen(e), d = Math.hypot(s.x - x, s.y - y); if (d < bd) { bd = d; best = e; } }
+  return best;
+}
+function startDrag(ev, t, fromEdge) {
+  ev.preventDefault(); ac(); SND.pick();
+  drag = { t, from: fromEdge, part: fromEdge ? circ.parts[fromEdge] : null, x0: ev.clientX, y0: ev.clientY, moved: false, target: null, id: ev.pointerId };
+  const g = $('ghost'); g.innerHTML = ICON[t]; g.style.display = fromEdge ? 'none' : 'block'; moveGhost(ev.clientX, ev.clientY);
+}
+function moveGhost(x, y) { const r = $('main').getBoundingClientRect(), g = $('ghost'); g.style.left = (x - r.left) + 'px'; g.style.top = (y - r.top) + 'px'; }
+canvas.addEventListener('pointerdown', ev => {
+  if (!circ || won) return; ac();
+  const e = nearestEdge(ev.clientX, ev.clientY, e => circ.parts[e] && !circ.parts[e].fixed, 0.45);
+  if (e) startDrag(ev, circ.parts[e].t, e);
+});
+window.addEventListener('pointermove', ev => {
+  if (!drag) return;
+  if (Math.hypot(ev.clientX - drag.x0, ev.clientY - drag.y0) > 12 && !drag.moved) {
+    drag.moved = true;
+    if (drag.from) { delete circ.parts[drag.from]; board.sync(); renderTray(); $('ghost').style.display = 'block'; }
+  }
+  moveGhost(ev.clientX, ev.clientY);
+  if (drag.moved) { drag.target = nearestEdge(ev.clientX, ev.clientY, e => !circ.parts[e], 0.55); board.showHi(drag.target); }
+});
+// A new part from the tray lands on an edge. Switches arrive off, batteries arrive pointing + right or down.
+function dropPart(e, t, o) { circ.parts[e] = part(e, t, Object.assign({ fixed: false, on: t !== 'switch', dir: 1 }, o || {})); }
+function endDrag() {
+  if (!drag) return; const d = drag; drag = null; $('ghost').style.display = 'none'; board && board.showHi(null);
+  if (!d.moved) {
+    if (d.from) tapPart(d.from);
+    return;
+  }
+  if (d.target) { if (d.part) circ.parts[d.target] = Object.assign(d.part, { e: d.target }); else dropPart(d.target, d.t); SND.snap(); changed(d.target); }
+  else { SND.pick(); changed(null); }
+}
+window.addEventListener('pointerup', endDrag);
+window.addEventListener('pointercancel', endDrag);
+function tapPart(e) {
+  const p = circ.parts[e]; if (!p || p.fixed) return;
+  if (p.t === 'switch') { p.on = !p.on; SND.click(); changed(e); }
+  else if (p.t === 'battery') { p.dir = -(p.dir || 1); SND.click(); changed(e); }
+  else board.pop(e);
+}
+
+// ---------------------------------------------------------------------------
+// Layout and loop
+// ---------------------------------------------------------------------------
+function fit() {
+  const r = $('main').getBoundingClientRect(), w = Math.max(1, r.width), h = Math.max(1, r.height);
+  renderer.setSize(w, h, false); camera.aspect = w / h;
+  const k = Math.max(1, 1.55 / camera.aspect, 720 / h);
+  camera.position.set(0, 10.2 * k, 7.6 * k); camera.lookAt(0, -0.2, -1.3); camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', fit);
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now; const t = now / 1000;
+  if (board) board.tick(dt, t); quizBoards.forEach(b => b.tick(dt, t)); tickFX(dt);
+  renderer.render(scene, camera); requestAnimationFrame(frame);
+}
+
+$('done').onclick = doneTap;
+$('qa').onclick = () => answer('A');
+$('qb').onclick = () => answer('B');
+$('hear').onclick = () => say(task.text);
+$('skip').onclick = () => newRound();
+
+window.CIRCUIT_LAB = {
+  LEVELS, START, PHYS, solve, evaluate, validate, record, build, cls, gen: genLevel, newRound,
+  setLevel(i) { P.lv = i; P.st = { streak: 0, miss: 0 }; persist(); newRound(false); },
+  place(e, t, o) { dropPart(e, t, o); changed(e); },
+  // What the 3D board is drawing right now, so tests can check the picture matches the circuit.
+  render() {
+    if (!board) return null; const b = board, ms = b.meshes, parts = circ.parts;
+    return {
+      placed: Object.keys(parts).filter(e => !parts[e].fixed && ms[e] && ms[e].g.parent === b.group && ms[e].key === key(parts[e])).length,
+      placedParts: Object.keys(parts).filter(e => !parts[e].fixed).length,
+      bulbs: ofType(circ, 'bulb').map(e => ({ e, glow: ms[e].g.userData.glass.material.emissiveIntensity, bright: b.sol.bright[e] })),
+      windows: b.windows.map(w => w.w.material.emissiveIntensity),
+      tray: Object.fromEntries([...document.querySelectorAll('.part')].map(x => [x.dataset.t, +x.querySelector('.n').textContent])),
+      dots: b.dots.count,
+    };
+  },
+  remove(e) { delete circ.parts[e]; changed(null); },
+  stay() { clearTimeout(nextTimer); nextTimer = null; },
+  tap: tapPart, done: doneTap, answer, slotScreen, trayButton: t => document.querySelector('.part[data-t="' + t + '"]'),
+  get state() { return { level: P.lv, streak: P.st.streak, miss: P.st.miss, stars: P.stars, task, circ, missed, won, sol: board && board.sol }; },
+};
+
+fit(); newRound(false); requestAnimationFrame(frame);
+setTimeout(() => say(task.text), 600);
+</script>
+</body>
+</html>
