@@ -306,6 +306,11 @@ Three more apps (`apps/count-with-me.html`, `apps/music-box.html`, `apps/story-m
   That works at home while the PC is on; add `TTS_KEY` (Azure Speech with `TTS_REGION`, or
   OpenAI with `TTS_FALLBACK=openai`) and it takes over when the PC is unreachable. With `TTS_PROVIDER=azure|openai`
   the key is the primary voice. Without any of these, the Windows voices are used, varied per character.
+  Each story picks its voice service once, when it starts: VoiceStudio if the PC answers, otherwise the key for the
+  whole story, with no further calls to the PC. If the PC drops out mid-story, the rest of that story uses the key.
+  The next story checks the PC again. With Azure, each character keeps its own voice. A voice the key's region does
+  not offer is replaced by an unused voice of the same kind (girl, woman or man), so a story still has several
+  voices. Tested by `tools/test-story-voices.py`.
 
 ### 3D thinking games
 Each game is one offline file with three.js r149 inlined and 3D models built in code. Each one climbs a level ladder:

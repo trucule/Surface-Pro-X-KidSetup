@@ -171,24 +171,96 @@ const VOICE = (() => {
   function fxFor(who) { const v = vsCfg()[who.id]; return v && v.fx; }
 
   // --- VoiceStudio on the LAN (designed voices, GPU on the PC) -------------------------------------
-  // Reached only while the PC is on and sharing; otherwise the Azure or OpenAI key (if any) is used, and
-  // after that the Windows voices. Health is rechecked every 20 s so a story recovers when the PC comes back.
+  // Each story picks its voice service once, at its start: VoiceStudio when the PC answers, otherwise the Azure or
+  // OpenAI key, otherwise the Windows voices. A story that started without VoiceStudio does not ask the PC again,
+  // and a VoiceStudio story that loses the PC switches to the key for the rest of that story. The next story
+  // checks the PC again.
   const vs = { ok: null, at: 0, ids: null, active: 0, queue: [] };
   // The secret is the LAN-share PIN or, with OMNIVOICE_API_KEY set on the PC, that key; send it both ways.
   const vsHeaders = t => (t.pin ? { 'x-omnivoice-pin': t.pin, 'Authorization': 'Bearer ' + t.pin } : {});
   async function vsAlive(t) {
-    if (vs.ok !== null && Date.now() - vs.at < 20000) return vs.ok;
     vs.at = Date.now();
-    try { const c = new AbortController(); const tm = setTimeout(() => c.abort(), 1500); const r = await fetch(t.url + '/health', { headers: vsHeaders(t), signal: c.signal }); clearTimeout(tm); vs.ok = r.ok; }
+    try { const c = new AbortController(); const tm = setTimeout(() => c.abort(), 2000); const r = await fetch(t.url + '/health', { headers: vsHeaders(t), signal: c.signal }); clearTimeout(tm); vs.ok = r.ok; }
     catch (e) { vs.ok = false; }
     if (!vs.ok) vs.ids = null;
     return vs.ok;
+  }
+  // The key's service: 'azure' or 'openai' (VoiceStudio's fallback, or the primary), or null for none.
+  function keyService(t) {
+    if (!t || !t.key) return null;
+    if (t.provider === 'openai') return 'openai';
+    if (t.provider === 'azure') return 'azure';
+    if (t.fallback === 'none') return null;
+    return t.fallback === 'openai' ? 'openai' : 'azure';
+  }
+  // route: Promise of 'vs' | 'azure' | 'openai' | null for the current story.
+  let route = null;
+  function decide() {
+    const t = CFG.tts;
+    if (!t) return Promise.resolve(null);
+    if (t.provider === 'voicestudio' && t.url) return vsAlive(t).then(ok => ok ? 'vs' : keyService(t));
+    return Promise.resolve(keyService(t));
+  }
+  function currentRoute() { if (!route) route = decide(); return route; }
+  function beginStory() { route = decide(); if (!azList) azMapP = null; return route; }
+  function dropVoiceStudio() { route = Promise.resolve(keyService(CFG.tts)); }
+
+  // --- Azure: one voice per character, from the voices this key's region offers ---------------------
+  // Each character asks for its own voice; a voice the region does not have is replaced by an unused one of the
+  // same kind (girl, woman, man), so the cast still sounds like several people.
+  const AZ_KIND = { 'en-US-AnaNeural': 'child', 'en-US-JaneNeural': 'f', 'en-US-AriaNeural': 'f', 'en-US-SaraNeural': 'f', 'en-US-NancyNeural': 'f', 'en-US-AmberNeural': 'f', 'en-US-JennyNeural': 'f',
+                    'en-US-DavisNeural': 'm', 'en-US-TonyNeural': 'm', 'en-US-JasonNeural': 'm', 'en-US-GuyNeural': 'm', 'en-US-ChristopherNeural': 'm', 'en-US-BrandonNeural': 'm' };
+  let azList = null, azMap = null;
+  let azListP = null;
+  function azureVoices(t) { if (!azListP) azListP = loadAzureVoices(t); return azListP; }
+  async function loadAzureVoices(t) {
+    if (azList) return azList;
+    const LK = 'sm-azure-voices';
+    try { const c = JSON.parse(localStorage.getItem(LK) || 'null'); if (c && c.region === t.region && Date.now() - c.at < 864e5 && c.voices.length) return (azList = c.voices); } catch (e) {}
+    try {
+      const c = new AbortController(); const tm = setTimeout(() => c.abort(), 4000);
+      const r = await fetch(`https://${t.region || 'eastus'}.tts.speech.microsoft.com/cognitiveservices/voices/list`, { headers: { 'Ocp-Apim-Subscription-Key': t.key }, signal: c.signal });
+      clearTimeout(tm);
+      if (r.ok) {
+        const all = await r.json();
+        azList = all.filter(v => /^en-/i.test(v.Locale) && /neural/i.test(v.VoiceType || 'Neural') && !/:/.test(v.ShortName))
+          .map(v => ({ name: v.ShortName, kind: /child|girl|boy/i.test(JSON.stringify(v.VoiceTag || '')) || v.ShortName === 'en-US-AnaNeural' ? 'child' : (v.Gender === 'Female' ? 'f' : 'm'), us: /^en-US/i.test(v.Locale) }));
+        try { localStorage.setItem(LK, JSON.stringify({ region: t.region, at: Date.now(), voices: azList })); } catch (e) {}
+        return azList;
+      }
+    } catch (e) {}
+    return null;
+  }
+  let azMapP = null;
+  async function azureVoiceFor(t, who) {
+    if (!azMapP) azMapP = buildAzureMap(t);
+    await azMapP;
+    return azMap[who.id] || who.azure;
+  }
+  async function buildAzureMap(t) {
+    {
+      const list = await azureVoices(t);
+      azMap = {};
+      const everyone = [NARRATOR, ...CAST];
+      if (!list) { for (const c of everyone) azMap[c.id] = c.azure; }
+      else {
+        const have = new Set(list.map(v => v.name)), used = new Set();
+        for (const c of everyone) if (have.has(c.azure) && !used.has(c.azure)) { azMap[c.id] = c.azure; used.add(c.azure); }
+        for (const c of everyone) {
+          if (azMap[c.id]) continue;
+          const kind = AZ_KIND[c.azure] || 'f', free = v => !used.has(v.name);
+          const v = list.find(v => free(v) && v.kind === kind && v.us) || list.find(v => free(v) && v.kind === kind) || list.find(v => free(v) && v.us) || list.find(free) || list[0];
+          azMap[c.id] = v ? v.name : c.azure; used.add(azMap[c.id]);
+        }
+      }
+    }
+    if (!Object.keys(azMap).length || !azList) azListP = null;   // list not reached: ask again next story
   }
   async function vsVoiceId(t, who) {
     if (!vs.ids) {
       if (!vs.idsP) vs.idsP = (async () => {
         try { const r = await fetch(t.url + '/v1/audio/voices', { headers: vsHeaders(t) }); const j = await r.json(); const ids = {}; for (const v of (j.voices || [])) if (v.type === 'profile') ids[String(v.name).toLowerCase()] = v.voice_id; vs.ids = ids; }
-        catch (e) { vs.ids = null; }
+        catch (e) { vs.ids = null; vs.ok = false; }
         vs.idsP = null;
       })();
       await vs.idsP; if (!vs.ids) return null;
@@ -202,7 +274,7 @@ const VOICE = (() => {
   async function vsSynth(t, text, who) {
     await vsSlot();   // taken in call order, so a scene renders in reading order
     try {
-      if (!(await vsAlive(t))) return null;
+      if (vs.ok === false) return null;   // the PC dropped out earlier in this story
       const id = await vsVoiceId(t, who); if (!id) return null;
       const v = vsCfg()[who.id] || {};
       const fd = new FormData(); fd.append('text', text); fd.append('profile_id', id);
@@ -215,25 +287,29 @@ const VOICE = (() => {
   // Live TTS. Returns an AudioBuffer or null.
   async function synth(text, who, mood) {
     const t = CFG.tts; if (!t || !ctx()) return null;
-    const local = t.provider === 'voicestudio' && t.url;
-    if (!local && !t.key) return null;
+    if (!(t.provider === 'voicestudio' && t.url) && !t.key) return null;
     const k = (who.id || 'n') + '|' + (mood || '') + '|' + key(text); if (cache.has(k)) return cache.get(k);
     const pending = (async () => {
       let bytes = null;
       try {
-        if (local) bytes = await vsSynth(t, text, who);
-        if (!bytes && t.key && t.fallback !== 'none') {
-          if (t.provider === 'openai' || t.fallback === 'openai') {
-            const r = await fetch('https://api.openai.com/v1/audio/speech', { method: 'POST', headers: { 'Authorization': 'Bearer ' + t.key, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: t.model || 'gpt-4o-mini-tts', voice: who.openai || 'nova', input: text, response_format: 'mp3' }) });
-            if (r.ok) bytes = await r.arrayBuffer();
-          } else {
-            const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-            const style = mood && mood !== 'neutral' ? mood : null;
-            const inner = style ? `<mstts:express-as style="${style}">${esc(text)}</mstts:express-as>` : esc(text);
-            const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US"><voice name="${who.azure}"><prosody rate="${who.id === 'narrator' ? '-6%' : '0%'}">${inner}</prosody></voice></speak>`;
-            const r = await fetch(`https://${t.region || 'eastus'}.tts.speech.microsoft.com/cognitiveservices/v1`, { method: 'POST', headers: { 'Ocp-Apim-Subscription-Key': t.key, 'Content-Type': 'application/ssml+xml', 'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3' }, body: ssml });
-            if (r.ok) bytes = await r.arrayBuffer();
-          }
+        let via = await currentRoute();
+        if (via === 'vs') {
+          bytes = await vsSynth(t, text, who);
+          // The PC stopped answering: the rest of this story uses the key.
+          if (!bytes && vs.ok === false) { dropVoiceStudio(); via = await currentRoute(); }
+          else if (!bytes) via = keyService(t);   // this voice is not on the PC; use the key for this line
+        }
+        if (!bytes && via === 'openai') {
+          const r = await fetch('https://api.openai.com/v1/audio/speech', { method: 'POST', headers: { 'Authorization': 'Bearer ' + t.key, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: t.model || 'gpt-4o-mini-tts', voice: who.openai || 'nova', input: text, response_format: 'mp3' }) });
+          if (r.ok) bytes = await r.arrayBuffer();
+        } else if (!bytes && via === 'azure') {
+          const voice = await azureVoiceFor(t, who);
+          const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          const style = mood && mood !== 'neutral' ? mood : null;
+          const inner = style ? `<mstts:express-as style="${style}">${esc(text)}</mstts:express-as>` : esc(text);
+          const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="en-US"><voice name="${voice}"><prosody rate="${who.id === 'narrator' ? '-6%' : '0%'}">${inner}</prosody></voice></speak>`;
+          const r = await fetch(`https://${t.region || 'eastus'}.tts.speech.microsoft.com/cognitiveservices/v1`, { method: 'POST', headers: { 'Ocp-Apim-Subscription-Key': t.key, 'Content-Type': 'application/ssml+xml', 'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3' }, body: ssml });
+          if (r.ok) bytes = await r.arrayBuffer();
         }
       } catch (e) { bytes = null; }
       if (!bytes) return null;
@@ -241,7 +317,7 @@ const VOICE = (() => {
     })();
     cache.set(k, pending);
     const buf = await pending;
-    if (!buf) cache.delete(k);   // a failed line is retried next time (the PC may be back)
+    if (!buf) cache.delete(k);   // a failed line is retried next time
     else cache.set(k, buf);
     return buf;
   }
@@ -278,7 +354,7 @@ const VOICE = (() => {
   }
   function prefetch(text, who, mood) { synth(text, who, mood); }
   function prefetchAll(lines) { for (const l of lines) synth(l.text, l.who, l.mood); }
-  return { say, stop, prefetch, prefetchAll, live: () => !!(CFG.tts && (CFG.tts.key || (CFG.tts.provider === 'voicestudio' && CFG.tts.url))), vs };
+  return { say, stop, prefetch, prefetchAll, beginStory, route: () => currentRoute(), azureVoiceFor: who => azureVoiceFor(CFG.tts, who), live: () => !!(CFG.tts && (CFG.tts.key || (CFG.tts.provider === 'voicestudio' && CFG.tts.url))), vs };
 })();
 function say(t, done) { VOICE.say(t, NARRATOR, null, done); }
 
@@ -562,6 +638,7 @@ function storyQuestions() {
 // ---------------------------------------------------------------------------
 async function start(sameFriends) {
   story = { scenes: [], history: [], reading: -1, ai: canUseAI(), level: level[1], glossary: {} };
+  VOICE.beginStory();   // which voice service this story uses, decided once
   if (story.ai) countStory();
   $('setup').classList.add('off'); $('story').classList.add('on'); $('back').hidden = false; $('end').classList.remove('on'); $('quiz').classList.remove('on');
   $('title').textContent = ''; $('scene').innerHTML = ''; $('text').innerHTML = '';

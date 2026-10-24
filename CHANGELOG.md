@@ -1,6 +1,9 @@
 # Changes
 
 ## 2026-10-24
+- Story Maker decides on VoiceStudio once per story: when the PC does not answer at the start, the whole story uses
+  the Azure voices without asking the PC again, and a PC that drops out mid-story hands the rest to Azure. Each
+  character keeps a distinct Azure voice, with stand-ins for voices the region lacks.
 - Trace With Me Little mode traces thin school print on handwriting lines (top line, dashed midline, baseline), one
   stroke at a time from numbered green start dots with direction arrows, in place of colouring in bubble letters.
 - Kid Pix is removed from the defaults and from tablets that have it.
