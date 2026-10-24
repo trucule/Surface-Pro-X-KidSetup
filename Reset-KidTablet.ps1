@@ -112,6 +112,16 @@ $script:TileDefaults = @{
 }
 $script:Palette = '#1C7ED6', '#2F9E44', '#E8590C', '#7048E8', '#D6336C', '#0C8599', '#F08C00', '#3B5BDB'
 
+# Airline entertainment portals: shown as tiles only while travel mode is on. They open on the plane's WiFi.
+$script:TravelApps = @(
+    @{ Name = 'Southwest TV'; Host = 'www.southwestwifi.com'; Color = '#304CB2' }
+    @{ Name = 'United TV';    Host = 'www.unitedwifi.com';    Color = '#005DAA' }
+    @{ Name = 'Delta TV';     Host = 'wifi.delta.com';        Color = '#C01933' }
+    @{ Name = 'American TV';  Host = 'www.aainflight.com';    Color = '#0078D2' }
+    @{ Name = 'Alaska TV';    Host = 'www.alaskawifi.com';    Color = '#01426A' }
+    @{ Name = 'JetBlue TV';   Host = 'www.flyfi.com';         Color = '#0033A0' }
+)
+
 # ---------------------------------------------------------------------------
 # Defaults (used only when no config exists, or with -ResetConfig)
 # ---------------------------------------------------------------------------
@@ -1640,6 +1650,8 @@ function Sync-KidTablet {
     Assert-Elevated
     Update-KidAppConfig
     $cfg  = Read-Config
+    # Airline tiles exist only while travel mode is on.
+    if (-not (Test-KidTravelMode $cfg)) { $tn = @($script:TravelApps | ForEach-Object { $_.Name }); $cfg.WebApps = @($cfg.WebApps | Where-Object { $tn -notcontains $_.Name }) }
     $edge = Get-EdgePath
 
     # Resolve desktop apps
@@ -2250,6 +2262,8 @@ function Start-KidBackgroundSync {
     $action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument ("-NoProfile -ExecutionPolicy Bypass -Command `"$cmd`"")
     $runAs    = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 1)
+    # A sync already running finishes first, so this one sees the newest config.json.
+    for ($i = 0; $i -lt 90 -and (Get-ScheduledTask -TaskName 'KidTablet-Sync' -ErrorAction SilentlyContinue).State -eq 'Running'; $i++) { Start-Sleep 2 }
     Register-ScheduledTask -TaskName 'KidTablet-Sync' -Action $action -Principal $runAs -Settings $settings -Force | Out-Null
     Start-ScheduledTask -TaskName 'KidTablet-Sync'
     Write-Host "Sync started in the background. Progress: $log"
@@ -2258,36 +2272,50 @@ function Start-KidBackgroundSync {
 function Set-KidTravelMode {
     <#
     .SYNOPSIS
-        Lifts her website allowlist for a few hours (for an airplane's entertainment portal, whose web addresses
-        are not known ahead of time), then puts it back on its own.
+        Travel mode: shows the airline entertainment tiles and lifts her website allowlist for a few hours, then
+        hides the tiles and puts the allowlist back on its own.
     .DESCRIPTION
-        Only the site blocklist is lifted; every other limit stays. When it ends (a one-time task at the end time,
-        and again at her next sign-in if the tablet was asleep), the allowlist returns and the sites her apps
-        opened in the meantime are written to C:\ProgramData\KidTablet\jobs\travel-hosts.txt, so the ones the
-        portal needs can be added for good with Add-KidAllowedDomain.
+        The tiles ($script:TravelApps: Southwest, United, Delta, American, Alaska, JetBlue) open each airline's
+        portal, which only answers on that plane's WiFi and may load pages from addresses that cannot be known
+        ahead of time, so the site blocklist is lifted while travel mode is on. Every other limit stays.
+        It ends at the end time (a one-time task), or at her next sign-in if the tablet was asleep then. When it
+        ends, the sites her apps opened are written to C:\ProgramData\KidTablet\jobs\travel-hosts.txt.
+        The home screen tiles are rebuilt by a background sync (jobs\sync.log), so they appear and go away within
+        a few minutes; the allowlist changes at once.
     .EXAMPLE
-        Set-KidTravelMode -Hours 6
+        Set-KidTravelMode               # 6 hours
+    .EXAMPLE
+        Set-KidTravelMode -Hours 12
     .EXAMPLE
         Set-KidTravelMode -Off
     #>
     [CmdletBinding()]
-    param([ValidateRange(1, 24)][int]$Hours = 6, [switch]$Off)
+    param([ValidateRange(1, 48)][int]$Hours = 6, [switch]$Off)
     Assert-Elevated
     $cfg = Read-Config
     Initialize-Prop $cfg 'TravelUntil' ''
     $task = 'KidTablet-TravelEnd'
+    $names = @($script:TravelApps | ForEach-Object { $_.Name })
     if ($Off) {
         $was = [string]$cfg.TravelUntil
         $cfg.TravelUntil = ''
+        $cfg.WebApps = @($cfg.WebApps | Where-Object { $names -notcontains $_.Name })
         Write-Config $cfg
         Unregister-ScheduledTask -TaskName $task -Confirm:$false -ErrorAction SilentlyContinue
         Sync-KidUserSettings
         if ($was) { Save-KidTravelHosts }
-        Write-Host 'Travel mode is off. Her website allowlist is back on.'
+        Start-KidBackgroundSync
+        Write-Host 'Travel mode is off. Her website allowlist is back on, and the airline tiles go away in a few minutes.'
         return
     }
     $until = (Get-Date).AddHours($Hours)
     $cfg.TravelUntil = $until.ToString('o')
+    foreach ($t in $script:TravelApps) {
+        $url = 'https' + [char]58 + '//' + $t.Host + '/'
+        $app = $cfg.WebApps | Where-Object Name -eq $t.Name | Select-Object -First 1
+        if ($app) { $app.Url = $url; continue }
+        $cfg.WebApps = @($cfg.WebApps) + [pscustomobject]@{ Name = $t.Name; Url = $url; Icon = (ConvertTo-KidIcon 'U+2708'); Color = $t.Color }
+    }
     Write-Config $cfg
     $action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -Command "Import-Module KidTablet -Force; Set-KidTravelMode -Off"'
     $trigger  = New-ScheduledTaskTrigger -Once -At $until
@@ -2295,7 +2323,8 @@ function Set-KidTravelMode {
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
     Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Principal $runAs -Settings $settings -Force | Out-Null
     Sync-KidUserSettings
-    Write-Host ("Travel mode is on until {0:ddd h:mm tt}. Her website allowlist comes back on by itself then." -f $until)
+    Start-KidBackgroundSync
+    Write-Host ("Travel mode is on until {0:ddd h:mm tt} ({1} hours). Her website allowlist is lifted now; the airline tiles appear in a few minutes and go away when it ends." -f $until, $Hours)
 }
 
 function Test-KidTravelMode {

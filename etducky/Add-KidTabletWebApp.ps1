@@ -3,8 +3,8 @@
     Adds a website tile to her home screen and its domains to her allowlist. Run as SYSTEM from ET Ducky.
 
 .DESCRIPTION
-    Set the tile in the Settings block (it starts out set for Southwest Airlines' inflight entertainment portal,
-    which works in a browser on the plane's WiFi). The sync that puts the tile on her home screen runs as a
+    Set the tile in the Settings block. Airline entertainment tiles are not added here: travel mode
+    (Set-KidTabletTravelMode.ps1) shows them while it is on. The sync that puts the tile on her home screen runs as a
     background task, so ET Ducky's time limit cannot cut it off; the tile appears within a few minutes and
     Get-KidTabletStatus.ps1 shows the sync log.
 
@@ -14,11 +14,11 @@
 #>
 
 # ---- Settings ---------------------------------------------------------------
-$Name      = 'Southwest TV'
-$SiteHost  = 'www.southwestwifi.com'          # opened over https
-$Domains   = @('southwestwifi.com')           # her allowlist; subdomains are included
-$Icon      = 'U+2708'                         # an airplane; any emoji or U+ code point
-$Color     = '#304CB2'
+$Name      = 'PBS Kids Games'
+$SiteHost  = 'pbskids.org'                    # opened over https
+$Domains   = @('pbskids.org')                 # her allowlist; subdomains are included
+$Icon      = 'U+1F3AE'                        # any emoji or U+ code point
+$Color     = '#2F9E44'
 # -----------------------------------------------------------------------------
 
 $ErrorActionPreference = 'Stop'

@@ -100,8 +100,8 @@ plain-text output. The author runs them from ET Ducky; any RMM that runs PowerSh
 | `Update-KidTabletApps.ps1` | Downloads a package zip from a URL (this repo's GitHub zipball by default), keeps the voice packs already on the tablet, backs up the previous package, and runs its `Install-KidApps.ps1`. One run is a full update. |
 | `Set-KidTabletVoices.ps1` | Writes the voice settings into `.env`, checks that the voice server answers from the tablet, rewrites each app's `config.js`. |
 | `Sync-KidTablet.ps1` | Reapplies the configuration from `config.json`. |
-| `Add-KidTabletWebApp.ps1` | Adds a website tile and its domains to her allowlist (set up for Southwest's inflight portal), then syncs in the background. |
-| `Set-KidTabletTravelMode.ps1` | Travel mode: lifts her website allowlist for a few hours (default 6) and restores it by itself; lists the sites her apps opened meanwhile. |
+| `Add-KidTabletWebApp.ps1` | Adds a website tile and its domains to her allowlist, then syncs in the background. |
+| `Set-KidTabletTravelMode.ps1` | Travel mode: airline entertainment tiles plus a lifted website allowlist for the hours you give (default 6); both undo themselves. |
 | `Get-KidTabletStatus.ps1` | Read-only status: module hash, home screen build, whether the child is signed in, installed apps, log tails. |
 | `Update-KidTablet.ps1` | Replaces the module only (generated from `Update-KidTablet.template.ps1`). |
 | `Reset-KidTablet.ps1` | Clean-slate reset, module embedded. |
@@ -114,12 +114,16 @@ interactive administrator has (the module writes folder ACLs without the audit s
 script's text should carry no secrets. Keys go into `.env` on the tablet once; the scripts read nothing back.
 
 ### Flying
-Southwest's free movies and live TV play in a browser on the plane's WiFi, so the **Southwest TV** tile
-(`Add-KidTabletWebApp.ps1`) opens southwestwifi.com. The portal cannot be reached on the ground, so any other web
-address it uses is unknown until the flight. Before boarding, while the tablet can still reach your RMM, run
-`Set-KidTabletTravelMode.ps1`: it lifts her site allowlist for six hours (every other limit stays) and restores it
-by itself. Afterward `Get-KidTabletStatus.ps1` lists the sites her apps opened; add the ones the portal needs with
-`Add-KidAllowedDomain` and next time travel mode is not needed. Connecting to the plane's network may need you.
+Travel mode (`Set-KidTabletTravelMode.ps1`, or `Set-KidTravelMode -Hours N` on the tablet) puts tiles for
+Southwest, United, Delta, American, Alaska and JetBlue on her home screen and lifts her website allowlist, for 6
+hours unless you give another number (1 to 48; ET Ducky asks for Hours when the script runs, and 0 ends it now).
+Each tile opens that airline's entertainment portal (southwestwifi.com, unitedwifi.com, wifi.delta.com,
+aainflight.com, alaskawifi.com, flyfi.com), which only answers on the plane's WiFi and may load pages from
+addresses that cannot be known ahead of time; that is why the allowlist is lifted rather than extended. Every other
+limit stays. When it ends (at the end time, or at her next sign-in if the tablet was asleep) the tiles go away, the
+allowlist is back, and `Get-KidTabletStatus.ps1` lists the sites her apps opened. Turn it on before boarding, while
+the tablet can still reach your RMM. Connecting to the plane's network may need you. The airline list is
+`$script:TravelApps` near the top of `KidTablet.psm1`.
 
 ## Natural voices
 All speaking apps can play pre-rendered neural voice clips instead of the Windows voice. See `voices/README.md`:

@@ -1,5 +1,11 @@
 # Changes
 
+## 2026-10-24
+- Travel mode shows tiles for Southwest, United, Delta, American, Alaska and JetBlue while it is on and removes them
+  when it ends (any sync also removes them if travel mode is off). `Set-KidTabletTravelMode.ps1` asks ET Ducky for
+  Hours (empty is 6, 0 ends it now, up to 48). The standalone Southwest TV tile is folded into travel mode.
+- A background sync waits for one already running, so back-to-back changes are not lost.
+
 ## 2026-10-23
 - Travel mode (`Set-KidTravelMode`, ET Ducky script `Set-KidTabletTravelMode.ps1`): lifts her website allowlist for
   a few hours for an airplane's entertainment portal, then restores it by itself (at the end time, or at her next
