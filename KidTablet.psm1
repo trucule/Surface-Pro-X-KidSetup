@@ -1940,21 +1940,24 @@ function Write-KidHomeTiles {
     if (Test-Path $script:BackgroundDir) {
         $lines += @(Get-ChildItem $script:BackgroundDir -File | Sort-Object Name | ForEach-Object { "#background`t$($_.FullName)" })
     }
+    # Tiles are listed alphabetically by name, whatever kind of app they open.
+    $tiles = @()
     foreach ($app in $Config.WebApps) {
         $lnk = Join-Path $script:ShortcutDir "$($app.Name).lnk"
-        if (Test-Path $lnk) { $lines += "$($app.Name)`t$($app.Icon)`t$($app.Color)`t$lnk`t`t$(Get-KidTileImage $app.Name)`tplate" }
+        if (Test-Path $lnk) { $tiles += "$($app.Name)`t$($app.Icon)`t$($app.Color)`t$lnk`t`t$(Get-KidTileImage $app.Name)`tplate" }
     }
     foreach ($app in $Config.DesktopApps) {
         $lnk = Join-Path $script:ShortcutDir "$($app.Name).lnk"
         if (-not (Test-Path $lnk)) { continue }
         $flag = if ($active -contains $app.Path) { '' } else { 'pending' }
-        $lines += "$($app.Name)`t$($app.Icon)`t$($app.Color)`t$lnk`t$flag`t$(Get-KidTileImage $app.Name)`tplate"
+        $tiles += "$($app.Name)`t$($app.Icon)`t$($app.Color)`t$lnk`t$flag`t$(Get-KidTileImage $app.Name)`tplate"
     }
     foreach ($app in $Config.PackagedApps) {
         if ($installedPfns -notcontains ($app.Aumid -split '!')[0]) { continue }
         $flag = if ($active -contains $app.Aumid) { '' } else { 'pending' }
-        $lines += "$($app.Name)`t$($app.Icon)`t$($app.Color)`tshell:AppsFolder\$($app.Aumid)`t$flag`t$(Get-KidTileImage $app.Name)`t"
+        $tiles += "$($app.Name)`t$($app.Icon)`t$($app.Color)`tshell:AppsFolder\$($app.Aumid)`t$flag`t$(Get-KidTileImage $app.Name)`t"
     }
+    $lines += @($tiles | Sort-Object { ($_ -split "`t")[0] } -Culture 'en-US')
     $lines | Set-Content -Path $script:HomeTsv -Encoding UTF8
 }
 
