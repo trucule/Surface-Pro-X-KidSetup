@@ -42,8 +42,8 @@ Import-Module (Split-Path $installed) -Force
 # --- Apps -------------------------------------------------------------------------------------------
 # Name, source (file or folder with index.html), tile image, tile colour. Folder apps keep their files next to index.html.
 $apps = @(
-    @{ Name = 'Kitchen Lab';   Path = 'apps\kitchen-lab.html';   Tile = $null;                          Color = $null }
-    @{ Name = 'Chemistry Lab'; Path = 'apps\chemistry-lab.html'; Tile = $null;                          Color = $null }
+    @{ Name = 'Kitchen Lab';   Path = 'apps\kitchen-lab.html';   Tile = 'apps\tiles\Kitchen Lab.png';   Color = '#FF7A3D' }
+    @{ Name = 'Chemistry Lab'; Path = 'apps\chemistry-lab.html'; Tile = 'apps\tiles\Chemistry Lab.png'; Color = '#0C8599' }
     @{ Name = 'Draw With Me';  Path = 'apps\draw-with-me';       Tile = 'apps\draw-with-me-tile.png';   Color = '#FF4F8B' }
     @{ Name = 'Trace With Me'; Path = 'apps\trace-with-me.html'; Tile = 'apps\trace-with-me-tile.png';  Color = '#9B6BFF' }
     @{ Name = 'Count With Me'; Path = 'apps\count-with-me.html'; Tile = 'apps\count-with-me-tile.png';  Color = '#58C7F0' }
@@ -60,6 +60,16 @@ foreach ($app in $apps) {
     Add-KidLocalApp -Name $app.Name -Path $src -NoSync
     if ($app.Tile) { Set-KidApp -Name $app.Name -Image (Join-Path $here $app.Tile) -Color $app.Color -NoSync }   # one sync at the end
     Write-Host ("  installed {0}" -f $app.Name)
+}
+
+# Tile art for apps added on the tablet itself (a website tile, say): apps\tiles\<app name>.png is used when an app
+# with that name is on her home screen.
+$names = @(Get-KidApp | ForEach-Object { $_.Name })
+foreach ($png in Get-ChildItem (Join-Path $here 'apps\tiles') -Filter *.png -ErrorAction SilentlyContinue) {
+    $n = $png.BaseName
+    if ($names -contains $n -and -not ($apps | Where-Object { $_.Name -eq $n })) {
+        try { Set-KidApp -Name $n -Image $png.FullName -NoSync; Write-Host ("  tile art for {0}" -f $n) } catch { Write-Warning ("Tile art for {0}: {1}" -f $n, $_.Exception.Message) }
+    }
 }
 
 if ($SkipRestart) { Sync-KidTablet; Write-Host 'Done. Apps updated; her session was left running (they load on next launch).' }

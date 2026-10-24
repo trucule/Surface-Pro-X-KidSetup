@@ -45,7 +45,7 @@ $script:TileDefaults = @{
     'Kid Pix'                    = @{ Icon = 0x1F58D; Color = '#F03E3E' }
     'Kleki Paint'                = @{ Icon = 0x1F58A; Color = '#AE3EC9' }
     'Kids Typing Zoo'            = @{ Icon = 0x2328;  Color = '#2B8A3E' }
-    'Kitchen Lab'                = @{ Icon = 0x1F9EA; Color = '#FF7A3D' }
+    'Kitchen Lab'                = @{ Icon = 0x1F373; Color = '#FF7A3D' }
     'Tux Paint'                  = @{ Icon = 0x1F3A8; Color = '#E8590C'; Arguments = '--fullscreen --native' }
     'Paint'                      = @{ Icon = 0x1F58C; Color = '#C2255C' }
     'Camera'                     = @{ Icon = 0x1F4F7; Color = '#495057' }

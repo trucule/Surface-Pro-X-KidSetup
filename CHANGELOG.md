@@ -4,6 +4,8 @@
 - Travel mode shows tiles for Southwest, United, Delta, American, Alaska and JetBlue while it is on and removes them
   when it ends (any sync also removes them if travel mode is off). `Set-KidTabletTravelMode.ps1` asks ET Ducky for
   Hours (empty is 6, 0 ends it now, up to 48). The standalone Southwest TV tile is folded into travel mode.
+- Tile art for Kitchen Lab (a mixing bowl, no longer a test tube), Chemistry Lab (a flask) and Space Place (a rocket).
+  Any `apps\tiles\<app name>.png` is applied to an app of that name on the tablet, including website tiles added there.
 - A background sync waits for one already running, so back-to-back changes are not lost.
 
 ## 2026-10-23
