@@ -3,6 +3,8 @@
 ## 2026-10-24
 - Nine new 3D thinking games with adaptive levels: Robot Path, Light Bridge, Pattern Machine, Fraction Pizza,
   Tangram City, Number Line Rocket, Circuit Lab, Ecosystem Aquarium and Planet Explorer.
+- Three more: Word Wizard (spelling that casts 3D spells), Read It Say It Make It (reading aloud with offline speech
+  checking, then an animated scene) and Simon Orchestra (melody and light memory, then backwards).
 - Home screen tiles are sorted alphabetically by name, across websites, local apps and Store apps.
 - Travel mode shows tiles for Southwest, United, Delta, American, Alaska and JetBlue while it is on and removes them
   when it ends (any sync also removes them if travel mode is off). `Set-KidTabletTravelMode.ps1` asks ET Ducky for

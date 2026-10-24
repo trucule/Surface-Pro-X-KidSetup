@@ -62,6 +62,9 @@ $apps = @(
     @{ Name = 'Circuit Lab'; Path = 'apps\circuit-lab.html'; Tile = 'apps\circuit-lab-tile.png'; Color = '#FF9F1C' }
     @{ Name = 'Ecosystem Aquarium'; Path = 'apps\ecosystem-aquarium.html'; Tile = 'apps\ecosystem-aquarium-tile.png'; Color = '#2EC4D6' }
     @{ Name = 'Planet Explorer'; Path = 'apps\planet-explorer.html'; Tile = 'apps\planet-explorer-tile.png'; Color = '#7A4DFF' }
+    @{ Name = 'Word Wizard'; Path = 'apps\word-wizard.html'; Tile = 'apps\word-wizard-tile.png'; Color = '#8A3FFC' }
+    @{ Name = 'Read It Say It Make It'; Path = 'apps\read-it-say-it'; Tile = 'apps\read-it-say-it-tile.png'; Color = '#13C95A' }
+    @{ Name = 'Simon Orchestra'; Path = 'apps\simon-orchestra.html'; Tile = 'apps\simon-orchestra-tile.png'; Color = '#FF7A00' }
 )
 foreach ($app in $apps) {
     $src = Join-Path $here $app.Path

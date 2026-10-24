@@ -1,0 +1,1 @@
+window.RISI_MODEL_FILES = 6; window.RISI_MODEL_NAMES = ["am/final.mdl", "conf/mfcc.conf", "conf/model.conf", "graph/HCLr.fst", "graph/disambig_tid.int", "graph/phones/word_boundary.int", "graph/words.txt", "ivector/final.dubm", "ivector/final.ie", "ivector/final.mat", "ivector/global_cmvn.stats", "ivector/online_cmvn.conf", "ivector/splice.conf"];

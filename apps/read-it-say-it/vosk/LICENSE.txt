@@ -1,0 +1,6 @@
+vosk-browser 0.0.8 (npm vosk-browser), Copyright Ciro Mattia Gonano and contributors, Apache License 2.0.
+Vosk speech recognition toolkit and Kaldi, Apache License 2.0.
+vosk-model-small-en-us-0.15, Copyright 2020 Alpha Cephei Inc, Apache License 2.0 (npm transcribe2texts 1.0.6 carries it).
+https://www.apache.org/licenses/LICENSE-2.0
+Changes: the engine runs on the page, not in a Worker; binary files are stored as base64 .js;
+graph/Gr.fst is left out because recognition always uses a grammar.

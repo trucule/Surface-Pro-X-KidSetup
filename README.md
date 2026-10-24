@@ -12,12 +12,13 @@ Built for a Surface Pro X. Any Windows 11 Pro device with a touch screen works t
 - Edge locked to an allowlist of domains. Everything else is blocked.
 - A touch-first home screen (`KidHome.exe`, built on the tablet from source in the module) with large tiles, a
   wallpaper, and a Home button that closes any app.
-- Twenty offline HTML apps: Level Up (reading, math, color science, patterns, time and money, shapes and fractions,
+- Twenty-three offline HTML apps: Level Up (reading, math, color science, patterns, time and money, shapes and fractions,
   each climbing from kindergarten to about 4th grade), Voice Band (her voice as an instrument: sing a melody, voice
   effects, a looper band), Camera Fun (filters, face stickers and stamps), Draw With Me (step-by-step drawing lessons), Trace With Me
   (letters, spelling, cursive), Count With Me, Music Box, Story Maker (a read-aloud branching story app), Kitchen Lab,
-  Chemistry Lab, Playground Lab (3D physics), and nine 3D thinking games: Robot Path, Light Bridge, Pattern Machine,
-  Fraction Pizza, Tangram City, Number Line Rocket, Circuit Lab, Ecosystem Aquarium and Planet Explorer. Each one is
+  Chemistry Lab, Playground Lab (3D physics), and twelve 3D thinking games: Robot Path, Light Bridge, Pattern Machine,
+  Fraction Pizza, Tangram City, Number Line Rocket, Circuit Lab, Ecosystem Aquarium, Planet Explorer, Word Wizard,
+  Read It Say It Make It and Simon Orchestra. Each one is
   described below. Home screen tiles are sorted alphabetically by name.
 - Optional AI: with an Anthropic API key, Draw With Me learns new drawings on request and Story Maker writes each
   scene live, with a daily cap.
@@ -328,6 +329,20 @@ each game has a Playwright test in `tools/test-<name>.py`.
   A crashed tank names the day and the reason.
 - **Planet Explorer** (`apps/planet-explorer.html`): She flies to a planet in a 3D solar system, lands and jumps.
   Jump heights, day and year lengths, sizes and tilts come from the NASA Planetary Fact Sheet.
+
+- **Word Wizard** (`apps/word-wizard.html`): She hears a word, sees a picture and taps letter tiles into the slots.
+  The right word casts a spell in a 3D world: "rain" makes it rain and "giant frog" makes a giant frog. Levels go from
+  3-letter words to two-word spells, the endings -s, -er and -est, the beginnings un- and re-, and compound words.
+  The test runs every one of the 292 spells.
+- **Read It Say It Make It** (`apps/read-it-say-it/`): She reads a sentence out loud and each word turns green as she
+  says it, then the sentence plays out as an animated 3D scene. Sentences grow from three words to long ones with two
+  animals, weather and "first ... then". Speech is checked offline by Vosk (vosk-browser with the small English model,
+  Apache 2.0) in `apps/read-it-say-it/vosk/`, built from npm by `tools/build-read-it-say-it-vendor.py`. It listens
+  only for the sentence's own words. A grown-up can press and hold the gear button for 1.5 seconds to choose
+  Microphone, Tap each word, or Trust me (one "I read it!" button). Always install it from the folder.
+- **Simon Orchestra** (`apps/simon-orchestra.html`): A drum, marimba, trumpet, harp, piano and chimes play a tune
+  with spotlights on a 3D stage, and she plays it back. Tunes grow longer, then faster, then must be played backwards.
+  Every instrument plays on a pentatonic scale.
 
 ### Draw With Me library
 `apps/draw-with-me/library.js` holds the pre-made lessons (152 as of this package: 70 simple, 82 detailed). To add more, edit
