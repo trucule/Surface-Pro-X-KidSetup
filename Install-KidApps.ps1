@@ -53,6 +53,15 @@ $apps = @(
     @{ Name = 'Level Up';      Path = 'apps\level-up.html';      Tile = 'apps\level-up-tile.png';       Color = '#FF8A5B' }
     @{ Name = 'Voice Band';    Path = 'apps\voice-band.html';    Tile = 'apps\voice-band-tile.png';     Color = '#9B6BFF' }
     @{ Name = 'Camera Fun';    Path = 'apps\camera-fun';        Tile = 'apps\camera-fun-tile.png';     Color = '#3BA8FF' }
+    @{ Name = 'Robot Path'; Path = 'apps\robot-path.html'; Tile = 'apps\robot-path-tile.png'; Color = '#5CD38B' }
+    @{ Name = 'Light Bridge'; Path = 'apps\light-bridge.html'; Tile = 'apps\light-bridge-tile.png'; Color = '#9B6BFF' }
+    @{ Name = 'Pattern Machine'; Path = 'apps\pattern-machine.html'; Tile = 'apps\pattern-machine-tile.png'; Color = '#FF4F8B' }
+    @{ Name = 'Fraction Pizza'; Path = 'apps\fraction-pizza.html'; Tile = 'apps\fraction-pizza-tile.png'; Color = '#FF7A1A' }
+    @{ Name = 'Tangram City'; Path = 'apps\tangram-city.html'; Tile = 'apps\tangram-city-tile.png'; Color = '#4660FF' }
+    @{ Name = 'Number Line Rocket'; Path = 'apps\number-line-rocket.html'; Tile = 'apps\number-line-rocket-tile.png'; Color = '#6A1BFF' }
+    @{ Name = 'Circuit Lab'; Path = 'apps\circuit-lab.html'; Tile = 'apps\circuit-lab-tile.png'; Color = '#FF9F1C' }
+    @{ Name = 'Ecosystem Aquarium'; Path = 'apps\ecosystem-aquarium.html'; Tile = 'apps\ecosystem-aquarium-tile.png'; Color = '#2EC4D6' }
+    @{ Name = 'Planet Explorer'; Path = 'apps\planet-explorer.html'; Tile = 'apps\planet-explorer-tile.png'; Color = '#7A4DFF' }
 )
 foreach ($app in $apps) {
     $src = Join-Path $here $app.Path

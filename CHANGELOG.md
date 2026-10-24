@@ -1,6 +1,8 @@
 # Changes
 
 ## 2026-10-24
+- Nine new 3D thinking games with adaptive levels: Robot Path, Light Bridge, Pattern Machine, Fraction Pizza,
+  Tangram City, Number Line Rocket, Circuit Lab, Ecosystem Aquarium and Planet Explorer.
 - Home screen tiles are sorted alphabetically by name, across websites, local apps and Store apps.
 - Travel mode shows tiles for Southwest, United, Delta, American, Alaska and JetBlue while it is on and removes them
   when it ends (any sync also removes them if travel mode is off). `Set-KidTabletTravelMode.ps1` asks ET Ducky for

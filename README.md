@@ -12,11 +12,13 @@ Built for a Surface Pro X. Any Windows 11 Pro device with a touch screen works t
 - Edge locked to an allowlist of domains. Everything else is blocked.
 - A touch-first home screen (`KidHome.exe`, built on the tablet from source in the module) with large tiles, a
   wallpaper, and a Home button that closes any app.
-- Eleven offline HTML apps: Level Up (reading, math, color science, patterns, time and money, shapes and fractions,
+- Twenty offline HTML apps: Level Up (reading, math, color science, patterns, time and money, shapes and fractions,
   each climbing from kindergarten to about 4th grade), Voice Band (her voice as an instrument: sing a melody, voice
   effects, a looper band), Camera Fun (filters, face stickers and stamps), Draw With Me (step-by-step drawing lessons), Trace With Me
   (letters, spelling, cursive), Count With Me, Music Box, Story Maker (a read-aloud branching story app), Kitchen Lab,
-  Chemistry Lab, and Playground Lab (3D physics). Each one is described below.
+  Chemistry Lab, Playground Lab (3D physics), and nine 3D thinking games: Robot Path, Light Bridge, Pattern Machine,
+  Fraction Pizza, Tangram City, Number Line Rocket, Circuit Lab, Ecosystem Aquarium and Planet Explorer. Each one is
+  described below. Home screen tiles are sorted alphabetically by name.
 - Optional AI: with an Anthropic API key, Draw With Me learns new drawings on request and Story Maker writes each
   scene live, with a daily cap.
 - Optional natural voices: pre-rendered neural voice clips for every spoken line, or live voices from Azure Speech,
@@ -295,6 +297,37 @@ Three more apps (`apps/count-with-me.html`, `apps/music-box.html`, `apps/story-m
   That works at home while the PC is on; add `TTS_KEY` (Azure Speech with `TTS_REGION`, or
   OpenAI with `TTS_FALLBACK=openai`) and it takes over when the PC is unreachable. With `TTS_PROVIDER=azure|openai`
   the key is the primary voice. Without any of these, the Windows voices are used, varied per character.
+
+### 3D thinking games
+Each game is one offline file with three.js r149 inlined and 3D models built in code. Each one climbs a level ladder:
+4 right first try in a row moves up a level, and 2 missed in a row moves down. Progress is saved on the tablet, and
+each game has a Playwright test in `tools/test-<name>.py`.
+
+- **Robot Path** (`apps/robot-path.html`): She taps arrow cards to program a toy robot to collect gems on a 3D
+  board. Later levels add Repeat cards, an If pink card, card limits and fewest moves challenges. Every board is
+  proven solvable by a search when it is made.
+- **Light Bridge** (`apps/light-bridge.html`): She drags between matching glowing orbs to fill the board without
+  crossing bridges. Boards grow from 4 by 4 to 9 by 9, and a separate solver proves each board before it is shown.
+  Each color also has its own orb shape.
+- **Pattern Machine** (`apps/pattern-machine.html`): Glowing machines turn, flip, paint and resize block shapes.
+  She predicts the output, then works out a hidden rule from examples, then follows chains of two and three machines.
+- **Fraction Pizza** (`apps/fraction-pizza.html`): She cuts pizzas and pies and serves slices to customers. Levels
+  cover halves and quarters, what is left, equal fractions, adding slices, fractions on a number line and comparing.
+- **Tangram City** (`apps/tangram-city.html`): She drags, turns and flips the seven tangram pieces to fill city
+  shapes. Later levels hide the inside lines, ask for mirror designs, then count squares for area and fence sides for
+  perimeter. Every shape comes from a known solution.
+- **Number Line Rocket** (`apps/number-line-rocket.html`): She taps a spot on the number line and the rocket flies
+  there. The line goes from 0 to 10 up to 0 to 1000, then fractions and numbers below zero. Closer guesses earn more
+  stars.
+- **Circuit Lab** (`apps/circuit-lab.html`): She drags batteries, wires, bulbs, switches and buzzers onto a board to
+  light the rooms of a 3D house. A nodal analysis solver decides brightness, so bulbs in series glow dim and bulbs in
+  parallel glow bright. A short circuit sparks and counts as a miss. Source: `src/science-games/`, built by
+  `tools/build-science-games.py`.
+- **Ecosystem Aquarium** (`apps/ecosystem-aquarium.html`): She sets fish, snails, plants, light and food, then runs
+  the days. A step by step simulation with no randomness covers oxygen, food, algae, room to swim and a food chain.
+  A crashed tank names the day and the reason.
+- **Planet Explorer** (`apps/planet-explorer.html`): She flies to a planet in a 3D solar system, lands and jumps.
+  Jump heights, day and year lengths, sizes and tilts come from the NASA Planetary Fact Sheet.
 
 ### Draw With Me library
 `apps/draw-with-me/library.js` holds the pre-made lessons (152 as of this package: 70 simple, 82 detailed). To add more, edit
