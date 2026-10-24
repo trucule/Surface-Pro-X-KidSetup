@@ -2029,6 +2029,8 @@ function Sync-KidUserSettings {
         # Edge only honors the all-local-files form here ('file:///*'); a folder path is ignored.
         # It stays scoped to her apps: the site blocklist lets only C:\KidTabletApps pages load.
         $mediaSites = @($mediaSites) + @('file:///*')
+        # Her apps may start sound without a tap first (spoken instructions when a game opens).
+        Set-RegList "$edgePol\AutoplayAllowlist" @('file:///*')
         if ($c.AllowCameraMic) {
             Set-RegValue $edgePol 'AudioCaptureAllowed' 1
             Set-RegValue $edgePol 'VideoCaptureAllowed' 1
@@ -2044,7 +2046,9 @@ function Sync-KidUserSettings {
             Remove-Item "$edgePol\URLBlocklist", "$edgePol\URLAllowlist" -Recurse -Force -ErrorAction SilentlyContinue
         } else {
             Set-RegList "$edgePol\URLBlocklist" @('*')
-            Set-RegList "$edgePol\URLAllowlist" @($c.AllowedDomains)
+            # The narrator voice service is reachable whenever a voice is configured (Story Maker uses it too).
+            $voiceHost = @(Get-KidNarratorVoice | ForEach-Object { $_.Host })
+            Set-RegList "$edgePol\URLAllowlist" @(@($c.AllowedDomains) + $voiceHost | Select-Object -Unique)
         }
         $cdm = "$root\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"
         foreach ($n in 'RotatingLockScreenOverlayEnabled', 'SubscribedContent-338387Enabled',
@@ -2320,6 +2324,24 @@ function Read-KidEnvFile {
     return $vars
 }
 
+function Get-KidNarratorVoice {
+    <#
+    .SYNOPSIS
+        The live narrator voice for the offline apps, from the .env: Azure Speech when TTS_KEY is an Azure key
+        (TTS_PROVIDER=azure, or VoiceStudio with the Azure fallback). Returns $null when there is none.
+        NARRATOR_VOICE picks the voice (default en-US-AnaNeural, a child voice); TTS_REGION the Azure region.
+    #>
+    param([string]$EnvFile = (Join-Path $script:DataDir '.env'))
+    $vars = Read-KidEnvFile -Path $EnvFile
+    if (-not $vars['TTS_KEY']) { return $null }
+    $provider = if ($vars['TTS_PROVIDER']) { $vars['TTS_PROVIDER'] } elseif ($vars['TTS_URL']) { 'voicestudio' } else { 'azure' }
+    $fallback = if ($vars['TTS_FALLBACK']) { $vars['TTS_FALLBACK'] } else { 'azure' }
+    if (-not ($provider -eq 'azure' -or ($provider -eq 'voicestudio' -and $fallback -eq 'azure'))) { return $null }
+    $region = if ($vars['TTS_REGION']) { $vars['TTS_REGION'].Trim().ToLowerInvariant() } else { 'eastus' }
+    $voice = if ($vars['NARRATOR_VOICE']) { $vars['NARRATOR_VOICE'].Trim() } else { 'en-US-AnaNeural' }
+    [pscustomobject]@{ Key = $vars['TTS_KEY']; Region = $region; Voice = $voice; Host = "$region.tts.speech.microsoft.com" }
+}
+
 function Update-KidAppConfig {
     <#
     .SYNOPSIS
@@ -2344,6 +2366,19 @@ function Update-KidAppConfig {
     if ($vars['DRAW_DAILY_LIMIT'] -and [int]::TryParse($vars['DRAW_DAILY_LIMIT'], [ref]$null)) { $limit = [Math]::Max(1, [int]$vars['DRAW_DAILY_LIMIT']) }
     $model = if ($vars['DRAW_MODEL']) { $vars['DRAW_MODEL'] } else { 'claude-sonnet-5-5' }
     if (-not (Test-Path $script:LocalAppsDir)) { return }
+    # Narrator voice for every app that loads voice-config.js (apps/shared/kid-voice.js inside each app).
+    $narrator = Get-KidNarratorVoice -EnvFile $EnvFile
+    foreach ($dir in Get-ChildItem -LiteralPath $script:LocalAppsDir -Directory) {
+        $index = Join-Path $dir.FullName 'index.html'
+        if (-not (Test-Path $index) -or -not (Select-String -LiteralPath $index -SimpleMatch 'src="voice-config.js"' -Quiet)) { continue }
+        $voiceFile = Join-Path $dir.FullName 'voice-config.js'
+        if ($narrator) {
+            $json = [ordered]@{ provider = 'azure'; key = $narrator.Key; region = $narrator.Region; voice = $narrator.Voice } | ConvertTo-Json -Compress
+            Set-Content -LiteralPath $voiceFile -Value "window.KID_TTS = $json;" -Encoding UTF8
+        } elseif (Test-Path $voiceFile) { Remove-Item -LiteralPath $voiceFile -Force }
+    }
+    $script:KidNarratorStatus = if ($narrator) { "narrator voice: Azure $($narrator.Voice) ($($narrator.Region))" } else { 'narrator voice: Windows voice (no Azure TTS_KEY in .env)' }
+    Write-Verbose $script:KidNarratorStatus
     foreach ($dir in Get-ChildItem -LiteralPath $script:LocalAppsDir -Directory) {
         $index = Join-Path $dir.FullName 'index.html'
         if (-not (Test-Path $index) -or -not (Select-String -LiteralPath $index -SimpleMatch 'src="config.js"' -Quiet)) { continue }
@@ -3360,4 +3395,4 @@ Export-ModuleMember -Function `
     Invoke-KidAutoAdd, Hide-KidAvailableApp, Repair-KidStoreApp,
     Add-KidStoreApp, Find-KidStoreApp, Find-KidWallpaper, Add-KidLocalApp, Start-KidStoreInstall, Invoke-KidStoreQueue, Complete-KidStoreInstall,
     Get-KidTabletConfig, Get-KidApp, Add-KidWebApp, Add-KidDesktopApp, Find-KidPackagedApp,
-    Add-KidPackagedApp, Get-KidAvailableApp, Add-KidAvailableApp, Set-KidApp, Set-KidTabletSetting, Remove-KidApp, Add-KidAllowedDomain, Remove-KidAllowedDomain, Update-KidAppConfig, Start-KidBackgroundSync, Set-KidTravelMode, Save-KidTravelHosts
+    Add-KidPackagedApp, Get-KidAvailableApp, Add-KidAvailableApp, Set-KidApp, Set-KidTabletSetting, Remove-KidApp, Add-KidAllowedDomain, Remove-KidAllowedDomain, Update-KidAppConfig, Get-KidNarratorVoice, Start-KidBackgroundSync, Set-KidTravelMode, Save-KidTravelHosts

@@ -1,6 +1,8 @@
 # Changes
 
 ## 2026-10-24
+- Every game speaks with the Azure kid voice (en-US-AnaNeural, or `NARRATOR_VOICE`) when the `.env` has an Azure
+  Speech key, with clips kept on the tablet and the Windows voice as the fallback. Story Maker keeps its own cast.
 - Nine new 3D thinking games with adaptive levels: Robot Path, Light Bridge, Pattern Machine, Fraction Pizza,
   Tangram City, Number Line Rocket, Circuit Lab, Ecosystem Aquarium and Planet Explorer.
 - Three more: Word Wizard (spelling that casts 3D spells), Read It Say It Make It (reading aloud with offline speech

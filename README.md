@@ -129,9 +129,17 @@ the tablet can still reach your RMM. Connecting to the plane's network may need 
 `$script:TravelApps` near the top of `KidTablet.psm1`.
 
 ## Natural voices
-All speaking apps can play pre-rendered neural voice clips instead of the Windows voice. See `voices/README.md`:
-run `voices\make-voices.py` on your PC with edge-tts, piper, or VoiceStudio, then `Install-KidApps.ps1`. Without
-packs, everything works with the Windows voice.
+The games speak with the Azure kid voice (`en-US-AnaNeural`) when the `.env` has an Azure Speech key: `TTS_KEY` and
+`TTS_REGION` with `TTS_PROVIDER=azure`, or VoiceStudio with the Azure fallback. `NARRATOR_VOICE` picks another Azure
+voice. `Update-KidAppConfig` writes `voice-config.js` next to each app, and the shared layer in
+`apps/shared/kid-voice.js` (put into every app by `tools/apply-kid-voice.py`) sends each spoken line to Azure. Each
+clip is kept on the tablet after the first time, so repeated lines play at once and without the internet. A line that
+Azure cannot answer within 4 seconds uses the Windows voice. The voice service host is added to her website allowlist
+while a key is set. `Install-KidApps.ps1` ends by printing which narrator voice is in use, so
+`Get-KidTabletStatus.ps1` shows it. Tested by `tools/test-kid-voice.py`.
+
+Apps can also play pre-rendered voice clips. See `voices/README.md`: run `voices\make-voices.py` on your PC with
+edge-tts, piper, or VoiceStudio, then `Install-KidApps.ps1`. A clip in a pack plays before the live voice.
 
 Story Maker reads whole stories, so it uses a live voice service instead of clips. The options, from `env.example`:
 `TTS_PROVIDER=azure` or `openai` with the key, or `TTS_PROVIDER=voicestudio` with `TTS_URL` pointing at a

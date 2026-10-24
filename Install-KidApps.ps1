@@ -86,3 +86,6 @@ foreach ($png in Get-ChildItem (Join-Path $here 'apps\tiles') -Filter *.png -Err
 
 if ($SkipRestart) { Sync-KidTablet; Write-Host 'Done. Apps updated; her session was left running (they load on next launch).' }
 else { Sync-KidTablet -RestartSession; Write-Host ('Done: ' + (($apps | ForEach-Object { $_.Name }) -join ', ') + ' are on her home screen.') }
+# The narrator voice the games use (Azure kid voice from the .env, or the Windows voice).
+$nv = Get-KidNarratorVoice
+Write-Host $(if ($nv) { "Narrator voice: Azure $($nv.Voice) ($($nv.Region))" } else { 'Narrator voice: Windows voice (add TTS_KEY and TTS_REGION for Azure to the .env)' })
