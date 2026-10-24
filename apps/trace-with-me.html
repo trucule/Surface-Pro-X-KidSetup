@@ -160,7 +160,8 @@
 <!--
   Trace With Me. Handwriting from first letters to joined cursive. One file, no network, no API.
   Three modes:
-    Little   the original decks: capital letters, small letters, numbers and shapes to colour in with a finger.
+    Little   capital letters, small letters, numbers and shapes in thin school print on handwriting lines, traced
+             stroke by stroke from numbered start dots.
     Spell    a word is spoken (with a picture clue). She traces it letter by letter in school print, then writes it
              from memory in letter boxes; each box is read by a small built-in letter matcher. Eight levels, from short
              vowel words to tricky 3rd grade words (because, friend, laugh).
@@ -305,78 +306,169 @@ const DECKS = {
   numbers: NUMBERS.map((w, n) => ({ id: 'N' + n, glyph: String(n), say: `Trace the number ${w}.`, done: n === 0 ? 'Zero! Nothing at all.' : `${w.charAt(0).toUpperCase() + w.slice(1)}! ` + 'Count them: ' + Array.from({ length: n }, (_, i) => NUMBERS[i + 1]).join(', ') + '.', emoji: n === 0 ? '🫧' : '🍓'.repeat(n), label: String(n) })),
   shapes: SHAPES.map(s => ({ id: 'S' + s.id, shape: s, say: `Trace the ${s.name}.`, done: `A ${s.name}!`, emoji: s.emoji, label: '' }))
 };
-const FONT = '900 820px "Segoe UI", "Arial Rounded MT Bold", Arial, sans-serif';
-const DONE_AT = 0.72;          // coverage needed to win
-const BRUSH = 72;              // her finger line, in page units
+// Little letters are written the way she writes with a pencil: thin school print (ball and stick) on handwriting
+// lines, with a numbered start dot and an arrow for each stroke in order. Units match PRINT below: top line y=0,
+// midline y=100, baseline y=200, descender line y=300.
+const PRINT_UPPER = {
+  A: { w: 120, d: ['M60 0 L8 200', 'M60 0 L112 200', 'M28 125 H92'] },
+  B: { w: 105, d: ['M12 0 V200', 'M12 0 H55 C100 0 100 98 55 98 H12', 'M12 98 H60 C108 98 108 200 60 200 H12'] },
+  C: { w: 115, d: ['M105 32 C85 -2 12 -4 10 100 C12 204 85 202 105 168'] },
+  D: { w: 112, d: ['M12 0 V200', 'M12 0 H45 C122 0 122 200 45 200 H12'] },
+  E: { w: 100, d: ['M12 0 V200', 'M12 0 H92', 'M12 100 H80', 'M12 200 H92'] },
+  F: { w: 95, d: ['M12 0 V200', 'M12 0 H90', 'M12 100 H78'] },
+  G: { w: 120, d: ['M106 32 C86 -2 12 -4 10 100 C12 206 98 206 108 150 V118 H70'] },
+  H: { w: 112, d: ['M12 0 V200', 'M100 0 V200', 'M12 100 H100'] },
+  I: { w: 90, d: ['M45 0 V200', 'M8 0 H82', 'M8 200 H82'] },
+  J: { w: 95, d: ['M80 0 V148 C80 212 12 212 6 160'] },
+  K: { w: 105, d: ['M12 0 V200', 'M95 0 L12 118', 'M44 78 L100 200'] },
+  L: { w: 95, d: ['M12 0 V200 H90'] },
+  M: { w: 140, d: ['M12 0 V200', 'M12 0 L70 140 L128 0 V200'] },
+  N: { w: 112, d: ['M12 0 V200', 'M12 0 L100 200 V0'] },
+  O: { w: 120, d: ['M60 0 C-10 0 -10 200 60 200 C130 200 130 0 60 0'] },
+  P: { w: 100, d: ['M12 0 V200', 'M12 0 H55 C105 0 105 104 55 104 H12'] },
+  Q: { w: 125, d: ['M60 0 C-10 0 -10 200 60 200 C130 200 130 0 60 0', 'M72 150 L115 208'] },
+  R: { w: 105, d: ['M12 0 V200', 'M12 0 H55 C105 0 105 104 55 104 H12', 'M52 104 L100 200'] },
+  S: { w: 105, d: ['M98 30 C84 -6 12 -6 12 48 C12 98 98 96 98 150 C98 210 14 212 4 166'] },
+  T: { w: 110, d: ['M55 0 V200', 'M5 0 H105'] },
+  U: { w: 112, d: ['M12 0 V140 C12 212 100 212 100 140 V0'] },
+  V: { w: 116, d: ['M5 0 L58 200 L111 0'] },
+  W: { w: 150, d: ['M5 0 L40 200 L75 40 L110 200 L145 0'] },
+  X: { w: 110, d: ['M10 0 L100 200', 'M100 0 L10 200'] },
+  Y: { w: 116, d: ['M8 0 L58 100', 'M108 0 L58 100 V200'] },
+  Z: { w: 112, d: ['M10 0 H100 L10 200 H102'] },
+};
+const PRINT_DIGITS = {
+  0: { w: 100, d: ['M50 0 C-8 0 -8 200 50 200 C108 200 108 0 50 0'] },
+  1: { w: 70, d: ['M35 0 V200'] },
+  2: { w: 105, d: ['M12 45 C15 -12 95 -12 92 50 C90 96 14 150 10 200 H96'] },
+  3: { w: 100, d: ['M12 26 C34 -8 92 -2 88 48 C85 90 52 97 40 98 C96 98 100 148 92 170 C80 216 18 210 8 178'] },
+  4: { w: 105, d: ['M66 0 L8 135 H100', 'M76 0 V200'] },
+  5: { w: 105, d: ['M22 0 V92 C60 70 98 92 98 140 C98 210 24 212 10 176', 'M22 0 H92'] },
+  6: { w: 105, d: ['M86 12 C40 -12 10 50 10 130 C10 212 96 212 96 140 C96 84 24 80 12 126'] },
+  7: { w: 105, d: ['M10 0 H95 L40 200'] },
+  8: { w: 100, d: ['M88 40 C85 -6 15 -6 15 45 C15 92 92 98 92 150 C92 212 8 212 8 150 C8 100 88 95 88 40'] },
+  9: { w: 100, d: ['M90 55 C90 -12 10 -12 10 55 C10 112 90 106 90 55 V200'] },
+};
+// Shapes are traced along their outline, in page units (0..1000).
+function starPath() { let s = ''; for (let i = 0; i <= 10; i++) { const a = -Math.PI / 2 + (i % 10) * Math.PI / 5, r = i % 2 ? 150 : 360; s += (i ? ' L' : 'M') + (500 + r * Math.cos(a)).toFixed(1) + ' ' + (520 + r * Math.sin(a)).toFixed(1); } return s; }
+const SHAPE_D = {
+  circle: ['M500 170 A330 330 0 1 0 500 830 A330 330 0 1 0 500 170'],
+  square: ['M190 190 H810 V810 H190 V190'],
+  triangle: ['M500 150 L850 820 L150 820 L500 150'],
+  heart: ['M500 340 C490 300 460 240 390 230 C150 200 120 560 500 840 C880 560 850 200 610 230 C540 240 510 300 500 340'],
+  star: [starPath()],
+  diamond: ['M500 140 L840 500 L500 860 L160 500 L500 140'],
+};
+const LS = 2.6, LTOP = 150;     // letter units to page units, and where the top line sits (below the word label)
+const PENCIL = 26;              // her pencil line, in page units
+const NEAR = 40;                // how close to the guide a point must be to count
+const STRAY = 85;               // ink this far from every guide is off the letter
+const STROKE_DONE = 0.86;       // share of a stroke's guide points she must pass over
 
 let deck = 'upper', idx = 0, won = false, nudged = false, last = null;
 const cv = $('c'), g = cv.getContext('2d');
 const ink = document.createElement('canvas'); ink.width = ink.height = 1000; const ig = ink.getContext('2d');
-const mask = document.createElement('canvas'); mask.width = mask.height = 1000; const mg = mask.getContext('2d');
-let samples = [], outside = [];
+let guides = [], hits = [], drawn = 0, stray = 0, isLetter = false;
 const meter = document.querySelector('#meter i'), wordEl = $('word');
 const SKEY = 'tracer-stickers';
 function loadStickers() { try { return JSON.parse(localStorage.getItem(SKEY) || '[]'); } catch (e) { return []; } }
 function saveSticker(id) { const s = loadStickers(); if (!s.includes(id)) { s.push(id); try { localStorage.setItem(SKEY, JSON.stringify(s)); } catch (e) {} } }
 function item() { return DECKS[deck][idx]; }
+function glyphDef(ch) { return PRINT_UPPER[ch] || PRINT_DIGITS[ch] || PRINT[ch]; }
 
-function buildMask() {
-  mg.clearRect(0, 0, 1000, 1000); mg.fillStyle = '#000'; mg.strokeStyle = '#000';
+// Guide strokes in page units, in writing order.
+function buildGuides() {
   const it = item();
-  if (it.shape) { mg.lineWidth = 120; mg.lineJoin = mg.lineCap = 'round'; mg.beginPath(); it.shape.path(mg); mg.stroke(); }
+  if (it.shape) { isLetter = false; guides = SHAPE_D[it.shape.id].map(d => samplePath(d, 6)); }
   else {
-    mg.font = FONT; mg.textAlign = 'center'; mg.textBaseline = 'middle';
-    let size = 820; const w = mg.measureText(it.glyph).width; if (w > 780) size = Math.floor(820 * 780 / w);
-    mg.font = FONT.replace('820px', size + 'px');
-    mg.fillText(it.glyph, 500, it.glyph === it.glyph.toLowerCase() && /[gjpqy]/.test(it.glyph) ? 430 : 500);
+    isLetter = true;
+    const def = glyphDef(it.glyph), ox = 500 - def.w * LS / 2;
+    guides = def.d.map(d => samplePath(d, 2).map(([x, y]) => [ox + x * LS, LTOP + y * LS]));
   }
-  const d = mg.getImageData(0, 0, 1000, 1000).data; samples = []; outside = [];
-  for (let y = 10; y < 1000; y += 12) for (let x = 10; x < 1000; x += 12) (d[(y * 1000 + x) * 4 + 3] > 128 ? samples : outside).push([x, y]);
+  hits = guides.map(st => new Uint8Array(st.length)); drawn = 0; stray = 0;
+}
+function strokeShare(i) { const h = hits[i]; let n = 0; for (const v of h) n += v; return n / h.length; }
+function nextStroke() { for (let i = 0; i < guides.length; i++) if (strokeShare(i) < STROKE_DONE) return i; return -1; }
+function progress() { let a = 0, n = 0; for (const h of hits) { for (const v of h) a += v; n += h.length; } return n ? a / n : 0; }
+
+function linePath(st) { g.beginPath(); st.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); }
+function arrowAt(st) {
+  // A small arrow a little way along the stroke, pointing the way to go.
+  let k = 1, run = 0; while (k < st.length - 1 && run < 75) { run += Math.hypot(st[k][0] - st[k - 1][0], st[k][1] - st[k - 1][1]); k++; }
+  const j = Math.max(0, k - 4);
+  const [x, y] = st[k], a = Math.atan2(y - st[j][1], x - st[j][0]);
+  g.save(); g.translate(x, y); g.rotate(a); g.fillStyle = '#2EB872';
+  g.beginPath(); g.moveTo(22, 0); g.lineTo(-10, -16); g.lineTo(-10, 16); g.closePath(); g.fill(); g.restore();
 }
 function renderLittle() {
   g.clearRect(0, 0, 1000, 1000);
-  g.save(); g.globalAlpha = 0.18; g.drawImage(mask, 0, 0); g.restore();
-  g.save(); g.setLineDash([22, 18]); g.lineWidth = 7; g.strokeStyle = '#9B6BFF'; g.lineJoin = g.lineCap = 'round';
-  const it = item();
-  if (it.shape) { g.beginPath(); it.shape.path(g); g.stroke(); }
-  else { g.font = mg.font; g.textAlign = 'center'; g.textBaseline = 'middle'; g.strokeText(it.glyph, 500, it.glyph === it.glyph.toLowerCase() && /[gjpqy]/.test(it.glyph) ? 430 : 500); }
+  if (isLetter) {   // handwriting lines: top, dashed midline, baseline, and a faint descender line
+    const y = u => LTOP + u * LS;
+    g.save(); g.lineWidth = 5;
+    g.strokeStyle = '#7FB2F0'; g.beginPath(); g.moveTo(40, y(0)); g.lineTo(960, y(0)); g.stroke();
+    g.setLineDash([26, 20]); g.beginPath(); g.moveTo(40, y(100)); g.lineTo(960, y(100)); g.stroke(); g.setLineDash([]);
+    g.strokeStyle = '#F07F8F'; g.lineWidth = 6; g.beginPath(); g.moveTo(40, y(200)); g.lineTo(960, y(200)); g.stroke();
+    g.strokeStyle = '#D6E6F8'; g.lineWidth = 4; g.beginPath(); g.moveTo(40, y(300)); g.lineTo(960, y(300)); g.stroke();
+    g.restore();
+  }
+  // The letter to trace: a light pencil-width shadow with grey dots along it.
+  g.save(); g.lineJoin = g.lineCap = 'round';
+  for (const st of guides) { g.strokeStyle = '#ECE6F5'; g.lineWidth = PENCIL + 14; linePath(st); g.stroke(); }
+  g.strokeStyle = '#A89BB8'; g.lineWidth = 11; g.setLineDash([1, 24]);
+  for (const st of guides) { linePath(st); g.stroke(); }
   g.restore();
   g.drawImage(ink, 0, 0);
+  // Where to start the next stroke, with its number and direction.
+  const n = won ? -1 : nextStroke();
+  if (n >= 0) {
+    const st = guides[n], [x, y] = st[0];
+    arrowAt(st);
+    g.save(); g.fillStyle = '#2EB872'; g.beginPath(); g.arc(x, y, 26, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#fff'; g.font = '900 32px "Segoe UI", Arial, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(String(n + 1), x, y + 1); g.restore();
+  }
 }
-function coverage() {
-  if (!samples.length) return { on: 0, off: 0 };
-  const d = ig.getImageData(0, 0, 1000, 1000).data; let hit = 0, miss = 0;
-  for (const [x, y] of samples) if (d[(y * 1000 + x) * 4 + 3] > 40) hit++;
-  for (const [x, y] of outside) if (d[(y * 1000 + x) * 4 + 3] > 40) miss++;
-  return { on: hit / samples.length, off: miss / Math.max(1, hit) };
+function markSegment(a, b) {
+  // Every guide point within NEAR of this bit of pencil line is passed over.
+  const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy || 1; let near = false;
+  for (let s = 0; s < guides.length; s++) {
+    const st = guides[s], h = hits[s];
+    for (let i = 0; i < st.length; i++) {
+      const [px, py] = st[i]; let t = ((px - a[0]) * dx + (py - a[1]) * dy) / L2; t = t < 0 ? 0 : t > 1 ? 1 : t;
+      const ex = a[0] + t * dx - px, ey = a[1] + t * dy - py, d2 = ex * ex + ey * ey;
+      if (d2 <= NEAR * NEAR) h[i] = 1;
+      if (d2 <= STRAY * STRAY) near = true;
+    }
+  }
+  drawn++; if (!near) stray++;
 }
 function loadLittle(i, speak = true) {
   idx = (i + DECKS[deck].length) % DECKS[deck].length; won = false; nudged = false;
   ig.clearRect(0, 0, 1000, 1000); meter.style.width = '0';
   $('win').classList.remove('on');
-  buildMask(); renderLittle();
+  buildGuides(); renderLittle();
   const it = item();
   wordEl.textContent = it.shape ? it.shape.name : (it.label + '  ' + (it.emoji.length > 4 ? '' : it.emoji));
-  if (speak) say(it.say);
+  if (speak) say(it.say + (guides.length > 1 ? ' Start at the green dot. Follow the numbers.' : ' Start at the green dot.'));
 }
 let activeId = null;
 function pos(e) { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * 1000, (e.clientY - r.top) / r.height * 1000]; }
-cv.addEventListener('pointerdown', e => { if (activeId !== null || won) return; activeId = e.pointerId; cv.setPointerCapture(e.pointerId); last = pos(e); dot(last); });
+function pencil(a, b) { ig.strokeStyle = colorFor(); ig.lineWidth = PENCIL; ig.lineCap = ig.lineJoin = 'round'; ig.beginPath(); ig.moveTo(a[0], a[1]); ig.lineTo(b[0], b[1]); ig.stroke(); markSegment(a, b); }
+cv.addEventListener('pointerdown', e => { if (activeId !== null || won) return; activeId = e.pointerId; cv.setPointerCapture(e.pointerId); last = pos(e); pencil(last, last); renderLittle(); });
 cv.addEventListener('pointermove', e => {
   if (e.pointerId !== activeId) return;
-  const p = pos(e);
-  ig.strokeStyle = colorFor(); ig.lineWidth = BRUSH; ig.lineCap = ig.lineJoin = 'round';
-  ig.beginPath(); ig.moveTo(last[0], last[1]); ig.lineTo(p[0], p[1]); ig.stroke(); last = p; renderLittle();
+  const p = pos(e); pencil(last, p); last = p; renderLittle();
 });
-function dot(p) { ig.fillStyle = colorFor(); ig.beginPath(); ig.arc(p[0], p[1], BRUSH / 2, 0, Math.PI * 2); ig.fill(); renderLittle(); }
 function endStroke(e) {
   if (e.pointerId !== activeId) return; activeId = null;
-  const c = coverage(); meter.style.width = Math.round(Math.min(1, c.on / DONE_AT) * 100) + '%';
-  if (c.on >= DONE_AT && c.off <= 1.0) winLittle();
-  else if (c.on >= DONE_AT && !nudged) { nudged = true; say('Try to stay inside the ' + (item().shape ? item().shape.name : 'letter') + '. Tap the drop to start over.'); }
+  const pr = progress(); meter.style.width = Math.round(Math.min(1, pr) * 100) + '%';
+  const messy = drawn > 8 && stray / drawn > 0.25;
+  if (nextStroke() < 0 && !messy) winLittle();
+  else if (messy && !nudged) { nudged = true; say('Try to stay on the dots. Tap the drop to start over.'); }
+  renderLittle();
 }
 cv.addEventListener('pointerup', endStroke); cv.addEventListener('pointercancel', endStroke);
-const COLORS = ['#FF4F8B', '#58C7F0', '#5CD38B', '#FFC93C', '#9B6BFF', '#FF8C42'];
+const COLORS = ['#FF4F8B', '#3B8BEB', '#2EB872', '#F2A20C', '#9B6BFF', '#FF8C42'];
 function colorFor() { return COLORS[idx % COLORS.length]; }
 function sparkle() {
   const host = document.querySelector('main');
@@ -928,6 +1020,8 @@ addEventListener('pointerdown', () => { if (mode === 'little') say('Trace With M
 
 // Test hook.
 window.TRACE = {
+  PRINT_UPPER, PRINT_DIGITS, SHAPE_D, littleGuides: () => guides, littleProgress: progress, littleNext: nextStroke, littleWon: () => won,
+  littleLoad: (d, i) => { deck = d; loadLittle(i, false); }, littleClient: () => { const r = cv.getBoundingClientRect(), k = r.width / 1000; return guides.map(st => st.map(([x, y]) => [r.left + x * k, r.top + y * k])); },
   PRINT, PRINT_ALT, CURSIVE, SPELL, CURSIVE_LEVELS, START, SLANT, opts: TRACE_HOOK,
   samplePath, cursiveWord, slant, printLetter, recognize, features, record, makeItem,
   P: () => P, current: () => cur, phase: () => phase, layout: () => layout, mode: () => mode, setMode,

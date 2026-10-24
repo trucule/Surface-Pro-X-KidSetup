@@ -74,7 +74,7 @@ Everything personal lives in two places: `C:\ProgramData\KidTablet\config.json` 
 domains, wallpaper, text scale) and the apps' own content.
 
 - **Apps and domains.** The defaults are a starter list (Teach Your Monster to Read, Starfall, PBS KIDS, PhET,
-  Chrome Music Lab, Kid Pix, Kleki, Tux Paint, Paint). Change them with the module commands after
+  Chrome Music Lab, Kleki, Tux Paint, Paint). Change them with the module commands after
   `Import-Module KidTablet`: `Add-KidWebApp -Name 'Name' -Url https://...` (its domain is allowed automatically),
   `Add-KidAllowedDomain`, `Add-KidStoreApp -StoreId ...`, `Add-KidDesktopApp`, `Remove-KidApp`, `Set-KidApp` (tile
   image and colour). `Sync-KidTablet -RestartSession` applies the change.

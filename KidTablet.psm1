@@ -80,13 +80,12 @@ function New-DefaultConfig {
             [pscustomobject]@{ Name = 'PBS KIDS Games';             Url = 'https://pbskids.org/games' }
             [pscustomobject]@{ Name = 'PhET Science';               Url = 'https://phet.colorado.edu/en/simulations/browse' }
             [pscustomobject]@{ Name = 'Chrome Music Lab';           Url = 'https://musiclab.chromeexperiments.com' }
-            [pscustomobject]@{ Name = 'Kid Pix';                    Url = 'https://kidpix.app' }
             [pscustomobject]@{ Name = 'Kleki Paint';                Url = 'https://kleki.com' }
         )
         AllowedDomains   = @(
             'teachyourmonstertoread.com', 'teachyourmonster.org', 'starfall.com', 'adaptedmind.com',
             'pbskids.org', 'pbs.org', 'phet.colorado.edu', 'musiclab.chromeexperiments.com',
-            'kidpix.app', 'kleki.com'
+            'kleki.com'
         )
         DesktopApps      = @(
             [pscustomobject]@{ Name = 'Tux Paint'; WingetId = 'NewBreedSoftware.TuxPaint'; ExeName = 'tuxpaint.exe'; Path = $null }

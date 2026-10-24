@@ -1,6 +1,9 @@
 # Changes
 
 ## 2026-10-24
+- Trace With Me Little mode traces thin school print on handwriting lines (top line, dashed midline, baseline), one
+  stroke at a time from numbered green start dots with direction arrows, in place of colouring in bubble letters.
+- Kid Pix is removed from the defaults and from tablets that have it.
 - Every game speaks with the Azure kid voice (en-US-AnaNeural, or `NARRATOR_VOICE`) when the `.env` has an Azure
   Speech key, with clips kept on the tablet and the Windows voice as the fallback. Story Maker keeps its own cast.
 - Nine new 3D thinking games with adaptive levels: Robot Path, Light Bridge, Pattern Machine, Fraction Pizza,

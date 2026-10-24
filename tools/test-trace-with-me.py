@@ -126,8 +126,31 @@ def main():
             print(f'spell L{lv + 1} "{word}": wrong first letter -> {st0["state"]}; written ->', 'win' if won else 'NO WIN ' + str([(x['ch'], x['state'], x['last']) for x in boxes]))
             if not won: problems.append(f'spell {word} did not win')
             if won and pg.evaluate("() => TRACE.P().st.spell.miss") != 1: problems.append('spell: the retry did not count as a miss')
-        pg.evaluate("() => TRACE.setMode('little')"); pg.wait_for_timeout(200)
-        pg.screenshot(path=str(SHOTS / 'tw-little.png'))
+        pg.evaluate("() => TRACE.setMode('little')"); pg.wait_for_timeout(300)
+        # Little: thin school print on handwriting lines. Every item has guides; tracing them in order wins,
+        # a scribble beside the letter does not, and stopping after the first stroke does not.
+        decks = pg.evaluate("() => ({ upper: 26, lower: 26, numbers: 10, shapes: 6 })")
+        for deck, n in decks.items():
+            for i in range(n):
+                pg.evaluate("([d, i]) => TRACE.littleLoad(d, i)", [deck, i])
+                gs = pg.evaluate("() => TRACE.littleClient()")
+                if not gs or any(len(st) < 2 for st in gs) and deck == 'shapes': problems.append(f'little {deck} {i}: no guides'); continue
+                ys = [p[1] for st in pg.evaluate("() => TRACE.littleGuides()") for p in st]
+                if min(ys) < 0 or max(ys) > 1000: problems.append(f'little {deck} {i}: guide off the page')
+                if i == 0 or (deck == 'lower' and i in (6, 9)):   # also: a scribble far from the letter
+                    pg.mouse.move(60, 60); pg.mouse.down(); pg.mouse.move(70, 120, steps=6); pg.mouse.up()
+                    if pg.evaluate("() => TRACE.littleWon()"): problems.append(f'little {deck} {i}: scribble won')
+                    pg.evaluate("([d, i]) => TRACE.littleLoad(d, i)", [deck, i])
+                for k, st in enumerate(gs):
+                    draw(pg, st)
+                    if k == 0 and len(gs) > 1 and pg.evaluate("() => TRACE.littleWon()"): problems.append(f'little {deck} {i}: won after one stroke')
+                if not pg.evaluate("() => TRACE.littleWon()"): problems.append(f'little {deck} {i}: tracing did not win (next {pg.evaluate("() => TRACE.littleNext()")})')
+        print('little: traced', sum(decks.values()), 'items')
+        for deck, i, name in [('upper', 0, 'A'), ('upper', 4, 'E'), ('lower', 6, 'g'), ('numbers', 5, '5'), ('shapes', 3, 'heart')]:
+            pg.evaluate("([d, i]) => TRACE.littleLoad(d, i)", [deck, i]); pg.wait_for_timeout(150)
+            pg.screenshot(path=str(SHOTS / f'tw-little-{name}.png'))
+        pg.evaluate("() => TRACE.littleLoad('upper', 1)"); gs = pg.evaluate("() => TRACE.littleClient()"); draw(pg, gs[0])
+        pg.screenshot(path=str(SHOTS / 'tw-little-B-half.png'))
         print('page errors:', errs); problems += errs
         b.close()
     print('PROBLEMS:' if problems else 'ALL OK', problems[:20])

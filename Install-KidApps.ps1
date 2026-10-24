@@ -66,6 +66,12 @@ $apps = @(
     @{ Name = 'Read It Say It Make It'; Path = 'apps\read-it-say-it'; Tile = 'apps\read-it-say-it-tile.png'; Color = '#13C95A' }
     @{ Name = 'Simon Orchestra'; Path = 'apps\simon-orchestra.html'; Tile = 'apps\simon-orchestra-tile.png'; Color = '#FF7A00' }
 )
+# Retired tiles: removed from a tablet that still has them, with the sites only they used.
+$retired = @(@{ Name = 'Kid Pix'; Domains = @('kidpix.app') })
+foreach ($r in $retired) {
+    try { Remove-KidApp -Name $r.Name -NoSync; Write-Host ("  removed {0}" -f $r.Name) } catch { }   # already gone
+    Remove-KidAllowedDomain -Domain $r.Domains -NoSync
+}
 foreach ($app in $apps) {
     $src = Join-Path $here $app.Path
     if (-not (Test-Path $src)) { throw "App source missing: $src" }
