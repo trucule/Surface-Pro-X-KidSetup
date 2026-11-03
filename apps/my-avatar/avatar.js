@@ -4,6 +4,9 @@
 // has spent are saved here and sent to the home screen (KidHome), which shows her portrait and star balance.
 'use strict';
 const T = THREE;
+// The realistic avatar (real.js and models/) when its files are here; otherwise the drawn one below.
+const REAL = window.REAL_AVATAR && window.REAL_AVATAR.ok ? window.REAL_AVATAR : null;
+T.ColorManagement.legacyMode = false;         // colours are written as sRGB and lit in linear light
 const $ = id => document.getElementById(id);
 const HOME = (window.KID_STARS && window.KID_STARS.base) || 'http://127.0.0.1:47821';
 const KEY = 'kid-avatar-v1';
@@ -19,6 +22,9 @@ const CLOTH = ['#FF4F8B', '#FF2D55', '#FF9F1C', '#FFD60A', '#38E54D', '#22C5B8',
 const SHOECOL = ['#FFFFFF', '#2B2140', '#FF4F8B', '#3A86FF', '#FF2D55', '#9B5DE5', '#7A4A20', '#FFD60A'];
 const GLASSCOL = ['#2B2140', '#8E3B1F', '#FF4F8B', '#3A86FF', '#9B5DE5', '#C0C8D8'];
 
+const LOOK_DRAWN = {
+  pose: [['stand'], ['wave'], ['hips'], ['cheer'], ['shy']],
+};
 const LOOK = {
   face: [['round', 'Round'], ['oval', 'Oval'], ['heart', 'Heart'], ['square', 'Square']],
   eyeShape: [['round', 'Round'], ['almond', 'Almond'], ['wide', 'Wide'], ['sleepy', 'Sleepy']],
@@ -35,6 +41,12 @@ const LOOK = {
   build: [['slim', 'Slim'], ['medium', 'Medium'], ['sturdy', 'Sturdy']],
   pose: [['stand', 'Stand'], ['wave', 'Wave'], ['hips', 'Hands on hips'], ['cheer', 'Cheer'], ['shy', 'Shy']],
 };
+
+if (REAL) {
+  Object.assign(LOOK, { hair: REAL.LOOK.hair, brows: REAL.LOOK.brows, top: REAL.LOOK.top, bottom: REAL.LOOK.bottom, shoes: REAL.LOOK.shoes,
+    socks: REAL.LOOK.socks, glasses: REAL.LOOK.glasses, earrings: REAL.LOOK.earrings, pose: REAL.LOOK.pose });
+  EYES.push('#4F9A94', '#8EC5E8');
+}
 
 // Things to buy. slot: where it goes (one per slot). price in stars.
 const SHOP = [
@@ -87,6 +99,12 @@ const SHOP = [
   { id: 'stars', slot: 'sparkle', name: 'Star ring', e: '🌟', price: 15 },
   { id: 'bubbles', slot: 'sparkle', name: 'Bubbles', e: '🫧', price: 15 },
 ];
+if (REAL) {
+  // Real hats and glasses from the model files, next to the drawn ones.
+  const add = (id, slot, e, price) => { if (REAL.has(id)) SHOP.push({ id, slot, name: window.AVATAR_CATALOG.assets[id].label, e, price }); };
+  add('hat-newsboy', 'hat', '🧢', 12); add('hat-santa', 'hat', '🎅', 10);
+  add('glasses-3d', 'shades', '🎬', 12); add('glasses-goggles', 'shades', '🥽', 15);
+}
 Object.entries(DYES).forEach(([c, n]) => SHOP.push({ id: 'dye' + c.slice(1).toLowerCase(), slot: 'dye', name: n, e: '🎨', price: 10, color: c }));
 const ITEM = Object.fromEntries(SHOP.map(i => [i.id, i]));
 const SLOTS = ['hat', 'shades', 'neck', 'back', 'outfit', 'pet', 'place', 'sparkle'];
@@ -96,7 +114,28 @@ const DEFAULT = {
   freckles: false, blush: true, hair: 'long', hairColor: HAIR[3], top: 'tee', topColor: CLOTH[0], bottom: 'jeans', bottomColor: CLOTH[7],
   shoes: 'sneakers', shoesColor: SHOECOL[0], glasses: 'none', glassesColor: GLASSCOL[0], height: 'medium', build: 'medium', pose: 'stand',
   hat: null, shades: null, neck: null, back: null, outfit: null, pet: null, place: null, sparkle: null,
+  socks: 'socks-low', earrings: 'none', tune: {},
 };
+if (REAL) Object.assign(DEFAULT, { hair: 'hair-long', brows: 'brows-natural', top: 'top-tee', bottom: 'bottom-pants', shoes: 'shoes-sneakers', glasses: 'none' });
+// A design saved by the drawn avatar, or with a choice that no longer exists, gets the nearest real choice.
+function migrate(d) {
+  if (!REAL) return d;
+  for (const [k, map] of Object.entries(REAL.MIGRATE)) if (map[d[k]]) d[k] = map[d[k]];
+  for (const k of ['hair', 'brows', 'top', 'bottom', 'shoes', 'socks', 'glasses', 'earrings', 'pose'])
+    if (LOOK[k] && !LOOK[k].some(([v]) => v === d[k])) d[k] = DEFAULT[k];
+  if (!d.tune || typeof d.tune !== 'object') d.tune = {};
+  return d;
+}
+// The drawn avatar's nearest choice for a real one (used only if the model files fail to load).
+function drawnDesign(P) {
+  if (!REAL) return P;
+  const q = Object.assign({}, P), BASE = { hair: 'long', brows: 'natural', top: 'tee', bottom: 'jeans', shoes: 'sneakers', glasses: 'none', pose: 'stand' };
+  for (const [k, map] of Object.entries(REAL.MIGRATE)) if (q[k] && !Object.keys(map).includes(q[k])) q[k] = Object.keys(map).find(o => map[o] === q[k]) || BASE[k] || q[k];
+  if (REAL.isDress(P.top)) q.top = 'dress';
+  if (!LOOK_DRAWN.pose.some(([v]) => v === q.pose)) q.pose = 'stand';
+  if (q.glasses && q.glasses.startsWith('glasses-')) q.glasses = 'round';
+  return q;
+}
 
 // ---------------------------------------------------------------------------------------------------------------
 // Saved state
@@ -107,7 +146,7 @@ function loadLocal() {
   return null;
 }
 function clean(s) {
-  const d = Object.assign({}, DEFAULT, s.design || {});
+  const d = migrate(Object.assign({}, DEFAULT, s.design || {}));
   const owned = (s.owned || []).filter(id => ITEM[id]);
   for (const k of SLOTS) if (d[k] && !owned.includes(d[k])) d[k] = null;
   if (DYES[d.hairColor] && !owned.includes('dye' + d.hairColor.slice(1).toLowerCase())) d.hairColor = DEFAULT.hairColor;
@@ -147,6 +186,7 @@ const stage = $('stage');
 const renderer = new T.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = T.PCFSoftShadowMap;
+renderer.outputEncoding = T.sRGBEncoding; renderer.toneMapping = T.LinearToneMapping; renderer.toneMappingExposure = 0.85;
 stage.appendChild(renderer.domElement);
 const scene = new T.Scene();
 const camera = new T.PerspectiveCamera(30, 1, 0.05, 200);
@@ -156,6 +196,8 @@ key.shadow.mapSize.set(1024, 1024); Object.assign(key.shadow.camera, { left: -2,
 scene.add(key);
 const rim = new T.DirectionalLight('#cfe0ff', 0.55); rim.position.set(-3, 2.5, -2.5); scene.add(rim);
 const fill = new T.DirectionalLight('#ffe9f2', 0.3); fill.position.set(-2.5, 1.2, 3); scene.add(fill);
+// Soft light from a whole room, which skin and cloth need to look real.
+if (T.RoomEnvironment) { try { const pm = new T.PMREMGenerator(renderer); scene.environment = pm.fromScene(new T.RoomEnvironment(), 0.04).texture; hemi.intensity = 0.15; key.intensity = 0.9; rim.intensity = 0.3; fill.intensity = 0.15; } catch (e) {} }
 
 const mats = {};
 function mat(color, o) {
@@ -186,13 +228,13 @@ function gradientTexture(top, bottom, extra) {
   const c = document.createElement('canvas'); c.width = 16; c.height = 256; const g = c.getContext('2d');
   const gr = g.createLinearGradient(0, 0, 0, 256); gr.addColorStop(0, top); gr.addColorStop(1, bottom); g.fillStyle = gr; g.fillRect(0, 0, 16, 256);
   if (extra) extra(g, c);
-  const t = new T.CanvasTexture(c); return t;
+  const t = new T.CanvasTexture(c); t.encoding = T.sRGBEncoding; return t;
 }
 function starsTexture() {
   const c = document.createElement('canvas'); c.width = 512; c.height = 512; const g = c.getContext('2d');
   const gr = g.createLinearGradient(0, 0, 0, 512); gr.addColorStop(0, '#05021a'); gr.addColorStop(1, '#2a1660'); g.fillStyle = gr; g.fillRect(0, 0, 512, 512);
   for (let i = 0; i < 260; i++) { g.fillStyle = `rgba(255,255,255,${0.3 + Math.random() * 0.7})`; const r = Math.random() * 1.6 + 0.3; g.beginPath(); g.arc(Math.random() * 512, Math.random() * 512, r, 0, 7); g.fill(); }
-  const t = new T.CanvasTexture(c); return t;
+  const t = new T.CanvasTexture(c); t.encoding = T.sRGBEncoding; return t;
 }
 let floorY = 0;
 function buildPlace(id) {
@@ -278,14 +320,57 @@ const hairMatFor = c => mat(c, { roughness: 0.48, metalness: 0.05 });
 function stripesTexture(c1, c2) {
   const c = document.createElement('canvas'); c.width = 64; c.height = 64; const g = c.getContext('2d');
   for (let i = 0; i < 8; i++) { g.fillStyle = i % 2 ? c2 : c1; g.fillRect(0, i * 8, 64, 8); }
-  const t = new T.CanvasTexture(c); t.wrapS = t.wrapT = T.RepeatWrapping; t.repeat.set(1, 3); return t;
+  const t = new T.CanvasTexture(c); t.encoding = T.sRGBEncoding; t.wrapS = t.wrapT = T.RepeatWrapping; t.repeat.set(1, 3); return t;
 }
 function lighter(c, k) { const x = new T.Color(c); x.lerp(new T.Color('#ffffff'), k); return '#' + x.getHexString(); }
 function darker(c, k) { const x = new T.Color(c); x.lerp(new T.Color('#000000'), k); return '#' + x.getHexString(); }
 
 function build(d, preview) {
-  avatar.clear(); parts = {};
   const P = Object.assign({}, d, preview || {});
+  if (REAL && !REAL.failed) return buildReal(P);
+  return buildDrawn(drawnDesign(P));
+}
+
+const HAT_FIT = { s: 0.9, y: -0.035, z: 0.05 };   // the drawn hats on her real head and hair
+// The realistic avatar from real.js, with the drawn hats, wings, outfits extras and pets added to it.
+let lastPreview = null;
+function buildReal(P) {
+  if (REAL.need(P).length) {
+    loadingNote(true);
+    REAL.onReady = () => { loadingNote(false); rebuild(lastPreview); };
+    REAL.compose(new T.Group(), P);          // starts loading what is missing; the avatar on screen stays until it is ready
+    return;
+  }
+  loadingNote(false);
+  avatar.clear(); parts = {}; floaters.length = 0;
+  const r = REAL.compose(avatar, P);
+  const out = P.outfit, R = 0.19, W = { slim: 0.94, medium: 1, sturdy: 1.08 }[P.build] || 1;
+  const head = r.head, body = r.torso;
+  if (P.shades && !REAL.SHADES.includes(P.shades)) buildShades(head, P.shades, R);
+  // Drawn hats sit on top of real hair, which is fuller than the drawn hair.
+  const hg = new T.Group(); hg.scale.setScalar(HAT_FIT.s); hg.position.set(0, HAT_FIT.y, HAT_FIT.z); head.add(hg);
+  if (P.hat && !REAL.has(P.hat)) buildHat(hg, P.hat, P.hairColor, R);
+  if (out === 'chef') { hg.add(mesh(CYL, mat('#ffffff', { roughness: 0.9 }), 0, R * 0.72, -0.01, R * 1.02, R * 0.7, R * 1.02)); hg.add(mesh(SPH, mat('#ffffff', { roughness: 0.9 }), 0, R * 1.17, -0.01, R * 1.25, R * 0.55, R * 1.25)); }
+  if (out === 'superhero') head.add(mesh(new T.TorusGeometry(0.085, 0.02, 8, 30), mat('#FF2D55'), 0, 0.005, R * 0.84, 1.15, 0.45, 1));
+  if (out === 'astronaut') { head.add(new T.Mesh(new T.SphereGeometry(R * 1.75, 32, 24), new T.MeshPhysicalMaterial({ color: '#cfe8ff', transparent: true, opacity: 0.2, roughness: 0.05, metalness: 0.1, depthWrite: false }))); put(body, mesh(new T.TorusGeometry(0.12, 0.03, 10, 30), mat('#C0C8D8', { metalness: 0.5, roughness: 0.3 }), 0, 1.13, 0, 1, 1, 0.9)).rotation.x = Math.PI / 2; }
+  if (out === 'doctor') put(body, mesh(new T.TorusGeometry(0.06, 0.008, 6, 20), mat('#9A8C98', { metalness: 0.6 }), 0, 0.97, 0.11)).rotation.x = 0.2;
+  if (P.neck && P.neck !== 'necklace') buildNeck(body, P.neck, W);
+  // Her real back is shorter and deeper than the drawn one: things on her back sit a little higher and further out.
+  const back = new T.Group(); back.position.set(0, 0.1, -0.05); body.add(back);
+  if (P.back) buildBack(back, P.back, W, P.hairColor);
+  if (out === 'superhero' && P.back !== 'cape') buildBack(back, 'cape', W, '#FF2D55');
+  if (P.pet) buildPet(P.pet);
+  if (P.sparkle) buildSparkle(P.sparkle, r.H);
+  Object.assign(parts, { H: r.H, faceY: r.eyeY, headR: r.headR, real: true });
+}
+function loadingNote(on) {
+  let n = $('loading');
+  if (!n && on) { n = el('div', '', 'Getting ready...'); n.id = 'loading'; stage.appendChild(n); }
+  if (n) n.classList.toggle('on', !!on);
+}
+
+function buildDrawn(P) {
+  avatar.clear(); parts = {};
   const H = { short: 0.92, medium: 1, tall: 1.07 }[P.height] || 1, W = { slim: 0.9, medium: 1, sturdy: 1.13 }[P.build] || 1;
   const body = new T.Group(); body.scale.set(1, H, 1); avatar.add(body);
   const skin = mat(P.skin, { roughness: 0.55 });
@@ -681,13 +766,15 @@ const clock = new T.Clock(); let blinkAt = 2;
 function frame() {
   const dt = Math.min(0.05, clock.getDelta()), t = clock.elapsedTime;
   yaw += (yawGoal - yaw) * Math.min(1, dt * 6); avatar.rotation.y = yaw;
-  const g = camGoal[view], H = parts.H || 1;
+  const H = parts.H || 1;
+  const g = view === 'face' && parts.faceY ? { y: parts.faceY / H + 0.02, d: 1.45 * parts.headR / 0.19 + 0.15, look: parts.faceY / H - 0.02 } : camGoal[view];
   for (const k of ['y', 'd', 'look']) camNow[k] += (g[k] * (k === 'd' ? 1 : H) - camNow[k]) * Math.min(1, dt * 4);
   const aspect = camera.aspect, d = camNow.d * (aspect < 1 ? 1.25 / Math.max(0.6, aspect) : 1);
   camera.position.set(0, camNow.y, d); camera.lookAt(0, camNow.look, 0);
   // Breathing, a little sway, and a blink now and then.
   avatar.scale.y = 1 + Math.sin(t * 2.1) * 0.004;
   if (parts.head) parts.head.rotation.z = (parts.head.userData.rz || 0) + Math.sin(t * 0.7) * 0.02;
+  if (parts.real) { const b = t > blinkAt && t < blinkAt + 0.16 ? 1 : 0; REAL.tick(t, b); if (t > blinkAt + 0.2) blinkAt = t + 2.5 + Math.random() * 3; }
   if (parts.lids) { const b = t > blinkAt ? Math.min(1, (t - blinkAt) / 0.08) : 0; const close = b > 0 && t < blinkAt + 0.16; parts.lids.forEach(l => { l.scale.y = close ? 1.9 : 1; }); if (t > blinkAt + 0.2) blinkAt = t + 2.5 + Math.random() * 3; }
   for (const s of [-1, 1]) if (parts['wing' + s]) parts['wing' + s].rotation.y = s * (0.5 + Math.sin(t * 2.4) * 0.12);
   for (const f of floaters) { const u = f.userData; u.a += dt * u.sp * 0.6; if (u.kind === 'stars') { f.position.set(Math.cos(u.a) * u.r, u.y + Math.sin(u.a * 2) * 0.05, Math.sin(u.a) * u.r); f.rotation.y = -u.a; } else { u.y += dt * u.sp * 0.25; if (u.y > 1.9) u.y = 0.05; f.position.set(Math.cos(u.a) * u.r, u.y, Math.sin(u.a) * u.r); f.lookAt(camera.position); } }
@@ -698,13 +785,15 @@ renderer.setAnimationLoop(frame);
 // The home screen portrait: head and shoulders on a clear background, 384 pixels square.
 let pr = null, pcam = null;
 function portrait() {
-  if (!pr) { pr = new T.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true }); pr.setSize(384, 384, false); pr.setPixelRatio(1); pcam = new T.PerspectiveCamera(30, 1, 0.05, 50); }
+  if (!pr) { pr = new T.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true }); pr.setSize(384, 384, false); pr.setPixelRatio(1); pr.outputEncoding = renderer.outputEncoding; pr.toneMapping = renderer.toneMapping; pr.toneMappingExposure = renderer.toneMappingExposure; pcam = new T.PerspectiveCamera(30, 1, 0.05, 50); }
   const H = parts.H || 1, bg = scene.background, fog = scene.fog, ry = avatar.rotation.y, sp = parts.sparkle;
   scene.background = null; scene.fog = null; backdrop.visible = false; avatar.rotation.y = 0.22; if (sp) sp.visible = false;
   // Frame the head and a little of the shoulders; step back for tall hats and big hair.
   const tall = (S.design.hat && ['wizard', 'party', 'unicorn', 'crown', 'bunnyears', 'tiara'].includes(S.design.hat)) || S.design.outfit === 'chef' || S.design.outfit === 'astronaut' ? 1 : 0;
-  const big = S.design.hair === 'afro' || S.design.hair === 'bun' ? 0.5 : 0, hy = 1.375 * H + floorY;
-  pcam.position.set(0, hy + 0.02 + (tall + big) * 0.04, 1.45 + (tall + big) * 0.3); pcam.lookAt(0, hy - 0.06 + (tall + big) * 0.05, 0);
+  const big = ['afro', 'bun', 'hair-afro', 'hair-curls', 'hair-bun', 'hair-braid-bun'].includes(S.design.hair) ? 0.5 : 0;
+  const hy = (parts.faceY || 1.375 * H) + floorY, k = parts.headR ? parts.headR / 0.19 : 1;
+  const back = parts.real ? 0.04 : 0, drop = parts.real ? 0.035 : 0;   // real heads are smaller; show a little more of her
+  pcam.position.set(0, hy + (0.02 + (tall + big) * 0.04) * k, (1.45 + (tall + big) * 0.3) * k + back); pcam.lookAt(0, hy + (-0.06 + (tall + big) * 0.05) * k - drop + 0.03, 0);
   pr.setClearColor(0x000000, 0); pr.render(scene, pcam);
   scene.background = bg; scene.fog = fog; backdrop.visible = true; avatar.rotation.y = ry; if (sp) sp.visible = true;
   return pr.domElement.toDataURL('image/png');
@@ -753,6 +842,7 @@ function render() {
   const p = $('panel'); p.innerHTML = ''; const c = CATS.find(x => x && x.id === cat);
   p.appendChild(el('h2', '', c.e + ' ' + c.name));
   $('balance').innerHTML = ''; $('balance').append('⭐ ' + balance()); const sm = el('small', '', 'to spend'); $('balance').appendChild(sm);
+  if (REAL && !REAL.failed && renderReal()) return;
   switch (cat) {
     case 'body': swatches('Skin', 'skin', SKIN); opts('Height', 'height', LOOK.height); opts('Build', 'build', LOOK.build); break;
     case 'face': opts('Face shape', 'face', LOOK.face); opts('Nose', 'nose', LOOK.nose); opts('Mouth', 'mouth', LOOK.mouth); toggle('Freckles', 'freckles'); toggle('Rosy cheeks', 'blush'); break;
@@ -763,6 +853,38 @@ function render() {
     case 'pose': opts('Pose', 'pose', LOOK.pose); break;
     default: shop(c);
   }
+}
+// The panels for the realistic avatar: real clothes and hair, and sliders for the face.
+function renderReal() {
+  const p = $('panel'), d = S.design, tints = id => REAL.tints(id);
+  switch (cat) {
+    case 'body': swatches('Skin', 'skin', SKIN); toggle('Freckles', 'freckles'); opts('Height', 'height', LOOK.height); opts('Build', 'build', LOOK.build); return true;
+    case 'face': opts('Face shape', 'face', LOOK.face); opts('Mouth', 'mouth', LOOK.mouth); sliders('Make it look like you', REAL.TUNE); opts('Earrings', 'earrings', LOOK.earrings); return true;
+    case 'eyes': swatches('Eye color', 'eyeColor', EYES); opts('Eyebrows', 'brows', LOOK.brows); toggle('Eyelashes', 'lashes'); opts('Glasses', 'glasses', LOOK.glasses); return true;
+    case 'hair': opts('Hair style', 'hair', LOOK.hair); swatches('Hair color', 'hairColor', HAIR); swatches('Fun colors ⭐', 'hairColor', Object.keys(DYES), true); return true;
+    case 'clothes':
+      if (d.outfit) p.appendChild(el('h3', '', 'You are wearing an outfit from the Outfits shop. Take it off there to see these clothes.'));
+      opts('Top or dress', 'top', LOOK.top); if (tints(d.top)) swatches('Top color', 'topColor', CLOTH);
+      if (!REAL.isDress(d.top)) { opts('Bottoms', 'bottom', LOOK.bottom); if (tints(d.bottom)) swatches('Bottoms color', 'bottomColor', CLOTH); }
+      opts('Socks', 'socks', LOOK.socks); opts('Shoes', 'shoes', LOOK.shoes); if (tints(d.shoes)) swatches('Shoe color', 'shoesColor', SHOECOL);
+      return true;
+    case 'pose': opts('Pose', 'pose', LOOK.pose); return true;
+  }
+  return false;
+}
+let tuneT = null;
+function sliders(title, list) {
+  const p = $('panel'); p.appendChild(el('h3', '', title));
+  const box = el('div', 'sliders'); p.appendChild(box);
+  for (const [k, name] of list) {
+    const row = el('label', 'slide'); row.appendChild(el('span', '', name));
+    const r = document.createElement('input'); r.type = 'range'; r.min = -100; r.max = 100; r.step = 5; r.dataset.k = k;
+    r.value = Math.round(((S.design.tune || {})[k] || 0) * 100);
+    r.oninput = () => { S.design.tune = Object.assign({}, S.design.tune, { [k]: +r.value / 100 }); rebuild(); clearTimeout(tuneT); tuneT = setTimeout(() => persist(), 400); };
+    r.ondblclick = () => { r.value = 0; r.oninput(); };
+    row.appendChild(r); box.appendChild(row);
+  }
+  const reset = el('button', 'opt', 'Start over'); reset.onclick = () => { S.design.tune = {}; persist(); rebuild(); render(); }; p.appendChild(reset);
 }
 function shop(c) {
   const p = $('panel');
@@ -806,7 +928,7 @@ function modal(text, buttons) {
   for (const [label, fn, cls] of buttons) { const b = el('button', cls || '', label); b.onclick = () => { $('modal').classList.remove('on'); if (fn) fn(); }; box.appendChild(b); }
   $('modal').classList.add('on');
 }
-function rebuild(preview) { try { build(S.design, preview); } catch (e) { window.MY_AVATAR.errors.push(e.message); console.error(e); } }
+function rebuild(preview) { lastPreview = preview || null; try { build(S.design, preview); } catch (e) { window.MY_AVATAR.errors.push(e.message); console.error(e); } }
 function say(t) { try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(t); u.rate = 0.95; speechSynthesis.speak(u); } catch (e) {} }
 
 // Stars earned in other apps change while she plays; check now and then while this app is open.
@@ -816,6 +938,9 @@ window.MY_AVATAR = {
   errors: [], state: () => JSON.parse(JSON.stringify(S)), balance, earned, set, buy: id => buy(ITEM[id]), tryOn: id => tryOn(ITEM[id]), stopTrying,
   setCat: c => { cat = c; const x = CATS.find(y => y && y.id === c); setView(x.view); nav(); render(); }, setView, turn: a => { yawGoal = a; yaw = a; },
   portrait, sendHome, SHOP, LOOK, DEFAULT, homeOk: () => homeOk, parts: () => parts, restoreFromHome,
+  HAT_FIT,
+  three: { renderer, scene, camera, lights: { hemi, key, rim, fill } },
+  real: () => (REAL ? { ready: REAL.ready, failed: REAL.failed, need: REAL.need(Object.assign({}, S.design, lastPreview || {})), textures: !!REAL.texturesReady, errors: REAL.errors.slice() } : null),
 };
 buildPlace(S.design.place); rebuild(); nav(); render(); setView('body'); resize();
 restoreFromHome().then(() => { if (!S.savedAt) persist(true); else sendHome(true); });

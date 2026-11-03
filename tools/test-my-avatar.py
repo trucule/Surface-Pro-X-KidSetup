@@ -4,8 +4,9 @@
 The real KidService C# code is compiled with mono (mcs) and run on 127.0.0.1:47821 with a scratch profile, so the app
 talks to the same service the tablet runs. Checks: stars from every kind of saved progress add up; every app carries the
 star counter; every look and every shop item builds; trying on is free, buying needs enough stars and spends them; the
-design survives a reload and comes back from the home screen when the app's own copy is lost; the portrait is a clear
-PNG; another app's new stars reach the home screen; the badge on the home screen renders. Screenshots go to
+design survives a reload and comes back from the home screen when the app's own copy is lost; the realistic avatar loads
+from its model files, the face sliders shape it, old drawn designs carry over and the drawn avatar is the fallback; the
+portrait is a clear PNG; another app's new stars reach the home screen; the badge on the home screen renders. Screenshots go to
 /tmp/claude-0/tests. Run: python3 tools/test-my-avatar.py   (needs mono-mcs and xvfb-run for the service and badge)
 """
 import base64, glob, io, json, os, pathlib, re, shutil, subprocess, sys, tempfile, time, urllib.request
@@ -63,9 +64,16 @@ try:
         ctx = b.new_context(viewport={'width': 1440, 'height': 960})
         pg = ctx.new_page(); errs = []
         pg.on('pageerror', lambda e: errs.append(str(e)))
-        pg.goto(AVATAR); pg.evaluate('localStorage.clear()'); pg.reload(); pg.wait_for_timeout(1500)
+        # The realistic avatar loads its model files as it needs them; wait until what she is wearing is in.
+        def ready(page=None, textures=False):
+            (page or pg).wait_for_function("window.MY_AVATAR && MY_AVATAR.real() && (MY_AVATAR.real().failed || (MY_AVATAR.real().ready && !MY_AVATAR.real().need.length" + (" && MY_AVATAR.real().textures" if textures else "") + "))", timeout=180000)
+            (page or pg).wait_for_timeout(150)
+        def put(k, v): pg.evaluate('([k, v]) => MY_AVATAR.set(k, v)', [k, v]); ready()
+        pg.goto(AVATAR); pg.evaluate('localStorage.clear()'); pg.reload(); ready(textures=True); pg.wait_for_timeout(800)
         check(pg.evaluate('!!window.KID_STARS && !!window.MY_AVATAR'), 'app loads with the star counter')
         check(pg.evaluate("document.documentElement.innerHTML.includes('KID-VOICE START')"), 'narrator voice layer is in the app')
+        r = pg.evaluate('MY_AVATAR.real()')
+        check(r and r['ready'] and not r['failed'] and pg.evaluate('MY_AVATAR.parts().real') and not r['errors'], f'the realistic avatar loads from its model files {r}')
         pg.screenshot(path=str(SHOTS / 'avatar-start.png'))
 
         # Stars from every kind of saved progress.
@@ -78,7 +86,7 @@ try:
         pg.evaluate("s => { for (const [k, v] of Object.entries(s)) localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v)); }", saved)
         earned = pg.evaluate('KID_STARS.earned()')
         check(earned == 12 + 20 + 10 + 3 + 1 + 5 + 7 + 3, f'stars from all kinds of progress add up ({earned}, wanted 61)')
-        pg.reload(); pg.wait_for_timeout(1500)
+        pg.reload(); ready()
         check(pg.evaluate('MY_AVATAR.balance()') == 61, 'balance starts at everything earned')
 
         # Every app carries the star counter once.
@@ -96,11 +104,24 @@ try:
         # Every look builds.
         looks = pg.evaluate('MY_AVATAR.LOOK')
         for k, opts in looks.items():
-            for v, _ in opts: pg.evaluate('([k, v]) => MY_AVATAR.set(k, v)', [k, v])
+            for v, _ in opts: put(k, v)
         for k in ['freckles', 'blush', 'lashes']:
-            for v in [True, False]: pg.evaluate('([k, v]) => MY_AVATAR.set(k, v)', [k, v])
-        check(not pg.evaluate('MY_AVATAR.errors') and not errs, f'every look option builds {pg.evaluate("MY_AVATAR.errors")[:3]} {errs[:2]}')
-        pg.evaluate("MY_AVATAR.set('hair', 'long'); MY_AVATAR.set('pose', 'stand'); MY_AVATAR.set('top', 'tee')")
+            for v in [True, False]: put(k, v)
+        check(not pg.evaluate('MY_AVATAR.errors') and not errs and not pg.evaluate('MY_AVATAR.real().errors'), f'every look option builds {pg.evaluate("MY_AVATAR.errors")[:3]} {errs[:2]}')
+        # She is always dressed: every design wears a top (or dress) and, without a dress, bottoms.
+        worn = pg.evaluate("[...new Set(REAL_AVATAR._body().all.map(m => m.name))]")
+        check(len(worn) > 5, f'the avatar wears its clothes {worn}')
+        put('top', 'dress-sundress'); put('bottom', 'bottom-pants')
+        check(pg.evaluate("MY_AVATAR.parts().real") and not pg.evaluate('MY_AVATAR.errors'), 'a dress replaces top and bottoms')
+        for k, v in [('hair', 'hair-long'), ('pose', 'stand'), ('top', 'top-tee')]: put(k, v)
+        # The face sliders.
+        pg.evaluate("MY_AVATAR.setCat('face')")
+        n = pg.evaluate("document.querySelectorAll('#panel input[type=range]').length")
+        check(n >= 10, f'the face has sliders ({n})')
+        pg.evaluate("(() => { const r = document.querySelector('#panel input[data-k=noseWidth]'); r.value = 60; r.oninput(); })()"); pg.wait_for_timeout(600)
+        check(abs(pg.evaluate('MY_AVATAR.state().design.tune.noseWidth') - 0.6) < 1e-6, 'moving a slider changes and saves her face')
+        infl = pg.evaluate("(() => { const m = REAL_AVATAR._body().mesh; return m.morphTargetInfluences[m.morphTargetDictionary['noseWidth+']]; })()")
+        check(abs(infl - 0.6) < 1e-6, f'the slider shapes the model ({infl})')
 
         # Trying on is free; buying needs stars.
         s0 = pg.evaluate('MY_AVATAR.state()')
@@ -131,23 +152,36 @@ try:
         check(not pg.evaluate('MY_AVATAR.errors'), f'every shop item ({len(items)}) builds {pg.evaluate("MY_AVATAR.errors")[:3]}')
         for slot in ['outfit', 'place', 'pet', 'back', 'neck', 'hat', 'shades', 'sparkle']:
             for it in pg.evaluate('s => MY_AVATAR.SHOP.filter(i => i.slot === s).map(i => i.id)', slot):
-                pg.evaluate('([s, id]) => MY_AVATAR.set(s, id)', [slot, it])
+                put(slot, it)
         check(not pg.evaluate('MY_AVATAR.errors') and not errs, 'every item can be put on')
         looks_for_shots = [
             ('avatar-park', "MY_AVATAR.set('outfit', null); MY_AVATAR.set('place', 'park'); MY_AVATAR.set('pet', 'cat'); MY_AVATAR.set('hat', 'flowers'); MY_AVATAR.set('back', 'fairy'); MY_AVATAR.set('sparkle', 'glitter'); MY_AVATAR.set('pose', 'wave'); MY_AVATAR.set('shades', null); MY_AVATAR.set('neck', 'necklace'); MY_AVATAR.setView('body')"),
-            ('avatar-castle', "MY_AVATAR.set('outfit', 'princess'); MY_AVATAR.set('place', 'castle'); MY_AVATAR.set('pet', 'dragon'); MY_AVATAR.set('hat', 'tiara'); MY_AVATAR.set('back', null); MY_AVATAR.set('pose', 'cheer'); MY_AVATAR.set('hair', 'pigtails')"),
-            ('avatar-space', "MY_AVATAR.set('outfit', 'astronaut'); MY_AVATAR.set('place', 'space'); MY_AVATAR.set('pet', null); MY_AVATAR.set('hat', null); MY_AVATAR.set('pose', 'hips'); MY_AVATAR.set('skin', '#6F4128'); MY_AVATAR.set('hair', 'afro'); MY_AVATAR.set('hairColor', '#1E1612')"),
-            ('avatar-face', "MY_AVATAR.set('outfit', null); MY_AVATAR.set('place', null); MY_AVATAR.set('sparkle', null); MY_AVATAR.set('hair', 'long'); MY_AVATAR.set('skin', '#E2AC82'); MY_AVATAR.set('hairColor', '#5C3A21'); MY_AVATAR.set('glasses', 'round'); MY_AVATAR.set('freckles', true); MY_AVATAR.setCat('face')"),
+            ('avatar-castle', "MY_AVATAR.set('outfit', 'princess'); MY_AVATAR.set('place', 'castle'); MY_AVATAR.set('pet', 'dragon'); MY_AVATAR.set('hat', 'tiara'); MY_AVATAR.set('back', null); MY_AVATAR.set('pose', 'peace'); MY_AVATAR.set('hair', 'hair-double-braid')"),
+            ('avatar-space', "MY_AVATAR.set('outfit', 'astronaut'); MY_AVATAR.set('place', 'space'); MY_AVATAR.set('pet', null); MY_AVATAR.set('hat', null); MY_AVATAR.set('pose', 'hips'); MY_AVATAR.set('skin', '#6F4128'); MY_AVATAR.set('hair', 'hair-afro'); MY_AVATAR.set('hairColor', '#1E1612')"),
+            ('avatar-face', "MY_AVATAR.set('outfit', null); MY_AVATAR.set('place', null); MY_AVATAR.set('sparkle', null); MY_AVATAR.set('hair', 'hair-long'); MY_AVATAR.set('skin', '#E2AC82'); MY_AVATAR.set('hairColor', '#5C3A21'); MY_AVATAR.set('glasses', 'glasses-round'); MY_AVATAR.set('freckles', true); MY_AVATAR.setCat('face')"),
         ]
         for name, js in looks_for_shots:
-            pg.evaluate(js); pg.wait_for_timeout(1300); pg.screenshot(path=str(SHOTS / f'{name}.png'))
+            pg.evaluate(js); ready(textures=True); pg.wait_for_timeout(4000); pg.screenshot(path=str(SHOTS / f'{name}.png'))
 
         # Saved here, and kept after a reload.
         pg.wait_for_timeout(1200)
         before = pg.evaluate('MY_AVATAR.state()')
-        pg.reload(); pg.wait_for_timeout(1500)
+        pg.reload(); ready()
         after = pg.evaluate('MY_AVATAR.state()')
         check(after['design'] == before['design'] and after['owned'] == before['owned'] and after['spent'] == before['spent'], 'design, items and spent stars survive a reload')
+
+        # A design saved by the drawn avatar gets the nearest real choices.
+        old = {'design': {'hair': 'bob', 'top': 'dress', 'shoes': 'boots', 'glasses': 'cateye', 'pose': 'cheer', 'brows': 'thick', 'bottom': 'jeans'}, 'owned': [], 'spent': 0, 'savedAt': 9e12}   # newer than the home screen's copy
+        mig = ctx.new_page(); mig.goto(AVATAR, wait_until='domcontentloaded', timeout=120000); mig.evaluate("s => { localStorage.setItem('kid-avatar-v1', JSON.stringify(s)); }", old); mig.reload(wait_until='domcontentloaded', timeout=120000); ready(mig)
+        d = mig.evaluate('MY_AVATAR.state().design')
+        check((d['hair'], d['top'], d['shoes'], d['glasses'], d['pose'], d['brows']) == ('hair-bob', 'dress-sundress', 'shoes-rain-boots', 'glasses-leopard', 'peace', 'brows-thick'), f'an old drawn design carries over {d}')
+        mig.evaluate("s => localStorage.setItem('kid-avatar-v1', JSON.stringify(s))", before); mig.close()
+        # Without the model files the drawn avatar still works.
+        fb = ctx.new_page(); fberr = []; fb.on('pageerror', lambda e: fberr.append(str(e)))
+        fb.add_init_script("window.AVATAR_MODELS = new Proxy({}, { set(t, k, v) { if (k !== 'body') t[k] = v; return true; } });")
+        fb.goto(AVATAR, wait_until='domcontentloaded', timeout=120000); ready(fb); fb.wait_for_timeout(500)
+        check(fb.evaluate('MY_AVATAR.real().failed') and fb.evaluate('!!MY_AVATAR.parts().head') and not fb.evaluate('MY_AVATAR.errors') and not fberr, f'if the model files are missing, the drawn avatar shows instead {fberr[:2]}')
+        fb.screenshot(path=str(SHOTS / 'avatar-fallback.png')); fb.close()
 
         # Portrait for the home screen: a clear 384 x 384 PNG.
         from PIL import Image
@@ -165,7 +199,7 @@ try:
             port = home / '.local' / 'share' / 'KidTablet' / 'avatar' / 'portrait.png'
             check(port.exists() and Image.open(port).size == (384, 384), 'home screen saved her portrait')
             # Lost browser data: the avatar comes back from the home screen.
-            pg.evaluate("localStorage.removeItem('kid-avatar-v1')"); pg.reload(); pg.wait_for_timeout(2500)
+            pg.evaluate("localStorage.removeItem('kid-avatar-v1')"); pg.reload(); ready(); pg.wait_for_timeout(2500)
             back = pg.evaluate('MY_AVATAR.state()')
             check(back['design'] == before['design'] and back['spent'] == before['spent'], 'a lost avatar is restored from the home screen')
             # Another app's new stars reach the home screen.
