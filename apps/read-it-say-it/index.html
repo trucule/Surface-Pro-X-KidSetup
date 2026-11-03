@@ -218,10 +218,38 @@
   #parent button { display: block; width: 100%; text-align: left; font-size: 19px; font-weight: 700; border: 3px solid var(--ink); border-radius: 14px; background: #fff; padding: 10px 12px; margin: 6px 0; }
   #parent button.on { background: #5CFF8F; }
   #parent p { margin: 6px 0 0; font-size: 15px; color: #5a4f6e; }
+  /* Passages: a paragraph read one sentence at a time. */
+  #ptitle { display: none; font-size: 18px; font-weight: 800; color: #6b5f80; }
+  #app.passage #ptitle { display: block; }
+  #app.passage #card { padding-top: 10px; gap: 10px; }
+  #app.passage #words { display: block; text-align: left; width: min(1320px, 100%); max-height: 44vh; overflow-y: auto; touch-action: pan-y; line-height: 1.75; font-size: 0; }
+  #app.passage .w { display: inline; font-size: 29px; font-weight: 700; padding: 2px 4px; margin: 0 3px 0 0; border: 0; border-radius: 8px; box-shadow: none; background-color: transparent; color: #a39bb3; transition: background .2s, color .2s; }
+  #app.passage .w.read { color: var(--ink); background-color: #DDFBE7; }
+  #app.passage .w.cur { color: var(--ink); background-color: #FFF0A0; }
+  #app.passage .w.cur.heard { background-color: #5CFF8F; transform: none; }
+  #app.passage .w.missed { background-color: #FFC2CF; }
+  #app.passage .w.now { background-color: #FFD000; }
+  #app.passage .w.done { animation: none; }
+  /* Words with a meaning: a dotted line inside the word's own box, so the next line cannot cover it. */
+  #app.passage .w.gl { background-image: radial-gradient(circle, #8A3FFC 1.6px, transparent 1.8px); background-size: 8px 5px; background-repeat: repeat-x; background-position: 2px 100%; position: relative; z-index: 1; }
+  #gloss { position: fixed; z-index: 9; max-width: 420px; background: #fff; border: 4px solid var(--ink); border-radius: 18px; padding: 10px 14px; font-size: 21px; font-weight: 600; display: none; box-shadow: 0 6px 0 #2B214055; }
+  #gloss b { color: #8A3FFC; }
+  #gloss.on { display: block; }
+  #quiz { display: none; width: min(1100px, 100%); text-align: center; }
+  #quiz.on { display: block; }
+  #quiz .q { font-size: 30px; font-weight: 800; margin: 2px 0 12px; }
+  #quiz .n { font-size: 17px; font-weight: 800; color: #6b5f80; }
+  #quiz .opts { display: flex; flex-direction: column; gap: 10px; align-items: stretch; }
+  #quiz .opt { font-size: 25px; font-weight: 700; text-align: left; border: 4px solid var(--ink); border-radius: 18px; background: #fff; padding: 10px 18px; box-shadow: 0 5px 0 #2B2140; }
+  #quiz .opt.right { background: #5CFF8F; }
+  #quiz .opt.wrong { background: #FF9AAE; animation: shake .4s; }
+  #quiz .sum { font-size: 27px; font-weight: 800; line-height: 1.5; }
+  @media (max-height: 760px) { #app.passage .w { font-size: 24px; } #quiz .q { font-size: 25px; } #quiz .opt { font-size: 21px; padding: 7px 14px; } }
   @media (max-height: 760px) { .w { font-size: 34px; } .big { font-size: 24px; min-height: 56px; padding: 6px 18px; } }
 </style>
 </head>
 <body>
+<div id="gloss"></div>
 <div id="app">
   <header>
     <h1>📖 Read It Say It Make It</h1>
@@ -230,7 +258,9 @@
     <button class="pill" id="skip" title="New sentence">🔁</button>
   </header>
   <div id="card">
+    <div id="ptitle"></div>
     <div id="words"></div>
+    <div id="quiz"></div>
     <div id="controls">
       <button class="big" id="mic">🎤 Read it!</button>
       <button class="big" id="trust">✅ I read it!</button>
@@ -246,7 +276,7 @@
     <div id="parent">
       <h3>For grown-ups: how she reads</h3>
       <button data-mode="auto">🎤 Microphone checks her reading</button>
-      <button data-mode="tap">👆 She taps each word as she reads it</button>
+      <button data-mode="tap">👆 She taps each word as she reads it (in stories, a button for each sentence)</button>
       <button data-mode="trust">✅ Trust me: one "I read it" button</button>
       <p id="engineInfo"></p>
     </div>
@@ -374,6 +404,22 @@ window.Kit = (function () {
     jellyfish(c) { c = c || '#C77DFF'; const g = new T.Group(); const b = new T.Group(); b.name = 'hover'; const dome = new T.Mesh(new T.SphereGeometry(0.4, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2), mat(c, { transparent: true, opacity: 0.85 }));
       add(b, dome); eyes(b, 0, 0.18, 0.3, 0.05, 0.12); for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2; add(b, mesh('cyl', '#FF8FE0', 0.025, 0.5, 0.025, Math.cos(a) * 0.25, -0.25, Math.sin(a) * 0.25)); } b.position.y = 0.9; add(g, b); return g; },
     starfish(c) { const g = new T.Group(); const s = new T.Mesh(starGeo, mat(c || '#FF6B6B')); s.scale.set(0.45, 0.45, 0.5); s.rotation.x = -Math.PI / 2; s.position.y = 0.1; add(g, s); eyes(g, 0, 0.22, 0.05, 0.06, 0.1); return g; },
+    // People for story scenes: shirt color c. girl has long hair and a dress, man is taller with a hat.
+    person(c, o) { o = o || {}; c = c || '#3A86FF'; const g = new T.Group(), hair = o.hair || '#5A3A1A', skin = o.skin || '#F2C9A0', t = o.tall || 1;
+      for (const s of [-1, 1]) add(g, mesh('cyl', o.pants || '#2B2140', 0.07, 0.42 * t, 0.07, s * 0.1, 0.21 * t, 0));
+      add(g, o.dress ? mesh('cone', c, 0.32, 0.62 * t, 0.32, 0, 0.6 * t, 0) : mesh('cyl', c, 0.22, 0.5 * t, 0.17, 0, 0.67 * t, 0));
+      for (const s of [-1, 1]) { const arm = mesh('cyl', c, 0.055, 0.42 * t, 0.055, s * 0.28, 0.7 * t, 0); arm.rotation.z = s * 0.25; add(g, arm, mesh('sphere', skin, 0.06, 0.06, 0.06, s * 0.33, 0.5 * t, 0)); }
+      const hy = 1.12 * t; add(g, mesh('sphere', skin, 0.22, 0.24, 0.22, 0, hy, 0), mesh('sphere', hair, 0.235, 0.16, 0.235, 0, hy + 0.08, -0.03));
+      if (o.long) add(g, mesh('sphere', hair, 0.2, 0.3, 0.12, 0, hy - 0.12, -0.12));
+      eyes(g, 0, hy + 0.02, 0.2, 0.045, 0.08); add(g, mesh('sphere', '#E76F51', 0.05, 0.025, 0.02, 0, hy - 0.09, 0.2));
+      if (o.hat) add(g, mesh('cyl', '#2B2140', 0.3, 0.03, 0.3, 0, hy + 0.2, 0), mesh('cyl', '#2B2140', 0.18, 0.24, 0.18, 0, hy + 0.32, 0));
+      return g; },
+    girl(c) { return M.person(c || '#FF4F8B', { dress: true, long: true, hair: '#C77D3A' }); },
+    boy(c) { return M.person(c || '#22D35B', { hair: '#3A2410' }); },
+    man(c) { return M.person(c || '#6B4F3A', { tall: 1.2, hat: true, hair: '#2B2140' }); },
+    woman(c) { return M.person(c || '#8A3FFC', { tall: 1.15, dress: true, long: true, hair: '#2B2140' }); },
+    book(c) { const g = new T.Group(); for (const s of [-1, 1]) { const pg = mesh('box', '#FFF9E8', 0.34, 0.04, 0.46, s * 0.18, 0.08, 0); pg.rotation.z = -s * 0.12; const cv = mesh('box', c || '#FF2D55', 0.36, 0.03, 0.48, s * 0.18, 0.05, 0); cv.rotation.z = -s * 0.12; add(g, cv, pg); } return g; },
+    wolf(c) { const g = M.dog(c || '#8D99AE'); return g; },
     snowman() { const g = new T.Group(); add(g, mesh('sphere', '#ffffff', 0.45, 0.42, 0.45, 0, 0.42, 0), mesh('sphere', '#ffffff', 0.32, 0.3, 0.32, 0, 1.08, 0), mesh('sphere', '#ffffff', 0.22, 0.22, 0.22, 0, 1.55, 0));
       const n = mesh('cone', '#FF8C1A', 0.05, 0.25, 0.05, 0, 1.55, 0.3); n.rotation.x = Math.PI / 2; add(g, n); eyes(g, 0, 1.62, 0.17, 0.04, 0.08); add(g, mesh('cyl', '#2B2140', 0.2, 0.25, 0.2, 0, 1.85, 0), mesh('cyl', '#2B2140', 0.3, 0.03, 0.3, 0, 1.73, 0));
       add(g, mesh('torus', '#FF2D55', 0.2, 0.2, 0.5, 0, 1.33, 0)); g.children[g.children.length - 1].rotation.x = Math.PI / 2; [1.0, 1.15].forEach(y => add(g, mesh('sphere', '#2B2140', 0.04, 0.04, 0.04, 0, y, 0.31))); return g; },
@@ -487,7 +533,7 @@ window.Kit = (function () {
     const resize = () => { const w = host.clientWidth || 1, h = host.clientHeight || 1; renderer.setSize(w, h, false); camera.aspect = w / h;
       camera.position.z = w / h < 1.2 ? K.camZ * 1.35 : K.camZ; camera.updateProjectionMatrix(); };
     new ResizeObserver(resize).observe(host); resize();
-    renderer.setAnimationLoop(() => { if (K.paused) { clock.getDelta(); return; } const dt = Math.min(0.05, clock.getDelta()), t = clock.elapsedTime; for (const f of [...frameFns]) if (f(dt, t) === false) frameFns.delete(f); idle(dt, t); renderer.render(scene, camera); });
+    renderer.setAnimationLoop(() => { if (K.paused) { clock.getDelta(); return; } if (K.lowPower && (K.skipN = ((K.skipN || 0) + 1) % 3)) return; const dt = Math.min(0.05, clock.getDelta()), t = clock.elapsedTime; for (const f of [...frameFns]) if (f(dt, t) === false) frameFns.delete(f); idle(dt, t); renderer.render(scene, camera); });
     K.scene = scene; K.camera = camera; K.renderer = renderer; K.root = root;
     K.sky('day');
     return K;
@@ -677,6 +723,7 @@ window.Kit = (function () {
 
 </script>
 <script src="speech.js"></script>
+<script src="passages.js"></script>
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
@@ -773,6 +820,38 @@ const LEVELS = [
       scene: scene([actor(c1.an, a1), actor(c2.an, a2, NUMS.indexOf(n) + 2)], [{ a: 0, verb: c1.verb, rel: r1, place: p1 }, { a: 1, verb: c2.verb, rel: r2, place: p2 }]) }; }) },
 ];
 const START = 2;
+const SENTENCE_LEVELS = LEVELS.length;
+
+// ---------------------------------------------------------------------------
+// Passages (passages.js): paragraphs from grade 2 up to young adult, read one sentence at a time.
+// A "|" in the text breaks a long sentence into two reading parts. Each part may have a scene cue.
+// ---------------------------------------------------------------------------
+function buildPassage(src) {
+  const parts = src.text.replace(/\s+/g, ' ').trim().split(/\s*\|\s*|(?<!\b(?:Mr|Mrs|Ms|Dr|St)\.)(?<=[.!?;:]['"’”)]?)\s+(?=['"‘“(]?[A-Z])/);
+  const words = [], chunks = [];
+  for (const part of parts) {
+    const ws = part.split(' ').filter(Boolean); if (!ws.length) continue;
+    chunks.push({ a: words.length, b: words.length + ws.length, cue: src.cues && src.cues[chunks.length] || '' }); words.push(...ws);
+  }
+  const gloss = {}; for (const [k, v] of Object.entries(src.gloss || {})) gloss[k.toLowerCase()] = v;
+  return { kind: 'passage', title: src.title, by: src.by || '', set: src.set || '', text: words.join(' '), words, chunks, gloss, quiz: src.quiz || [], src };
+}
+// The words the listener hears for chunk c: hyphenated words are heard as their parts.
+function hearWords(t, c) {
+  const out = [], owner = [];
+  for (let i = c.a; i < c.b; i++) {
+    const bits = t.words[i].split(/[-–—]+/).filter(x => RISpeech.norm(x));
+    (bits.length ? bits : [t.words[i]]).forEach(b => { out.push(b); owner.push(i); });
+  }
+  return { words: out, owner };
+}
+// The words from part ci to the end, as the listener hears them, with the passage word each one belongs to.
+function restWords() { const out = { words: [], owner: [] }; for (let k = ci; k < task.chunks.length; k++) { const h = hearWords(task, task.chunks[k]); out.words.push(...h.words); out.owner.push(...h.owner); } return out; }
+const glossKey = w => String(w).toLowerCase().replace(/’/g, "'").replace(/^[^a-z]+|[^a-z]+$/g, '').replace(/'s$/, '');
+for (const tier of (window.RISI_PASSAGES || [])) {
+  const pool = tier.list.map(buildPassage);
+  LEVELS.push({ name: tier.name, grade: tier.grade, passage: true, pool, gen() { let t, guard = 0; do { t = pick(pool); } while (t.text === lastText && pool.length > 1 && guard++ < 20); lastText = t.text; return t; } });
+}
 
 // ---------------------------------------------------------------------------
 // Progress and settings
@@ -913,52 +992,119 @@ async function doStep(h, s, places, k, n) {
 // Round
 // ---------------------------------------------------------------------------
 let task = null, got = [], missed = false, phase = 'read', round = 0, listenTimer = null, tapPos = 0, nextTimer = null;
+// Passage state: the chunk being read, reading time, quiz progress.
+let ci = 0, hw = null, rest = null, readMs = 0, chunkT0 = 0, qi = 0, qFirst = 0, qMissed = false, quizOrder = [];
+const isPassage = () => !!(task && task.kind === 'passage');
 function engineMode() { if (P.mode === 'trust') return 'trust'; if (P.mode === 'tap') return 'tap'; return RISpeech.engine === 'vosk' || RISpeech.engine === 'webspeech' || RISpeech.status === 'loading' ? 'mic' : 'tap'; }
-function newRound() {
-  stopListening(); clearTimeout(nextTimer); round++; missed = false; phase = 'read'; tapPos = 0;
-  task = LEVELS[P.lv].gen(); got = task.words.map(() => false);
-  renderWords(); badge(); controls();
-  K.clear(true); K.sky('day', 0.6); K.weather('clear');
-  status(engineMode() === 'tap' ? 'Read each word out loud and tap it.' : engineMode() === 'trust' ? 'Read it out loud, then tap the green button.' : 'Tap the microphone, then read it out loud.');
-}
-function renderWords() {
-  const box = $('words'); box.innerHTML = '';
-  task.words.forEach((w, i) => { const s = document.createElement('span'); s.className = 'w' + (got[i] ? ' heard' : ''); s.textContent = w; s.dataset.i = i; s.onpointerdown = () => tapWord(i); box.appendChild(s); });
-}
-function paint(cls) { [...$('words').children].forEach((el, i) => { el.classList.toggle('heard', !!got[i]); if (cls) el.classList.add(cls); }); }
-function controls() {
+function readHint() {
   const m = engineMode();
-  $('mic').style.display = m === 'mic' ? '' : 'none'; $('trust').style.display = m === 'trust' ? 'inline-block' : 'none';
+  if (isPassage()) return m === 'mic' ? 'Tap the microphone, then read the yellow part out loud. Tap an underlined word to learn what it means.' : 'Read the yellow part out loud, then tap the green button. Tap an underlined word to learn what it means.';
+  return m === 'tap' ? 'Read each word out loud and tap it.' : m === 'trust' ? 'Read it out loud, then tap the green button.' : 'Tap the microphone, then read it out loud.';
+}
+function newRound() {
+  stopListening(); clearTimeout(nextTimer); hideGloss(); round++; missed = false; phase = 'read'; tapPos = 0;
+  task = LEVELS[P.lv].gen(); got = task.words.map(() => false);
+  ci = 0; readMs = 0; qi = 0; qFirst = 0; qMissed = false; hw = isPassage() ? hearWords(task, task.chunks[0]) : null;
+  $('app').classList.toggle('passage', isPassage()); $('quiz').classList.remove('on'); $('quiz').innerHTML = ''; $('words').style.display = '';
+  setTitle();
+  renderWords(); badge(); controls();
+  K.clear(true); K.sky('day', 0.6); K.weather('clear'); sketchReset();
+  if (isPassage() && task.set) cue(task.set);
+  if (isPassage()) warmUp(task);
+  status(readHint());
+}
+function setTitle() { $('ptitle').textContent = isPassage() ? (task.by ? `“${task.title}” by ${task.by}` : task.title) : ''; }
+function renderWords() {
+  const box = $('words'); box.innerHTML = ''; box.scrollTop = 0;
+  task.words.forEach((w, i) => {
+    const s = document.createElement('span'); s.className = 'w' + (got[i] ? ' heard' : ''); s.textContent = w; s.dataset.i = i;
+    if (isPassage() && task.gloss[glossKey(w)]) s.classList.add('gl');
+    s.onpointerdown = e => tapWord(i, e); box.appendChild(s);
+    if (isPassage()) box.appendChild(document.createTextNode(' '));
+  });
+  paint();
+}
+function paint(cls) {
+  const els = [...$('words').querySelectorAll('.w')], c = isPassage() && task.chunks[ci];
+  els.forEach((el, i) => {
+    el.classList.toggle('heard', !!got[i]); if (cls) el.classList.add(cls);
+    if (isPassage()) { const inCur = phase === 'read' && c && i >= c.a && i < c.b; el.classList.toggle('cur', inCur); el.classList.toggle('read', !inCur && (phase !== 'read' || (c && i < c.a))); }
+  });
+}
+function controls() {
+  const m = engineMode(), pas = isPassage(), reading = phase === 'read';
+  $('mic').style.display = m === 'mic' && reading ? '' : 'none';
+  $('trust').style.display = (m === 'trust' || (pas && m === 'tap')) && reading ? 'inline-block' : 'none';
+  $('trust').textContent = pas ? '✅ I read the yellow part' : '✅ I read it!';
+  $('listen').style.display = phase === 'quiz' && pas ? 'none' : '';
   $('next').style.display = phase === 'won' ? 'inline-block' : 'none';
   $('mic').disabled = m === 'mic' && RISpeech.status === 'loading';
   [...$('parent').querySelectorAll('button')].forEach(b => b.classList.toggle('on', b.dataset.mode === P.mode));
   $('engineInfo').textContent = 'Speech check: ' + (RISpeech.engine === 'vosk' ? 'offline (Vosk), ready' : RISpeech.status === 'loading' ? 'loading the offline listener...' : RISpeech.engine === 'webspeech' ? 'the browser listener' : 'no microphone check, so words are tapped') + (RISpeech.error ? ' (' + RISpeech.error + ')' : '');
 }
-function badge() { $('badge').textContent = `Level ${P.lv + 1}: ${LEVELS[P.lv].name}`; $('stars').textContent = '⭐ ' + P.stars; }
+function badge() { const lv = LEVELS[P.lv]; $('badge').textContent = `Level ${P.lv + 1}: ${lv.name}` + (lv.grade ? ` (grade ${lv.grade})` : ''); $('stars').textContent = '⭐ ' + P.stars; }
 function status(t) { $('status').textContent = t; }
 function toast(t) { const el = $('toast'); el.textContent = t; el.classList.add('on'); setTimeout(() => el.classList.remove('on'), 1600); }
-function miss() { if (!missed) { missed = true; const c = record(false); badge(); if (c < 0) toast('Shorter sentences'); } }
+function miss() { if (!missed) { missed = true; const c = record(false); badge(); if (c < 0) toast(P.lv < SENTENCE_LEVELS ? 'Shorter sentences' : 'An easier story'); } }
+const chunkWords = () => isPassage() ? hw.words : task.words;
+const limitFor = () => 5 + chunkWords().length * 1.3;
+
+// Tap-a-word meanings.
+function showGloss(i, el) {
+  const w = task.words[i], g = task.gloss[glossKey(w)], box = $('gloss'); if (!g) return false;
+  const clean = w.replace(/^[^A-Za-z']+|[^A-Za-z']+$/g, '');
+  box.innerHTML = ''; const b = document.createElement('b'); b.textContent = clean; box.append(b, document.createTextNode(': ' + g));
+  box.classList.add('on'); const r = el.getBoundingClientRect(), bw = Math.min(420, innerWidth - 24);
+  box.style.left = Math.max(12, Math.min(innerWidth - bw - 12, r.left - 20)) + 'px'; box.style.top = (r.bottom + 10) + 'px';
+  if (!listening) say(`${clean}. ${g}`);
+  clearTimeout(showGloss.t); showGloss.t = setTimeout(hideGloss, 6000); return true;
+}
+function hideGloss() { $('gloss').classList.remove('on'); }
 
 // Listening with the microphone.
 let listening = false;
 async function startListening() {
   if (phase !== 'read' || listening) return;
   audio(); try { speechSynthesis.cancel(); } catch (e) {}
-  // The 3D stage rests while listening, so the page has time for every bit of sound.
-  listening = true; K.paused = true; $('mic').classList.add('on'); $('mic').textContent = '👂 Listening...'; status('Read it out loud!');
-  const my = round, limit = 5 + task.words.length * 1.3;
+  // While she reads a sentence the 3D stage rests, so the page has time for every bit of sound. A passage's sketch
+  // keeps drawing as she reads, at a low frame rate.
+  listening = true; if (isPassage()) K.lowPower = true; else K.paused = true;
+  $('mic').classList.add('on'); $('mic').textContent = '👂 Listening...'; status(isPassage() ? 'Read the yellow part out loud!' : 'Read it out loud!');
+  const my = round;
   try {
-    await RISpeech.start(task.words, (text, fin) => { if (my === round) heard(text, fin); });
+    // A passage is heard as one stream from the current part to the end, so nothing is lost between sentences.
+    rest = isPassage() ? restWords() : null;
+    await RISpeech.start(rest ? rest.words : chunkWords(), (text, fin) => { if (my === round) heard(text, fin); });
   } catch (e) {
-    listening = false; K.paused = false; $('mic').classList.remove('on'); $('mic').textContent = '🎤 Read it!';
-    status('The microphone is not working, so tap each word as you read it.'); RISpeech.engine = 'tap'; RISpeech.error = String(e.message || e); controls(); return;
+    listening = false; K.paused = false; K.lowPower = false; $('mic').classList.remove('on'); $('mic').textContent = '🎤 Read it!';
+    status('The microphone is not working, so ' + (isPassage() ? 'tap the green button after each part.' : 'tap each word as you read it.')); RISpeech.engine = 'tap'; RISpeech.error = String(e.message || e); controls(); return;
   }
-  clearTimeout(listenTimer);
-  listenTimer = setTimeout(() => { if (my === round && phase === 'read') timeUp(); }, limit * 1000 * (window.READ_IT_SAY_IT.timeScale || 1));
+  chunkT0 = performance.now(); armTimer();
 }
-function stopListening() { clearTimeout(listenTimer); RISpeech.stop(); listening = false; K.paused = false; $('mic').classList.remove('on'); $('mic').textContent = '🎤 Read it!'; }
+function armTimer() { const my = round, c = ci; clearTimeout(listenTimer); listenTimer = setTimeout(() => { if (my === round && c === ci && phase === 'read') timeUp(); }, limitFor() * 1000 * (window.READ_IT_SAY_IT.timeScale || 1)); }
+function stopListening() {
+  if (listening && chunkT0) readMs += performance.now() - chunkT0; chunkT0 = 0;
+  clearTimeout(listenTimer); RISpeech.stop(); listening = false; K.paused = false; K.lowPower = false; $('mic').classList.remove('on'); $('mic').textContent = '🎤 Read it!';
+}
 function heard(text, fin) {
+  window.READ_IT_SAY_IT.heardText = text;
   if (phase !== 'read') return;
+  if (isPassage()) {
+    const R = rest || hearWords(task, task.chunks[ci]), now = RISpeech.match(R.words, text), per = {};
+    R.owner.forEach((o, k) => { per[o] = (per[o] === undefined ? true : per[o]) && now[k]; });
+    for (const o of Object.keys(per)) if (per[o] && !got[o] && +o >= task.chunks[ci].a) { got[o] = true; sfx('word', o % 8); }
+    paint();
+    // Every part read well enough moves on (she may read straight on into the next sentence). When a later part is
+    // read well, the parts before it count too if most of their words were heard: she clearly read on through them.
+    // After a pause the listener often misses the first few small words of the next sentence, so a part also counts
+    // when everything after its first five words is read well and at least half of its words were heard.
+    const ok = k => { const h = hearWords(task, task.chunks[k]), g = h.owner.map(o => got[o]); if (RISpeech.passes(h.words, g)) return true;
+      return h.words.length > 8 && RISpeech.passes(h.words.slice(5), g.slice(5)) && g.filter(Boolean).length >= h.words.length / 2; };
+    const most = k => { const c = task.chunks[k]; let n = 0; for (let i = c.a; i < c.b; i++) n += got[i] ? 1 : 0; return n >= 0.5 * (c.b - c.a); };
+    for (let k = task.chunks.length - 1; k > ci; k--) if (ok(k)) { let all = true; for (let m = ci; m < k; m++) all = all && most(m); if (all) { while (ci < k) chunkDone(); } break; }
+    while (phase === 'read' && ci < task.chunks.length && ok(ci)) chunkDone();
+    return;
+  }
   const now = RISpeech.match(task.words, text);
   now.forEach((g, i) => { if (g && !got[i]) { got[i] = true; sfx('word', i); } });
   paint();
@@ -966,11 +1112,17 @@ function heard(text, fin) {
 }
 function timeUp() {
   stopListening(); miss();
-  [...$('words').children].forEach((el, i) => el.classList.toggle('missed', !got[i]));
-  sfx('wrong'); status('Almost! Tap 🔊 to hear it, then try again.'); say('Almost! Let us try that again.');
+  const c = isPassage() ? task.chunks[ci] : { a: 0, b: task.words.length };
+  [...$('words').querySelectorAll('.w')].forEach((el, i) => el.classList.toggle('missed', i >= c.a && i < c.b && !got[i]));
+  sfx('wrong'); status(isPassage() ? 'Almost! Tap 🔊 to hear the yellow part, then tap the microphone and keep going.' : 'Almost! Tap 🔊 to hear it, then try again.'); say('Almost! Let us try that again.');
 }
-// Tap mode: tap each word in order while reading it.
-function tapWord(i) {
+// Tap mode: tap each word in order while reading it. In a passage, a tap on a word shows what it means or says it.
+function tapWord(i, e) {
+  if (isPassage()) {
+    const el = $('words').querySelectorAll('.w')[i];
+    if (!showGloss(i, el) && !listening) { hideGloss(); say(task.words[i].replace(/[^A-Za-z' -]/g, '')); }
+    return;
+  }
   if (phase !== 'read') return;
   const m = engineMode();
   if (m === 'mic') { if (!listening) say(task.words[i].replace(/[^A-Za-z' ]/g, '')); return; }
@@ -978,7 +1130,57 @@ function tapWord(i) {
   got[i] = true; tapPos++; sfx('word', i); paint();
   if (tapPos === task.words.length) success();
 }
-function trustMe() { if (phase !== 'read') return; got = got.map(() => true); paint(); success(); }
+function trustMe() { if (phase !== 'read') return; if (isPassage()) return chunkDone(); got = got.map(() => true); paint(); success(); }
+// One part of a passage is read: draw its piece of the scene and move on.
+function chunkDone() {
+  const c = task.chunks[ci]; for (let i = c.a; i < c.b; i++) got[i] = true;
+  sfx('magic'); if (c.cue) cue(c.cue);
+  [...$('words').querySelectorAll('.w')].forEach(el => el.classList.remove('missed'));
+  if (listening && chunkT0) { const t = performance.now(); readMs += t - chunkT0; chunkT0 = t; }
+  ci++;
+  if (ci >= task.chunks.length) { paint(); return passageRead(); }
+  hw = hearWords(task, task.chunks[ci]); paint();
+  const el = $('words').querySelectorAll('.w')[task.chunks[ci].a]; if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+  if (listening) { armTimer(); status(pick(['Keep going!', 'Nice! Next part.', 'Great! Keep reading.'])); }
+  else status(engineMode() === 'mic' ? 'Nice! Tap the microphone for the next part.' : pick(['Nice! Now the next part.', 'Great! Keep reading.']));
+}
+// The whole passage is read: the scene takes a bow, then the questions.
+async function passageRead() {
+  stopListening(); phase = 'quiz'; controls(); hideGloss();
+  status('You read the whole passage! Now some questions.');
+  for (const h of K.things) if (!h.userData.busy && !['house', 'tree', 'lighthouse', 'hill', 'pond', 'tower', 'treehouse'].includes(h.userData.name)) K.act(h, 'hop', { times: 1 });
+  const my = round; await K.wait(window.READ_IT_SAY_IT.hold ? 0.1 : 1.2); if (my !== round) return;
+  $('words').style.display = 'none'; quizOrder = task.quiz.map(q => shuffle(q.slice(1).map((t, k) => ({ t, right: k === 0 })))); showQuestion();
+}
+function showQuestion() {
+  const box = $('quiz'), q = task.quiz[qi]; qMissed = false; box.innerHTML = ''; box.classList.add('on');
+  const n = document.createElement('div'); n.className = 'n'; n.textContent = `Question ${qi + 1} of ${task.quiz.length}`;
+  const h = document.createElement('div'); h.className = 'q'; h.textContent = q[0];
+  const opts = document.createElement('div'); opts.className = 'opts';
+  quizOrder[qi].forEach((o, k) => { const b = document.createElement('button'); b.className = 'opt'; b.textContent = o.t; b.dataset.k = k; b.dataset.right = o.right ? 1 : 0; b.onclick = () => answer(k, b); opts.appendChild(b); });
+  box.append(n, h, opts); status('Read the question, then tap the best answer.');
+}
+function answer(k, b) {
+  if (phase !== 'quiz' || b.classList.contains('right')) return;
+  const o = quizOrder[qi][k];
+  if (!o.right) { qMissed = true; b.classList.remove('wrong'); void b.offsetWidth; b.classList.add('wrong'); sfx('wrong'); status('Not quite. Think about what the passage said, and try another answer.'); return; }
+  b.classList.add('right'); sfx('pop'); sfx('word', 6); if (!qMissed) qFirst++;
+  [...$('quiz').querySelectorAll('.opt')].forEach(x => x.disabled = true);
+  status(pick(['Yes, that is right!', 'Right!', 'Good thinking!'])); const my = round;
+  setTimeout(() => { if (my !== round) return; qi++; if (qi < task.quiz.length) showQuestion(); else finishPassage(); }, window.READ_IT_SAY_IT.hold ? 50 : 1100);
+}
+// Right first try: read without help or running out of time, and at least two questions right on the first answer.
+function finishPassage() {
+  phase = 'won'; const n = task.quiz.length, right = !missed && qFirst >= Math.min(2, n);
+  P.stars += 1 + qFirst; const change = record(right); badge(); controls();
+  const wpm = readMs > 3000 && engineMode() === 'mic' ? Math.round(task.words.length / (readMs / 60000)) : 0;
+  const box = $('quiz'); box.innerHTML = ''; const d = document.createElement('div'); d.className = 'sum';
+  d.textContent = `You read ${task.words.length} words` + (wpm ? ` at ${wpm} words a minute` : '') + `. ${qFirst} of ${n} questions right on the first try.`;
+  const d2 = document.createElement('div'); d2.className = 'n'; d2.textContent = right ? 'That counts toward the next level!' : missed ? 'Next time, try reading it all without help.' : 'Next time, think about what happens in the story.';
+  box.append(d, d2); sfx('magic'); K.weather('confetti'); setTimeout(() => K.weather(K.skyNow() === 'night' ? 'night' : 'clear'), 2500);
+  status('Tap Next for a new passage.'); if (change > 0) { toast('Level up! ⬆️'); sfx('up'); say('Level up!'); }
+  window.READ_IT_SAY_IT.last = { right, qFirst, wpm, missed };
+}
 async function success() {
   if (phase !== 'read') return;
   stopListening(); phase = 'won'; P.stars++; const change = missed ? 0 : record(true); badge();
@@ -993,16 +1195,64 @@ async function success() {
 }
 function hearIt() {
   if (phase === 'won') { say(task.text); return; }
+  if (phase !== 'read') return;
   stopListening(); miss(); // needing to hear it first is not a first-try read
-  const els = [...$('words').children];
-  say(task.text, i => { els.forEach((e, j) => e.classList.toggle('now', j === i)); }, () => els.forEach(e => e.classList.remove('now')));
+  const els = [...$('words').querySelectorAll('.w')], c = isPassage() ? task.chunks[ci] : { a: 0, b: task.words.length };
+  const text = task.words.slice(c.a, c.b).join(' ');
+  say(text, i => { els.forEach((e, j) => e.classList.toggle('now', j === c.a + i)); }, () => els.forEach(e => e.classList.remove('now')));
   status(engineMode() === 'mic' ? 'Now you read it! Tap the microphone.' : 'Now you read it!');
+}
+
+// ---------------------------------------------------------------------------
+// Scene sketch for passages. A cue is a list of steps separated by ";":
+//   +model, +model:#color, +model*1.4   put a thing on the stage (big things like houses go to the back)
+//   model verb                           the newest thing of that kind acts (hop, run, fly, sleep, glow, ...)
+//   -model                               take it away
+//   sky night | day | sunny | sunset | storm | snow      wx rain | snow | wind | storm | night | clear | bubbles | hearts
+// ---------------------------------------------------------------------------
+const BACK = new Set(['house', 'tree', 'treehouse', 'lighthouse', 'tower', 'hill', 'ship', 'sailboat', 'boat', 'pond', 'rainbow', 'bed', 'train', 'bus']);
+const UP = new Set(['moon', 'sun', 'cloud', 'star', 'rainbow']);
+const SLOTS = { back: [[-3.8, -2.2], [3.8, -2.4], [0, -3.2], [-6.4, -3], [6.4, -3]], front: [[0, 0.9], [-1.9, 0.7], [1.9, 0.7], [-1, 1.8], [1, 1.8], [-5.4, 0.6], [5.4, 0.6]], up: [[-3, 0], [3, 0], [0, 0]] };
+let used = { back: 0, front: 0, up: 0 };
+// Build every model the passage's scene will use once, out of sight, and compile its shaders now: a first-time
+// shader compile while she reads can stall the page long enough to lose some of her voice.
+function warmUp(t) {
+  try {
+    const names = new Set(); for (const c of t.chunks) for (const m of String(c.cue).matchAll(/\+([a-z]+)(?::(#[0-9a-fA-F]{3,6}))?/g)) names.add(m[1] + '|' + (m[2] || ''));
+    const hs = [...names].map(n => { const [m, col] = n.split('|'); const h = K.make(m, { color: col || undefined }); h.position.set(0, -40, 0); K.root.add(h); return h; });
+    K.renderer.compile(K.scene, K.camera); hs.forEach(h => K.root.remove(h));
+  } catch (e) { window.READ_IT_SAY_IT && window.READ_IT_SAY_IT.errors.push('warm up: ' + (e.message || e)); }
+}
+function sketchReset() { used = { back: 0, front: 0, up: 0 }; }
+const ACTS = new Set(['hop', 'jump', 'spin', 'dance', 'shake', 'grow', 'shrink', 'fly', 'swim', 'run', 'walk', 'roll', 'sleep', 'wake', 'sing', 'glow', 'pop', 'eat', 'splash', 'wave', 'open', 'close']);
+function cue(str) {
+  for (const raw of String(str).split(';')) {
+    const step = raw.trim(); if (!step) continue;
+    try {
+      const [a, b] = step.split(/\s+/);
+      if (a === 'sky') { K.sky(b, 1.2); continue; }
+      if (a === 'wx') { K.weather(b); continue; }
+      if (a[0] === '+') {
+        const m = /^\+([a-z]+)(?::(#[0-9a-fA-F]{3,6}))?(?:\*([\d.]+))?$/.exec(a); if (!m || !Kit.models[m[1]]) throw new Error('bad cue ' + step);
+        const kind = UP.has(m[1]) ? 'up' : BACK.has(m[1]) ? 'back' : 'front', list = SLOTS[kind], k = used[kind]++ % list.length, [x, z] = list[k];
+        const h = K.spawn(m[1], { x, z, color: m[2], scale: (m[3] ? +m[3] : 1) * (kind === 'back' ? 1.15 : 1) });
+        if (kind === 'up') h.position.y = 2.2 + (k % 2) * 0.4;
+        sfx('pop'); continue;
+      }
+      if (a[0] === '-') { const h = [...K.things].reverse().find(t => t.userData.name === a.slice(1)); if (h) K.remove(h); continue; }
+      const h = [...K.things].reverse().find(t => t.userData.name === a); if (!h || !ACTS.has(b)) throw new Error('bad cue ' + step);
+      if (h.userData.busy) continue;
+      if (b === 'run' || b === 'walk' || b === 'roll') { const x = h.position.x, to = V(Math.max(-3.4, Math.min(3.4, x + (x <= 0 ? 1.8 : -1.8))), h.position.y, h.position.z); K.act(h, b, { to }); }
+      else K.act(h, b, b === 'fly' ? { height: 1.6 } : {});
+    } catch (e) { window.READ_IT_SAY_IT && window.READ_IT_SAY_IT.errors.push(String(e.message || e)); }
+  }
 }
 $('mic').onclick = () => { if (listening) { stopListening(); status('Tap the microphone, then read it out loud.'); } else startListening(); };
 $('trust').onclick = trustMe;
 $('listen').onclick = hearIt;
 $('next').onclick = () => newRound();
 $('skip').onclick = () => newRound();
+document.addEventListener('pointerdown', e => { if (!e.target.closest || !e.target.closest('.w.gl')) hideGloss(); }, true);
 $('stage').addEventListener('pointerdown', e => { const h = K.pick(e.clientX, e.clientY); if (h && !h.userData.busy) K.act(h, pick(['hop', 'spin', 'dance'])); });
 // Grown-up switch: press and hold the gear for 1.5 seconds.
 // The time is checked on release too, so a busy page cannot miss a long press.
@@ -1029,9 +1279,10 @@ bootSpeech();
 // Test hook.
 window.READ_IT_SAY_IT = {
   LEVELS, START, record, P: () => P, gen: i => LEVELS[i].gen(), current: () => task, speech: RISpeech, playNow: sc => play(sc, round), hold: false, timeScale: 1, errors: [],
-  state: () => ({ level: P.lv, stars: P.stars, streak: P.st.streak, miss: P.st.miss, phase, missed, got: got.slice(), mode: engineMode(), listening, engine: RISpeech.engine, speech: RISpeech.status }),
+  state: () => ({ level: P.lv, stars: P.stars, streak: P.st.streak, miss: P.st.miss, phase, missed, got: got.slice(), chunk: ci, qi, qFirst, readMs, mode: engineMode(), listening, engine: RISpeech.engine, speech: RISpeech.status }),
   setLevel(i) { P.lv = i; P.st = { streak: 0, miss: 0 }; persist(); newRound(); }, newRound, tapWord, trustMe, hearIt, startListening, heard, setMode(m) { P.mode = m; persist(); controls(); newRound(); },
-  useTask(t) { newRound(); task = t; t.words = t.text.split(' '); got = t.words.map(() => false); renderWords(); },
+  useTask(t) { newRound(); if (t.kind === 'passage') { task = buildPassage(t.src || t); } else { task = t; t.words = t.text.split(' '); } got = task.words.map(() => false); ci = 0; hw = isPassage() ? hearWords(task, task.chunks[0]) : null; $('app').classList.toggle('passage', isPassage()); setTitle(); renderWords(); controls(); status(readHint()); },
+  buildPassage, cue, chunk: () => ci, hearWords: () => hw, answer: right => { const bs = [...$('quiz').querySelectorAll('.opt')]; const b = bs.find(x => (x.dataset.right === '1') === right && !x.disabled); if (b) b.click(); return !!b; }, SENTENCE_LEVELS, last: null,
 };
 </script>
 </body>

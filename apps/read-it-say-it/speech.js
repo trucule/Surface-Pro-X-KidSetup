@@ -15,7 +15,7 @@ window.RISpeech = (function () {
     const st = new Blob([u8]).stream().pipeThrough(new DecompressionStream('gzip'));
     return new Uint8Array(await new Response(st).arrayBuffer());
   }
-  const norm = w => String(w).toLowerCase().replace(/[^a-z']/g, '');
+  const norm = w => String(w).toLowerCase().replace(/\u2019/g, "'").replace(/[^a-z']/g, '').replace(/^'+|'+$/g, '');
   S.norm = norm;
 
   let V = null, model = null, loading = null;
@@ -67,12 +67,19 @@ window.RISpeech = (function () {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
       if (session.stopped) { stream.getTracks().forEach(t => t.stop()); return; }
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
-      const src = ctx.createMediaStreamSource(stream), proc = ctx.createScriptProcessor(8192, 1, 1);
-      const known = [...new Set(words.map(norm).filter(w => w && (!S.vocab || S.vocab.has(w))))];
-      const rec = new V.Recognizer(model, ctx.sampleRate, JSON.stringify([...known, '[unk]']));
-      const buf = V._malloc(8192 * 4), f = new Float32Array(8192);
+      const BUF = 8192; // about a sixth of a second of sound per step
+      const src = ctx.createMediaStreamSource(stream), proc = ctx.createScriptProcessor(BUF, 1, 1);
+      const grammar = ws => JSON.stringify([...new Set(ws.map(norm).filter(w => w && S.known(w)))].concat('[unk]'));
+      let rec = new V.Recognizer(model, ctx.sampleRate, grammar(words));
+      // A new set of words (the next sentence of a passage) on the same microphone, with nothing heard yet.
+      session.retarget = ws => { const old = rec; rec = new V.Recognizer(model, ctx.sampleRate, grammar(ws)); session.finals = []; session.partial = ''; try { old.delete(); } catch (e) {} };
+      const buf = V._malloc(BUF * 4), f = new Float32Array(BUF);
+      // S.load: time spent hearing, as a share of the sound's own length (above 1 the listener falls behind).
+      S.load = { audio: 0, work: 0, gap: 0, last: 0 };
       proc.onaudioprocess = e => {
         if (session.stopped) return;
+        const t0 = performance.now(); S.load.audio += e.inputBuffer.duration * 1000;
+        if (S.load.last) S.load.gap = Math.max(S.load.gap, t0 - S.load.last); S.load.last = t0;
         const d = e.inputBuffer.getChannelData(0);
         for (let i = 0; i < d.length; i++) f[i] = d[i] * 32768;
         V.HEAPF32.set(f.subarray(0, d.length), buf >> 2);
@@ -82,6 +89,7 @@ window.RISpeech = (function () {
           const p = clean(JSON.parse(rec.PartialResult()).partial);
           if (p !== session.partial) { session.partial = p; emit(false); }
         }
+        S.load.work += performance.now() - t0;
       };
       src.connect(proc); proc.connect(ctx.destination);
       session.end = () => { try { proc.disconnect(); src.disconnect(); } catch (e) {} stream.getTracks().forEach(t => t.stop()); ctx.close(); try { rec.delete(); } catch (e) {} V._free(buf); };
@@ -90,33 +98,61 @@ window.RISpeech = (function () {
     if (S.engine === 'webspeech') {
       const R = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
       R.lang = 'en-US'; R.continuous = true; R.interimResults = true;
-      R.onresult = e => { let fin = [], part = ''; for (const r of e.results) { if (r.isFinal) fin.push(r[0].transcript); else part += r[0].transcript; } session.finals = fin.map(clean); session.partial = clean(part); emit(false); };
+      session.seen = 0; session.skip = 0;
+      session.retarget = () => { session.skip = session.seen; session.finals = []; session.partial = ''; };
+      R.onresult = e => { let fin = [], part = ''; session.seen = e.results.length; for (let i = session.skip; i < e.results.length; i++) { const r = e.results[i]; if (r.isFinal) fin.push(r[0].transcript); else part += r[0].transcript; } session.finals = fin.map(clean); session.partial = clean(part); emit(false); };
       R.onerror = e => { S.error = 'webspeech: ' + e.error; if (e.error === 'network' || e.error === 'not-allowed' || e.error === 'service-not-allowed') { S.engine = 'tap'; if (S.onEngineLost) S.onEngineLost(); } };
       R.onend = () => { if (!session.stopped) try { R.start(); } catch (e) {} };
       R.start();
       session.end = () => { try { R.onend = null; R.abort(); } catch (e) {} };
     }
   };
+  S.retarget = function (words) { if (cur && cur.retarget) { cur.retarget(words); return true; } return false; };
   S.stop = function () { if (cur) { cur.stopped = true; if (cur.end) cur.end(); cur = null; } };
   const clean = t => String(t || '').toLowerCase().replace(/\[unk\]/g, ' ').replace(/[^a-z' ]/g, ' ').replace(/\s+/g, ' ').trim();
 
-  // Which sentence words have been read, in order. Each heard word may match the next word or skip up to two.
+  // Words the offline listener can hear. Without a word list (the browser listener) every word counts as known.
+  S.known = w => !S.vocab || S.vocab.has(norm(w));
+  // Which sentence words have been read, in order. Each heard word may match the next word or skip a few.
+  // A word the listener cannot hear (a rare name, an old word) counts as read once a word after it is heard,
+  // or once the last word it can hear is heard.
+  // The listener often mixes up a word with and without an "s" at the end (spin, spins), so those count as the same.
+  const same = (t, h) => t === h || (t.length > 3 && (t === h + 's' || h === t + 's'));
   S.match = function (words, heard) {
     const target = words.map(norm), got = new Array(target.length).fill(false);
+    const idx = target.map((w, i) => i).filter(i => target[i] && S.known(target[i]));
+    const hs = String(heard).split(' ').map(norm).filter(Boolean);
+    const look = idx.length > 12 ? 4 : 3;
+    const follows = (k, j, n) => { if (!n) return true; for (const d of [1, 2]) if (k + d < idx.length && same(target[idx[k + d]], hs[j]) && follows(k + d, j + 1, n - 1)) return true; return false; };
     let p = 0;
-    for (const h of String(heard).split(' ').map(norm).filter(Boolean)) {
-      for (let k = p; k < Math.min(p + 3, target.length); k++) if (target[k] === h) { got[k] = true; p = k + 1; break; }
+    for (let j = 0; j < hs.length; j++) {
+      const h = hs[j]; let hit = -1;
+      for (let k = p; k < Math.min(p + look, idx.length); k++) if (same(target[idx[k]], h)) { hit = k; break; }
+      // The listener sometimes drops a few words. Three heard words in a row that match three words further on (with at
+      // most one word left out between them) pick the place up again; the dropped words stay unread.
+      if (hit < 0 && j + 2 < hs.length) for (let k = p + look; k < Math.min(p + 14, idx.length); k++) if (same(target[idx[k]], h) && follows(k, j + 1, 2)) { hit = k; break; }
+      if (hit >= 0) { got[idx[hit]] = true; p = hit + 1; }
+    }
+    const last = idx.length ? idx[idx.length - 1] : -1;
+    let after = !idx.length || got[last];
+    for (let i = target.length - 1; i >= 0; i--) {
+      if (i < last && got[i]) after = true;
+      if (!target[i] || !S.known(target[i])) got[i] = after;
     }
     return got;
   };
-  // Read well enough: the last word, every main word, and nearly every small word (short words like "the" are often
-  // swallowed when a child reads fast, so up to one in four of them may be missed).
-  const SMALL = new Set(['the', 'a', 'an', 'to', 'and', 'it', 'its', 'their', 'on', 'in', 'is', 'so', 'of', 'then']);
+  // Read well enough: the last word, nearly every main word, and most small words. Short words like "the" are often
+  // swallowed when a child reads fast, so up to one in three of them may be missed; the listener also drops a word now
+  // and then, so in a sentence of eight words or more one main word in eight may be missed too.
+  const SMALL = new Set(['the', 'a', 'an', 'to', 'and', 'it', 'its', 'their', 'on', 'in', 'is', 'so', 'of', 'then',
+    'was', 'he', 'she', 'his', 'her', 'i', 'for', 'with', 'at', 'as', 'but', 'or', 'by', 'had', 'be', 'that', 'this', 'from', 'were', 'they', 'we', 'my', 'all']);
   S.passes = (words, got) => {
-    if (!got[got.length - 1]) return false;
+    // The sentence must be read to the end: its last word, or its last main word when it ends on a small word ("in it").
+    let end = got.length - 1; while (end > 0 && SMALL.has(norm(words[end])) && !got[end]) end--;
+    if (!got[end]) return false;
     let main = 0, small = 0;
     words.forEach((w, i) => { if (!got[i]) { if (SMALL.has(norm(w))) small++; else main++; } });
-    return main === 0 && small <= Math.floor(words.length / 4);
+    return main <= Math.floor(words.length / 8) && small <= Math.ceil(words.length / 3);
   };
   return S;
 })();
