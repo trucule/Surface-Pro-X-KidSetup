@@ -171,8 +171,9 @@ try:
         check(after['design'] == before['design'] and after['owned'] == before['owned'] and after['spent'] == before['spent'], 'design, items and spent stars survive a reload')
 
         # A design saved by the drawn avatar gets the nearest real choices.
-        old = {'design': {'hair': 'bob', 'top': 'dress', 'shoes': 'boots', 'glasses': 'cateye', 'pose': 'cheer', 'brows': 'thick', 'bottom': 'jeans'}, 'owned': [], 'spent': 0, 'savedAt': 9e12}   # newer than the home screen's copy
-        mig = ctx.new_page(); mig.goto(AVATAR, wait_until='domcontentloaded', timeout=120000); mig.evaluate("s => { localStorage.setItem('kid-avatar-v1', JSON.stringify(s)); }", old); mig.reload(wait_until='domcontentloaded', timeout=120000); ready(mig)
+        old = {'design': {'hair': 'bob', 'top': 'dress', 'shoes': 'boots', 'glasses': 'cateye', 'pose': 'cheer', 'brows': 'thick', 'bottom': 'jeans'}, 'owned': [], 'spent': 0, 'savedAt': 1}
+        mig = ctx.new_page(); mig.route(URL + '/**', lambda r: r.abort())   # this check leaves the home screen's copy alone
+        mig.goto(AVATAR, wait_until='domcontentloaded', timeout=120000); mig.evaluate("s => { localStorage.setItem('kid-avatar-v1', JSON.stringify(s)); }", old); mig.reload(wait_until='domcontentloaded', timeout=120000); ready(mig)
         d = mig.evaluate('MY_AVATAR.state().design')
         check((d['hair'], d['top'], d['shoes'], d['glasses'], d['pose'], d['brows']) == ('hair-bob', 'dress-sundress', 'shoes-rain-boots', 'glasses-leopard', 'peace', 'brows-thick'), f'an old drawn design carries over {d}')
         mig.evaluate("s => localStorage.setItem('kid-avatar-v1', JSON.stringify(s))", before); mig.close()
@@ -198,6 +199,12 @@ try:
             check(av and av['design'] == before['design'], 'home screen keeps a copy of her avatar')
             port = home / '.local' / 'share' / 'KidTablet' / 'avatar' / 'portrait.png'
             check(port.exists() and Image.open(port).size == (384, 384), 'home screen saved her portrait')
+            # Straight after the app opens, the portrait it sends home shows her (not an empty frame while models load).
+            port.unlink()
+            pg.reload(wait_until='domcontentloaded', timeout=120000)
+            pg.wait_for_function('window.MY_AVATAR && !MY_AVATAR.portraitDue() && MY_AVATAR.showingDesign()', timeout=180000); pg.wait_for_timeout(2500)
+            seen = sum(1 for px in Image.open(port).convert('RGBA').get_flattened_data() if px[3] > 200) if port.exists() else 0
+            check(seen > 384 * 384 // 6, f'the portrait sent when the app opens shows her ({seen} solid pixels)')
             # Lost browser data: the avatar comes back from the home screen.
             pg.evaluate("localStorage.removeItem('kid-avatar-v1')"); pg.reload(); ready(); pg.wait_for_timeout(2500)
             back = pg.evaluate('MY_AVATAR.state()')

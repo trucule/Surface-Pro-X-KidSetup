@@ -165,11 +165,20 @@ function persist(quiet) {
 // The home screen keeps a copy of the design (and what she owns and spent) and the portrait it shows.
 function sendHome(quiet) {
   const body = JSON.stringify({ design: S.design, owned: S.owned, spent: S.spent, savedAt: S.savedAt, earned: earned() });
+  // The portrait waits until the avatar on screen is the whole saved design (the realistic one loads its files first);
+  // a picture taken earlier would be empty or out of date. The frame loop sends it as soon as it is ready.
   let png = '';
-  try { png = portrait(); } catch (e) { window.MY_AVATAR.errors.push('portrait: ' + e.message); }
+  if (!showingDesign()) portraitDue = true;
+  else { portraitDue = false; try { png = portrait(); } catch (e) { window.MY_AVATAR.errors.push('portrait: ' + e.message); } }
   const post = (path, b) => fetch(HOME + path, { method: 'POST', body: b });
   return Promise.all([post('/avatar', body), png ? post('/portrait', png) : null, window.KID_STARS ? window.KID_STARS.report(true) : null])
     .then(() => { homeOk = true; if (!quiet) flashSaved(); }, () => { homeOk = false; });
+}
+let portraitDue = false;
+function showingDesign() {
+  if (!parts.H || trying || lastPreview) return false;
+  if (!parts.real) return !REAL || !!REAL.failed;
+  return !REAL.need(S.design).length && !!REAL.texturesReady;
 }
 function flashSaved() { const el = $('saved'); el.classList.add('on'); clearTimeout(flashSaved.t); flashSaved.t = setTimeout(() => el.classList.remove('on'), 1800); }
 // If this app's saved copy was lost (cleared browser data), the home screen's copy brings it back.
@@ -779,6 +788,7 @@ function frame() {
   for (const s of [-1, 1]) if (parts['wing' + s]) parts['wing' + s].rotation.y = s * (0.5 + Math.sin(t * 2.4) * 0.12);
   for (const f of floaters) { const u = f.userData; u.a += dt * u.sp * 0.6; if (u.kind === 'stars') { f.position.set(Math.cos(u.a) * u.r, u.y + Math.sin(u.a * 2) * 0.05, Math.sin(u.a) * u.r); f.rotation.y = -u.a; } else { u.y += dt * u.sp * 0.25; if (u.y > 1.9) u.y = 0.05; f.position.set(Math.cos(u.a) * u.r, u.y, Math.sin(u.a) * u.r); f.lookAt(camera.position); } }
   renderer.render(scene, camera);
+  if (portraitDue && showingDesign()) { portraitDue = false; sendHome(true); }
 }
 renderer.setAnimationLoop(frame);
 
@@ -940,6 +950,7 @@ window.MY_AVATAR = {
   portrait, sendHome, SHOP, LOOK, DEFAULT, homeOk: () => homeOk, parts: () => parts, restoreFromHome,
   HAT_FIT,
   three: { renderer, scene, camera, lights: { hemi, key, rim, fill } },
+  portraitDue: () => portraitDue, showingDesign: () => showingDesign(),
   real: () => (REAL ? { ready: REAL.ready, failed: REAL.failed, need: REAL.need(Object.assign({}, S.design, lastPreview || {})), textures: !!REAL.texturesReady, errors: REAL.errors.slice() } : null),
 };
 buildPlace(S.design.place); rebuild(); nav(); render(); setView('body'); resize();
