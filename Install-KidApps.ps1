@@ -65,6 +65,7 @@ $apps = @(
     @{ Name = 'Word Wizard'; Path = 'apps\word-wizard.html'; Tile = 'apps\word-wizard-tile.png'; Color = '#8A3FFC' }
     @{ Name = 'Read It Say It Make It'; Path = 'apps\read-it-say-it'; Tile = 'apps\read-it-say-it-tile.png'; Color = '#13C95A' }
     @{ Name = 'Simon Orchestra'; Path = 'apps\simon-orchestra.html'; Tile = 'apps\simon-orchestra-tile.png'; Color = '#FF7A00' }
+    @{ Name = 'My Avatar'; Path = 'apps\my-avatar'; Tile = 'apps\my-avatar-tile.png'; Color = '#8A3FFC' }
 )
 # Retired tiles: removed from a tablet that still has them, with the sites only they used.
 $retired = @(@{ Name = 'Kid Pix'; Domains = @('kidpix.app') })

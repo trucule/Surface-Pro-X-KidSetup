@@ -66,6 +66,8 @@ $script:StoreInstallTask = 'KidTablet-StoreInstall'
 $script:StoreFinishTask  = 'KidTablet-StoreFinish'
 $script:HomeDir     = Join-Path $env:ProgramFiles 'KidTablet'
 $script:HomeExe     = Join-Path $script:HomeDir 'KidHome.exe'
+# KidHome's local service for her offline apps (stars and avatar); the port is fixed in KidHome's KidService class.
+$script:KidServiceUrl = 'http://127.0.0.1:47821'
 $script:HomeTsv     = Join-Path $script:HomeDir 'launcher.tsv'
 $script:IconDir     = Join-Path $script:HomeDir 'icons'
 $script:BackgroundDir = Join-Path $script:HomeDir 'background'
@@ -442,6 +444,9 @@ using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 using System.Windows.Forms;
+using System.Net;
+using System.Net.Sockets;
+using System.Text.RegularExpressions;
 using Microsoft.Win32;
 
 // Swallows touch gesture messages before they reach any window in the launcher.
@@ -552,6 +557,8 @@ class HomeForm : Form
     readonly System.Windows.Forms.Timer windowTimer = new System.Windows.Forms.Timer();
     readonly HashSet<IntPtr> seenWindows = new HashSet<IntPtr>();
     readonly HomeButton homeButton;
+    readonly AvatarBadge badge;
+    List<TileInfo> tiles = new List<TileInfo>();
     readonly List<Image> backgrounds = new List<Image>();
     int backgroundIndex;
     DateTime configStamp = DateTime.MinValue;
@@ -578,14 +585,25 @@ class HomeForm : Form
         header.Dock = DockStyle.Top;
         header.Height = S(120);
         header.Padding = new Padding(S(56), S(28), S(56), 0);
+        header.Padding = new Padding(S(40), S(12), S(56), 0);
         title.Font = new Font("Segoe UI Light", 34f);
         title.AutoSize = true;
-        title.Dock = DockStyle.Left;
+        title.Margin = new Padding(S(14), S(14), 0, 0);
         clock.Font = new Font("Segoe UI Light", 30f);
         clock.AutoSize = true;
         clock.Dock = DockStyle.Right;
+        clock.Padding = new Padding(0, S(16), 0, 0);
+        // Her avatar and star balance sit before the greeting; a tap opens My Avatar.
+        badge = new AvatarBadge(this, scale);
+        var left = new FlowLayoutPanel();
+        left.Dock = DockStyle.Fill;
+        left.WrapContents = false;
+        left.BackColor = Color.Transparent;
+        left.Controls.Add(badge);
+        left.Controls.Add(title);
+        header.Controls.Add(left);
         header.Controls.Add(clock);
-        header.Controls.Add(title);
+        KidService.Start(() => { try { BeginInvoke((Action)badge.Reload); } catch (Exception) { } });
 
         // One fixed surface the size of the screen. It holds the wallpaper and every tile,
         // pre-rendered, and scrolls by drawing that picture at an offset: nothing moves.
@@ -835,7 +853,7 @@ class HomeForm : Form
     void Tick()
     {
         clock.Text = DateTime.Now.ToString("h:mm");
-        if (++ticks % 5 == 0) LoadTiles();
+        if (++ticks % 5 == 0) { LoadTiles(); badge.Reload(); }
         if (ticks % 30 == 0) { WriteIdleStatus(); MaybeRefreshSession(); }
         if (ticks % 900 == 0 && backgrounds.Count > 1)        // rotate every 15 minutes
         {
@@ -987,11 +1005,18 @@ class HomeForm : Form
             }
             if (backgroundIndex >= backgrounds.Count) backgroundIndex = 0;
 
+            tiles = list;
             canvas.SetTiles(list);
             Relayout();
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }
+    }
+
+    // Opens My Avatar (its tile), if it is on her home screen.
+    public void LaunchAvatar()
+    {
+        foreach (var t in tiles) if (t.Name == "My Avatar") { Launch(t); return; }
     }
 
     const string AppsFolderPrefix = "shell:AppsFolder\\";
@@ -1051,6 +1076,282 @@ class HomeForm : Form
         // Alt+F4 and similar: stay open. Sign-out and shutdown still close it.
         if (e.CloseReason == CloseReason.UserClosing) { e.Cancel = true; return; }
         base.OnFormClosing(e);
+    }
+}
+
+// Her avatar portrait and star balance on the home screen. My Avatar (an offline app in Edge) and her other apps
+// send them to KidService; this control shows what KidService saved.
+class AvatarBadge : Control
+{
+    readonly HomeForm home;
+    readonly float scale;
+    Image portrait;
+    DateTime portraitStamp = DateTime.MinValue;
+    int balance = -1;
+    readonly Font numberFont, hintFont;
+
+    public AvatarBadge(HomeForm home, float scale)
+    {
+        this.home = home; this.scale = scale;
+        SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.SupportsTransparentBackColor, true);
+        BackColor = Color.Transparent;
+        numberFont = new Font("Segoe UI", 22f, FontStyle.Bold);
+        hintFont = new Font("Segoe UI", 12f, FontStyle.Bold);
+        Size = new Size(S(250), S(100));
+        Margin = new Padding(0);
+        Cursor = Cursors.Hand;
+        Reload();
+    }
+
+    int S(int v) { return (int)(v * scale); }
+
+    public void Reload()
+    {
+        try
+        {
+            string png = KidService.PortraitPath;
+            var stamp = File.Exists(png) ? File.GetLastWriteTimeUtc(png) : DateTime.MinValue;
+            if (stamp != portraitStamp)
+            {
+                portraitStamp = stamp;
+                if (portrait != null) { portrait.Dispose(); portrait = null; }
+                if (stamp != DateTime.MinValue)
+                {
+                    byte[] bytes = File.ReadAllBytes(png);
+                    using (var ms = new MemoryStream(bytes)) using (var img = Image.FromStream(ms)) portrait = new Bitmap(img);
+                }
+                Invalidate();
+            }
+            int b = KidService.Balance();
+            if (b != balance) { balance = b; Invalidate(); }
+        }
+        catch (Exception) { }
+    }
+
+    protected override void OnClick(EventArgs e) { base.OnClick(e); home.LaunchAvatar(); }
+
+    static GraphicsPath Pill(RectangleF r)
+    {
+        var p = new GraphicsPath(); float d = r.Height;
+        p.AddArc(r.X, r.Y, d, d, 90, 180); p.AddArc(r.Right - d, r.Y, d, d, 270, 180); p.CloseFigure(); return p;
+    }
+
+    static PointF[] Star(float cx, float cy, float r)
+    {
+        var pts = new PointF[10];
+        for (int i = 0; i < 10; i++) { double a = -Math.PI / 2 + i * Math.PI / 5; float rr = i % 2 == 0 ? r : r * 0.45f; pts[i] = new PointF(cx + (float)Math.Cos(a) * rr, cy + (float)Math.Sin(a) * rr); }
+        return pts;
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics;
+        g.SmoothingMode = SmoothingMode.AntiAlias;
+        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+        int d = Height - S(4);
+        var circle = new Rectangle(S(2), S(2), d, d);
+        using (var bg = new LinearGradientBrush(circle, Color.FromArgb(255, 228, 92), Color.FromArgb(255, 143, 181), 90f)) g.FillEllipse(bg, circle);
+        if (portrait != null)
+        {
+            using (var clip = new GraphicsPath())
+            {
+                clip.AddEllipse(circle);
+                var old = g.Clip; g.SetClip(clip);
+                g.DrawImage(portrait, circle);
+                g.Clip = old;
+            }
+        }
+        else
+        {
+            using (var b = new SolidBrush(Color.FromArgb(150, 255, 255, 255)))
+            {
+                g.FillEllipse(b, circle.X + d * 0.33f, circle.Y + d * 0.16f, d * 0.34f, d * 0.34f);
+                g.FillEllipse(b, circle.X + d * 0.2f, circle.Y + d * 0.56f, d * 0.6f, d * 0.6f);
+            }
+        }
+        using (var ring = new Pen(Color.White, S(4))) g.DrawEllipse(ring, circle);
+
+        // Star balance, or a hint before her avatar exists.
+        string text = balance >= 0 ? balance.ToString() : "";
+        float x = circle.Right + S(10);
+        if (portrait == null && balance <= 0)
+        {
+            using (var b = new SolidBrush(Color.White)) g.DrawString("Make\nyour avatar!", hintFont, b, x, S(24));
+            return;
+        }
+        SizeF ts = g.MeasureString(text, numberFont);
+        var pill = new RectangleF(x, Height / 2f - S(24), S(56) + ts.Width, S(48));
+        using (var path = Pill(pill)) using (var fill = new SolidBrush(Color.White)) g.FillPath(fill, path);
+        using (var gold = new SolidBrush(Color.FromArgb(255, 201, 60))) using (var edge = new Pen(Color.FromArgb(214, 140, 0), S(2)))
+        {
+            var star = Star(pill.X + S(26), pill.Y + pill.Height / 2f, S(17));
+            g.FillPolygon(gold, star); g.DrawPolygon(edge, star);
+        }
+        using (var ink = new SolidBrush(Color.FromArgb(43, 33, 64))) g.DrawString(text, numberFont, ink, pill.X + S(46), pill.Y + (pill.Height - ts.Height) / 2f);
+    }
+}
+
+// A small web service on this tablet only (127.0.0.1), for her offline apps in Edge, which cannot write files:
+//   POST /stars      {"earned": n}            stars earned in all her apps (sent by each app's star counter)
+//   POST /avatar     {"design":..,"spent":n}  her avatar, what she owns and what she has spent
+//   POST /portrait   data:image/png;base64,.. the portrait shown on the home screen
+//   GET  /avatar, GET /stars                  what was saved, so My Avatar can restore itself
+// Files live in her profile: %LOCALAPPDATA%\KidTablet\avatar.
+static class KidService
+{
+    public const int Port = 47821;
+    static readonly object gate = new object();
+    static Action changed;
+
+    static string Dir { get { return Path.Combine(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KidTablet"), "avatar"); } }
+    public static string PortraitPath { get { return Path.Combine(Dir, "portrait.png"); } }
+    static string AvatarPath { get { return Path.Combine(Dir, "avatar.json"); } }
+    static string StarsPath { get { return Path.Combine(Dir, "stars.txt"); } }
+
+    public static void Start(Action onChange)
+    {
+        changed = onChange;
+        var t = new Thread(Listen); t.IsBackground = true; t.Start();
+    }
+
+    static void Listen()
+    {
+        TcpListener listener;
+        try { listener = new TcpListener(IPAddress.Loopback, Port); listener.Start(); }
+        catch (Exception ex) { Log("listen: " + ex.Message); return; }
+        while (true)
+        {
+            try
+            {
+                var client = listener.AcceptTcpClient();
+                ThreadPool.QueueUserWorkItem(o => Serve((TcpClient)o), client);
+            }
+            catch (Exception ex) { Log("accept: " + ex.Message); Thread.Sleep(500); }
+        }
+    }
+
+    static int Number(string json, string name)
+    {
+        var m = Regex.Match(json ?? "", "\"" + name + "\"\\s*:\\s*(\\d{1,9})");
+        return m.Success ? int.Parse(m.Groups[1].Value) : -1;
+    }
+
+    public static int Earned() { try { int n; return File.Exists(StarsPath) && int.TryParse(File.ReadAllText(StarsPath).Trim(), out n) ? n : 0; } catch (Exception) { return 0; } }
+    public static int Spent() { try { return File.Exists(AvatarPath) ? Math.Max(0, Number(File.ReadAllText(AvatarPath), "spent")) : 0; } catch (Exception) { return 0; } }
+    public static int Balance() { return Math.Max(0, Earned() - Spent()); }
+
+    static void Save(string path, byte[] data)
+    {
+        lock (gate)
+        {
+            Directory.CreateDirectory(Dir);
+            string tmp = path + ".tmp";
+            File.WriteAllBytes(tmp, data);
+            if (File.Exists(path)) File.Delete(path);
+            File.Move(tmp, path);
+        }
+    }
+
+    static void Serve(TcpClient client)
+    {
+        try
+        {
+            using (client)
+            {
+                client.ReceiveTimeout = 5000; client.SendTimeout = 5000;
+                var stream = client.GetStream();
+                // Headers, then a body of Content-Length bytes (at most 3 MB).
+                var buf = new MemoryStream(); var chunk = new byte[16384]; int headerEnd = -1;
+                while (headerEnd < 0)
+                {
+                    int n = stream.Read(chunk, 0, chunk.Length); if (n <= 0) return;
+                    buf.Write(chunk, 0, n);
+                    headerEnd = IndexOf(buf.GetBuffer(), (int)buf.Length);
+                    if (headerEnd < 0 && buf.Length > 65536) return;
+                }
+                string head = Encoding.ASCII.GetString(buf.GetBuffer(), 0, headerEnd);
+                string[] lines = head.Split(new[] { "\r\n" }, StringSplitOptions.None);
+                string[] first = lines[0].Split(' ');
+                if (first.Length < 2) return;
+                string method = first[0].ToUpperInvariant(), path = first[1].Split('?')[0];
+                int length = 0;
+                foreach (var l in lines) if (l.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase)) int.TryParse(l.Substring(15).Trim(), out length);
+                if (length < 0 || length > 3 * 1024 * 1024) { Reply(stream, 413, "{}"); return; }
+                int have = (int)buf.Length - (headerEnd + 4);
+                var body = new byte[length];
+                Array.Copy(buf.GetBuffer(), headerEnd + 4, body, 0, Math.Min(have, length));
+                while (have < length) { int n = stream.Read(body, have, length - have); if (n <= 0) break; have += n; }
+                string text = Encoding.UTF8.GetString(body, 0, Math.Min(have, length));
+
+                if (method == "OPTIONS") { Reply(stream, 204, ""); return; }
+                if (method == "GET" && path == "/avatar") { Reply(stream, 200, File.Exists(AvatarPath) ? File.ReadAllText(AvatarPath, Encoding.UTF8) : "null"); return; }
+                if (method == "GET" && path == "/stars") { Reply(stream, 200, "{\"earned\":" + Earned() + ",\"spent\":" + Spent() + ",\"balance\":" + Balance() + "}"); return; }
+                if (method == "POST" && path == "/stars")
+                {
+                    int earned = Number(text, "earned");
+                    if (earned < 0) { Reply(stream, 400, "{}"); return; }
+                    if (earned != Earned()) { Save(StarsPath, Encoding.ASCII.GetBytes(earned.ToString())); Changed(); }
+                    Reply(stream, 200, "{\"ok\":true}"); return;
+                }
+                if (method == "POST" && path == "/avatar")
+                {
+                    string t = text.Trim();
+                    if (!t.StartsWith("{") || !t.EndsWith("}") || t.Length > 65536 || t.IndexOf("\"design\"", StringComparison.Ordinal) < 0) { Reply(stream, 400, "{}"); return; }
+                    Save(AvatarPath, Encoding.UTF8.GetBytes(t));
+                    int earned = Number(t, "earned");
+                    if (earned >= 0 && earned != Earned()) Save(StarsPath, Encoding.ASCII.GetBytes(earned.ToString()));
+                    Changed(); Reply(stream, 200, "{\"ok\":true}"); return;
+                }
+                if (method == "POST" && path == "/portrait")
+                {
+                    const string prefix = "data:image/png;base64,";
+                    string t = text.Trim();
+                    if (!t.StartsWith(prefix)) { Reply(stream, 400, "{}"); return; }
+                    byte[] png;
+                    try { png = Convert.FromBase64String(t.Substring(prefix.Length)); } catch (FormatException) { Reply(stream, 400, "{}"); return; }
+                    if (png.Length < 8 || png[0] != 0x89 || png[1] != 0x50 || png[2] != 0x4E || png[3] != 0x47) { Reply(stream, 400, "{}"); return; }
+                    Save(PortraitPath, png); Changed(); Reply(stream, 200, "{\"ok\":true}"); return;
+                }
+                Reply(stream, 404, "{}");
+            }
+        }
+        catch (Exception ex) { Log("serve: " + ex.Message); }
+    }
+
+    static int IndexOf(byte[] b, int len)
+    {
+        for (int i = 0; i + 3 < len; i++) if (b[i] == 13 && b[i + 1] == 10 && b[i + 2] == 13 && b[i + 3] == 10) return i;
+        return -1;
+    }
+
+    static void Reply(Stream s, int code, string body)
+    {
+        byte[] data = Encoding.UTF8.GetBytes(body);
+        string status = code == 200 ? "OK" : code == 204 ? "No Content" : code == 404 ? "Not Found" : code == 413 ? "Too Large" : "Bad Request";
+        string head = "HTTP/1.1 " + code + " " + status + "\r\n" +
+            "Content-Type: application/json; charset=utf-8\r\n" +
+            "Access-Control-Allow-Origin: *\r\n" +
+            "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" +
+            "Access-Control-Allow-Headers: Content-Type\r\n" +
+            "Access-Control-Allow-Private-Network: true\r\n" +
+            "Cache-Control: no-store\r\n" +
+            "Content-Length: " + data.Length + "\r\nConnection: close\r\n\r\n";
+        byte[] h = Encoding.ASCII.GetBytes(head);
+        s.Write(h, 0, h.Length); if (data.Length > 0) s.Write(data, 0, data.Length); s.Flush();
+    }
+
+    static void Changed() { var c = changed; if (c != null) c(); }
+
+    static void Log(string message)
+    {
+        try
+        {
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "KidTablet");
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir, "service.log"), DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + "  " + message + Environment.NewLine);
+        }
+        catch (Exception) { }
     }
 }
 
@@ -2087,8 +2388,12 @@ function Sync-KidUserSettings {
             Set-RegList "$edgePol\URLBlocklist" @('*')
             # The narrator voice service is reachable whenever a voice is configured (Story Maker uses it too).
             $voiceHost = @(Get-KidNarratorVoice | ForEach-Object { $_.Host })
-            Set-RegList "$edgePol\URLAllowlist" @(@($c.AllowedDomains) + $voiceHost | Select-Object -Unique)
+            Set-RegList "$edgePol\URLAllowlist" @(@($c.AllowedDomains) + $voiceHost + $script:KidServiceUrl | Select-Object -Unique)
         }
+        # Her offline apps talk to the home screen's service on this tablet (stars and her avatar). Edge asks before a
+        # page reaches a local address; her own app files are allowed without asking.
+        Set-RegList "$edgePol\LocalNetworkAccessAllowedForUrls" @('file:///*')
+        Set-RegList "$edgePol\InsecurePrivateNetworkRequestsAllowedForUrls" @('file:///*')
         $cdm = "$root\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"
         foreach ($n in 'RotatingLockScreenOverlayEnabled', 'SubscribedContent-338387Enabled',
                        'SubscribedContent-338388Enabled', 'SubscribedContent-338389Enabled',

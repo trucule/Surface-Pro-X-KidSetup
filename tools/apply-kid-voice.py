@@ -24,7 +24,10 @@ for f in targets:
     if name in SKIP:
         continue
     s = open(f, encoding='utf-8').read()
-    if 'speechSynthesis' not in s and 'page.html' not in f and '.src.html' not in f:
+    # A folder app may speak from its own script files (apps/my-avatar/avatar.js).
+    own = ''.join(open(j, encoding='utf-8').read() for j in glob.glob(os.path.join(os.path.dirname(f), '*.js'))
+                  if f.endswith('index.html') and not j.endswith('.min.js') and os.path.basename(j) != 'voice-config.js')
+    if 'speechSynthesis' not in s + own and 'page.html' not in f and '.src.html' not in f:
         continue
     if pat.search(s):
         new = pat.sub(lambda m: block, s, count=1)

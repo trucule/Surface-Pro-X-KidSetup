@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<script src="voice-config.js"></script>
+<script>/* KID-VOICE START */
+/* Kid Voice: the narrator voice for every offline app.
+   When voice-config.js (written on the tablet from the KidTablet .env) names an Azure Speech key, every line an app
+   speaks through speechSynthesis is spoken by the Azure kid voice instead (en-US-AnaNeural unless NARRATOR_VOICE
+   says otherwise). Clips are kept in IndexedDB, so a line heard once plays again at once and without the internet.
+   Without a config, or when Azure does not answer in time, the line goes to the Windows voice as before.
+   The apps keep calling speechSynthesis.speak/cancel; this layer stands in for them and fires the same
+   utterance events (start, boundary, end, error), so word highlighting and "then do the next thing" keep working.
+   tools/apply-kid-voice.py copies this file into each app between the KID-VOICE markers. Story Maker is left out:
+   it has its own cast of voices. */
+(function () {
+  'use strict';
+  var cfg = window.KID_TTS;
+  if (!cfg || !cfg.key || !window.speechSynthesis || typeof window.SpeechSynthesisUtterance === 'undefined') return;
+  var ss = window.speechSynthesis;
+  var orig = { speak: ss.speak.bind(ss), cancel: ss.cancel.bind(ss), pause: ss.pause.bind(ss), resume: ss.resume.bind(ss) };
+  var VOICE = cfg.voice || 'en-US-AnaNeural', REGION = cfg.region || 'eastus', WAIT_MS = cfg.waitMs || 4000;
+  var ctx = null, current = null, queue = [], seq = 0, mem = new Map(), dbp = null, down = 0;
+
+  function audio() {
+    if (!ctx) { try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { ctx = null; } }
+    if (ctx && ctx.state === 'suspended') { try { ctx.resume(); } catch (e) {} }
+    return ctx;
+  }
+  ['pointerdown', 'keydown', 'touchstart'].forEach(function (t) { window.addEventListener(t, audio, { capture: true, passive: true }); });
+
+  function db() {
+    if (dbp) return dbp;
+    dbp = new Promise(function (res) {
+      try {
+        var r = indexedDB.open('kid-voice', 1);
+        r.onupgradeneeded = function () { r.result.createObjectStore('clips'); };
+        r.onsuccess = function () { res(r.result); };
+        r.onerror = function () { res(null); };
+      } catch (e) { res(null); }
+    });
+    return dbp;
+  }
+  function dbGet(k) { return db().then(function (d) { return new Promise(function (res) { if (!d) return res(null); try { var q = d.transaction('clips').objectStore('clips').get(k); q.onsuccess = function () { res(q.result || null); }; q.onerror = function () { res(null); }; } catch (e) { res(null); } }); }); }
+  function dbPut(k, v) { db().then(function (d) { if (!d) return; try { d.transaction('clips', 'readwrite').objectStore('clips').put(v, k); } catch (e) {} }); }
+
+  function clean(t) {
+    return String(t || '').replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}\u{200D}]/gu, '').replace(/\s+/g, ' ').trim();
+  }
+  function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function rateOf(u) { var r = Number(u.rate) || 1; return Math.round((Math.max(0.5, Math.min(2, r)) - 1) * 100); }
+
+  // Azure REST synthesis, with a time limit so a slow network falls back to the Windows voice.
+  function fetchClip(text, rate) {
+    var ssml = '<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="en-US"><voice name="' + VOICE + '">' +
+      '<prosody rate="' + (rate >= 0 ? '+' : '') + rate + '%">' + esc(text) + '</prosody></voice></speak>';
+    var ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = setTimeout(function () { if (ac) ac.abort(); }, WAIT_MS);
+    return fetch('https://' + REGION + '.tts.speech.microsoft.com/cognitiveservices/v1', {
+      method: 'POST', signal: ac ? ac.signal : undefined,
+      headers: { 'Ocp-Apim-Subscription-Key': cfg.key, 'Content-Type': 'application/ssml+xml', 'X-Microsoft-OutputFormat': 'audio-24khz-48kbitrate-mono-mp3' },
+      body: ssml
+    }).then(function (r) { clearTimeout(timer); return r.ok ? r.arrayBuffer() : null; })
+      .catch(function () { clearTimeout(timer); return null; });
+  }
+  function decode(bytes) {
+    var c = audio(); if (!c) return Promise.resolve(null);
+    return new Promise(function (res) { try { c.decodeAudioData(bytes.slice(0), function (b) { res(b); }, function () { res(null); }); } catch (e) { res(null); } });
+  }
+  // One AudioBuffer per line and rate: memory, then IndexedDB, then Azure.
+  function clip(text, rate) {
+    var k = VOICE + '|' + rate + '|' + text;
+    if (mem.has(k)) return mem.get(k);
+    var p = dbGet(k).then(function (saved) {
+      if (saved) return decode(saved);
+      if (Date.now() < down) return null;   // Azure failed a moment ago; do not wait on it again yet
+      return fetchClip(text, rate).then(function (bytes) {
+        if (!bytes) { down = Date.now() + 30000; return null; }
+        dbPut(k, bytes); return decode(bytes);
+      });
+    }).then(function (b) { if (!b) mem.delete(k); return b; });
+    mem.set(k, p);
+    return p;
+  }
+
+  function fire(u, type, extra) {
+    var ev;
+    try { ev = new SpeechSynthesisEvent(type, Object.assign({ utterance: u, charIndex: 0, elapsedTime: 0, name: '' }, extra || {})); }
+    catch (e) { ev = new Event(type); Object.assign(ev, { utterance: u, charIndex: 0, elapsedTime: 0, name: '' }, extra || {}); }
+    if (type === 'error' && !('error' in ev)) { try { Object.defineProperty(ev, 'error', { value: (extra && extra.error) || 'interrupted' }); } catch (e) {} }
+    try { u.dispatchEvent(ev); } catch (e) {}
+  }
+
+  function playNext() {
+    if (current || !queue.length) return;
+    var item = queue.shift(), my = ++seq, u = item.u;
+    current = item;
+    var text = clean(u.text), rate = rateOf(u);
+    if (!text) { current = null; fire(u, 'end'); playNext(); return; }
+    clip(text, rate).then(function (buf) {
+      var c = audio();
+      if (!buf || !c || c.state === 'running') return buf;
+      // Audio starts suspended until the page may play sound; give resume() a moment.
+      return Promise.race([c.resume().catch(function () {}), new Promise(function (r) { setTimeout(r, 300); })]).then(function () { return buf; });
+    }).then(function (buf) {
+      if (my !== seq) return;
+      var c = audio();
+      if (!buf || !c || c.state !== 'running') {   // no clip, or audio not allowed yet: the Windows voice says it
+        current = null; item.fallback = true; orig.speak(u); playNext(); return;
+      }
+      var src = c.createBufferSource(), gain = c.createGain();
+      gain.gain.value = u.volume == null ? 1 : Math.max(0, Math.min(1, Number(u.volume)));
+      src.buffer = buf; src.connect(gain); gain.connect(c.destination);
+      item.src = src; item.timers = [];
+      // Word boundaries spread over the clip by letter position, for apps that light up each word.
+      var full = String(u.text || ''), re = /\S+/g, m, dur = buf.duration;
+      while ((m = re.exec(full))) {
+        (function (ci, len) {
+          item.timers.push(setTimeout(function () { if (my === seq) fire(u, 'boundary', { name: 'word', charIndex: ci, charLength: len, elapsedTime: dur * (ci / Math.max(1, full.length)) }); }, 1000 * dur * (ci / Math.max(1, full.length))));
+        })(m.index, m[0].length);
+      }
+      src.onended = function () {
+        if (my !== seq) return;
+        item.timers.forEach(clearTimeout); current = null;
+        fire(u, 'end', { charIndex: full.length, elapsedTime: dur });
+        playNext();
+      };
+      fire(u, 'start');
+      src.start();
+    });
+  }
+
+  ss.speak = function (u) {
+    if (!(u instanceof SpeechSynthesisUtterance)) return orig.speak(u);
+    queue.push({ u: u });
+    playNext();
+  };
+  ss.cancel = function () {
+    seq++;
+    var was = current; current = null;
+    var dropped = queue.splice(0);
+    if (was) { if (was.src) { try { was.src.onended = null; was.src.stop(); } catch (e) {} } if (was.timers) was.timers.forEach(clearTimeout); if (!was.fallback) fire(was.u, 'error', { error: 'interrupted' }); }
+    dropped.forEach(function (d) { fire(d.u, 'error', { error: 'canceled' }); });
+    orig.cancel();
+  };
+  ss.pause = function () { if (ctx && current && current.src) { try { ctx.suspend(); } catch (e) {} } orig.pause(); };
+  ss.resume = function () { if (ctx) { try { ctx.resume(); } catch (e) {} } orig.resume(); };
+  try {
+    var proto = Object.getPrototypeOf(ss);
+    var od = function (n) { var d = Object.getOwnPropertyDescriptor(proto, n); return d && d.get ? d.get.bind(ss) : function () { return false; }; };
+    var sp = od('speaking'), pe = od('pending');
+    Object.defineProperty(ss, 'speaking', { configurable: true, get: function () { return !!current || sp(); } });
+    Object.defineProperty(ss, 'pending', { configurable: true, get: function () { return queue.length > 0 || pe(); } });
+  } catch (e) {}
+  window.KID_VOICE = { voice: VOICE, region: REGION, clip: clip, active: true };
+})();
+/* KID-VOICE END */</script>
+<script>/* KID-STARS START */
+// Kid stars: adds up the stars she has earned in every app and tells the home screen.
+// All of her offline apps are local files, which share one browser storage, so any app can read every app's saved
+// progress. The total goes to the home screen's small local service (KidHome, http://127.0.0.1:47821), which shows it
+// next to her avatar. Put into every app by tools/apply-kid-stars.py; edit this file and run that tool again.
+(function () {
+  if (window.KID_STARS) return;
+  var PORT = 47821, BASE = 'http://127.0.0.1:' + PORT;
+  // What counts as stars in an app's saved data:
+  //   an object with a number "stars"                     (most games: their progress object)
+  //   an object of objects with a number "stars" each      (Level Up: one per subject)
+  //   a number saved under a key ending in "-stars"        (Story Maker)
+  //   a list saved under a key starting with "lab-done-"   (Chemistry Lab, Kitchen Lab: one star per experiment)
+  function starsIn(key, raw) {
+    var v; try { v = JSON.parse(raw); } catch (e) { return 0; }
+    var n = function (x) { return typeof x === 'number' && isFinite(x) && x > 0 ? Math.floor(x) : 0; };
+    if (/^lab-done-/.test(key)) return Array.isArray(v) ? v.length : 0;
+    if (/-stars$/.test(key)) return n(v);
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return 0;
+    if (typeof v.stars === 'number') return n(v.stars);
+    var sum = 0;
+    for (var k in v) if (v[k] && typeof v[k] === 'object' && typeof v[k].stars === 'number') sum += n(v[k].stars);
+    return sum;
+  }
+  function earned() {
+    var total = 0, per = {};
+    try {
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i); if (!k || /^kid-avatar/.test(k)) continue;
+        var s = starsIn(k, localStorage.getItem(k)); if (s) { per[k] = s; total += s; }
+      }
+    } catch (e) {}
+    return { total: total, per: per };
+  }
+  var last = -1, timer = null;
+  function report(force) {
+    var e = earned();
+    if (!force && e.total === last) return Promise.resolve(e.total);
+    last = e.total;
+    // A plain text body keeps this a simple request (no preflight). A home screen that is not listening is fine.
+    try {
+      return fetch(BASE + '/stars', { method: 'POST', body: JSON.stringify({ earned: e.total }) })
+        .then(function () { return e.total; }, function () { return e.total; });
+    } catch (err) { return Promise.resolve(e.total); }
+  }
+  // Report after any save, a moment later so a burst of saves sends one report.
+  try {
+    var set = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (k, v) {
+      set.apply(this, arguments);
+      if (this === window.localStorage && !/^kid-avatar/.test(String(k))) { clearTimeout(timer); timer = setTimeout(report, 800); }
+    };
+  } catch (e) {}
+  window.KID_STARS = { earned: function () { return earned().total; }, breakdown: function () { return earned().per; }, report: report, starsIn: starsIn, base: BASE };
+  setTimeout(function () { report(true); }, 1500);
+})();
+/* KID-STARS END */</script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Avatar</title>
+<style>
+  :root { --ink: #2B2140; --card: #FFF9E8; --accent: #8A3FFC; }
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); background: #1d1640; }
+  body { touch-action: none; user-select: none; -webkit-user-select: none; }
+  button { font-family: inherit; color: var(--ink); cursor: pointer; }
+  #app { position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr; grid-template-columns: 132px minmax(0, 1fr) 430px; }
+  /* The right 210px of the header stays clear: the Home pill sits there. */
+  header { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; padding: 10px 210px 10px 16px; background: linear-gradient(90deg, #8A3FFC, #FF4F8B, #FFB703); }
+  header h1 { margin: 0; font-size: 27px; font-weight: 900; color: #fff; text-shadow: 0 3px 0 #2B2140; white-space: nowrap; }
+  #balance { font-size: 24px; font-weight: 900; background: #fff; border: 3px solid var(--ink); border-radius: 999px; padding: 4px 16px; white-space: nowrap; }
+  #balance small { font-size: 15px; font-weight: 700; color: #6b5f80; margin-left: 6px; }
+  #saved { margin-left: auto; color: #fff; font-weight: 800; font-size: 16px; opacity: 0; transition: opacity .3s; white-space: nowrap; }
+  #saved.on { opacity: 1; }
+  nav { background: #2B2140; display: flex; flex-direction: column; gap: 6px; padding: 8px 8px; overflow-y: auto; touch-action: pan-y; }
+  nav button { border: 0; border-radius: 16px; background: #3d3160; color: #fff; padding: 8px 4px; font-size: 15px; font-weight: 800; display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 66px; }
+  nav button .e { font-size: 28px; line-height: 1.1; }
+  nav button.on { background: #FFE45C; color: var(--ink); }
+  nav .sep { height: 2px; background: #4b3f73; margin: 4px 6px; border-radius: 2px; }
+  #stage { position: relative; min-width: 0; overflow: hidden; background: #cfe3ff; }
+  #stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #views { position: absolute; left: 12px; bottom: 12px; display: flex; gap: 8px; z-index: 2; }
+  #views button, #turn button { border: 3px solid var(--ink); background: #ffffffdd; border-radius: 999px; font-size: 17px; font-weight: 800; padding: 8px 14px; }
+  #views button.on { background: #FFE45C; }
+  #turn { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 8px; z-index: 2; }
+  #tryon { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); z-index: 3; display: none; align-items: center; gap: 12px; background: #fff; border: 4px solid var(--ink); border-radius: 22px; padding: 8px 10px 8px 18px; box-shadow: 0 5px 0 #2B2140; white-space: nowrap; }
+  #tryon.on { display: flex; }
+  #tryon b { font-size: 22px; }
+  #tryon button { border: 3px solid var(--ink); border-radius: 16px; font-size: 20px; font-weight: 900; padding: 8px 16px; }
+  #buy { background: #22D35B; }
+  #buy.short { background: #d9d3e6; color: #6b5f80; }
+  #takeoff { background: #fff; }
+  aside { background: var(--card); border-left: 5px solid var(--ink); overflow-y: auto; touch-action: pan-y; padding: 10px 16px 30px; }
+  aside h2 { margin: 6px 0 6px; font-size: 24px; }
+  aside h3 { margin: 16px 0 8px; font-size: 18px; color: #5a4f6e; }
+  .row { display: flex; flex-wrap: wrap; gap: 9px; }
+  .sw { width: 50px; height: 50px; border-radius: 50%; border: 4px solid #fff; box-shadow: 0 0 0 3px #2B214055; position: relative; padding: 0; }
+  .sw.on { box-shadow: 0 0 0 4px var(--ink); transform: scale(1.06); }
+  .sw .p { position: absolute; right: -8px; bottom: -8px; background: #fff; border: 2px solid var(--ink); border-radius: 999px; font-size: 11px; font-weight: 900; padding: 0 4px; }
+  .opt { border: 3px solid var(--ink); background: #fff; border-radius: 16px; padding: 7px 12px; font-size: 17px; font-weight: 800; min-height: 48px; }
+  .opt.on { background: #FFE45C; }
+  .item { width: 120px; border: 3px solid var(--ink); background: #fff; border-radius: 18px; padding: 8px 6px; display: flex; flex-direction: column; align-items: center; gap: 2px; position: relative; }
+  .item .e { font-size: 38px; line-height: 1.1; }
+  .item .n { font-size: 15px; font-weight: 800; text-align: center; }
+  .item .p { font-size: 15px; font-weight: 900; color: #8A3FFC; }
+  .item.owned .p { color: #1e9e4a; }
+  .item.on { background: #FFE45C; }
+  .item.trying { outline: 4px dashed #8A3FFC; outline-offset: 2px; }
+  #modal { position: fixed; inset: 0; background: #2B214088; display: none; align-items: center; justify-content: center; z-index: 9; }
+  #modal.on { display: flex; }
+  #modal .box { background: #fff; border: 5px solid var(--ink); border-radius: 26px; padding: 22px 26px; max-width: 520px; text-align: center; box-shadow: 0 8px 0 #2B2140; }
+  #modal p { font-size: 26px; font-weight: 800; margin: 0 0 16px; }
+  #modal button { border: 4px solid var(--ink); border-radius: 18px; font-size: 24px; font-weight: 900; padding: 10px 22px; margin: 0 6px; background: #FFE45C; }
+  #modal button.no { background: #fff; }
+  @media (max-width: 1200px) { #app { grid-template-columns: 112px minmax(0, 1fr) 360px; } .item { width: 100px; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>🧍 My Avatar</h1>
+    <span id="balance">⭐ 0</span>
+    <span id="saved">Saved to your home screen ✓</span>
+  </header>
+  <nav id="nav"></nav>
+  <div id="stage">
+    <div id="tryon"><b id="tryname"></b><button id="buy">Buy</button><button id="takeoff">Take off</button></div>
+    <div id="views"><button data-v="face">🙂 Face</button><button data-v="body">🧍 Body</button></div>
+    <div id="turn"><button data-t="-1">⟲</button><button data-t="1">⟳</button></div>
+  </div>
+  <aside id="panel"></aside>
+</div>
+<div id="modal"><div class="box"><p id="mtext"></p><div id="mbtns"></div></div></div>
+<script src="three.min.js"></script>
+<script src="avatar.js"></script>
+</body>
+</html>
