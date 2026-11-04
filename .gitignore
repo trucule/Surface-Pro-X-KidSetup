@@ -2,3 +2,4 @@ voices/cache/
 .env
 config.js
 _to_delete*
+__pycache__/
