@@ -65,8 +65,8 @@ SLIDERS.update({'build-': [('macrodetails/universal-female-child-averagemuscle-m
 EXPRESSIONS = ['eyeBlinkLeft', 'eyeBlinkRight', 'mouthSmileLeft', 'mouthSmileRight', 'jawOpen', 'cheekSquintLeft', 'cheekSquintRight',
                'browInnerUp', 'mouthDimpleLeft', 'mouthDimpleRight', 'mouthClose']
 # Morphs that change the shape of the head (hair, hats, glasses and eyebrows follow them) or the body (clothes follow).
-HEAD_MORPHS = [k for k in SLIDERS if k.split('-')[0].split('+')[0] in ('shape', 'faceWidth', 'ears', 'browHeight', 'eyeSize', 'eyeSpacing')]
-BODY_MORPHS = ['build-', 'build+']
+HEAD_MORPHS = ['boy'] + [k for k in SLIDERS if k.split('-')[0].split('+')[0] in ('shape', 'faceWidth', 'ears', 'browHeight', 'eyeSize', 'eyeSpacing')]
+BODY_MORPHS = ['boy', 'build-', 'build+']
 POSES = {'stand': 'callharvey3d_standingnatural', 'wave': 'callharvey3d_salute', 'hips': 'drednicolson_arms_akimbo', 'hero': 'elvs_super_him_standing_pose_1',
          'shy': 'callharvey3d_standingmodestembarrassed', 'peace': 'gpedroso_peace_and_love', 'pose': 'sohh_posing2', 'fly': 'fly01'}
 SKINS = {'light': 'young_caucasian_female', 'freckles': 'toigo_light_skin_female_freckles', 'medium': 'young_asian_female', 'deep': 'young_african_female'}
@@ -138,6 +138,27 @@ def make_key(obj, name, parts):
     for n in temp: obj.shape_key_remove(obj.data.shape_keys.key_blocks[n])
     key.value = 0.0
     return key
+
+def make_gender_key(base, info, st):
+    """A shape key 'boy': the same child built as a boy, minus the girl, so one body (and every piece of clothing and hair
+    fitted to it) can be either."""
+    before = set(bpy.data.objects)
+    other = dict(info); other['phenotype'] = dict(info['phenotype'], gender=1.0)
+    other.update({'eyes': '', 'eyelashes': '', 'teeth': '', 'eyebrows': '', 'rig': '', 'clothes': [], 'proxy': ''})
+    boy = HumanService.deserialize_from_dict(other, st)
+    TargetService.bake_targets(boy)
+    # Boys of the same settings come out a few centimetres taller; keep her height (the skeleton does not change with
+    # a shape key), so the key holds only the differences in shape.
+    bc, gc = coords(boy), coords(base)
+    k = (gc[:, 2].max() - gc[:, 2].min()) / (bc[:, 2].max() - bc[:, 2].min())
+    floor = np.array([0, 0, bc[:, 2].min()], dtype=np.float32)
+    bc = floor + (bc - floor) * k + np.array([0, 0, gc[:, 2].min() - bc[:, 2].min()], dtype=np.float32)
+    diff = bc - gc
+    for o in [o for o in bpy.data.objects if o not in before]: bpy.data.objects.remove(o, do_unlink=True)
+    key = base.shape_key_add(name='boy', from_mix=False)
+    key.data.foreach_set('co', (coords(base) + diff).reshape(-1))
+    key.value = 0.0
+    print('GENDER KEY', round(float(np.abs(diff).max()), 4))
 
 def coords(obj):
     a = np.empty(len(obj.data.vertices) * 3, dtype=np.float32); obj.data.vertices.foreach_get('co', a); return a.reshape(-1, 3)
@@ -263,6 +284,7 @@ def main():
     # The age, weight and other body settings become the rest shape; sliders and expressions are added as shape keys.
     TargetService.bake_targets(base)
     base.shape_key_add(name='Basis', from_mix=False)
+    make_gender_key(base, info, st)
     for name, ps in SLIDERS.items(): make_key(base, name, ps)
     for e in EXPRESSIONS: make_key(base, e, [('faceunits/' + e, 1)]) if os.path.exists(os.path.join(DATA, 'targets', 'faceunits', e + '.target')) else print('NO FACEUNIT', e)
     body_keys = [k.name for k in base.data.shape_keys.key_blocks if k.name != 'Basis']

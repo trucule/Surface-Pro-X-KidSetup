@@ -67,7 +67,7 @@ try:
         # The realistic avatar loads its model files as it needs them; wait until what she is wearing is in.
         def ready(page=None, textures=False):
             (page or pg).wait_for_function("window.MY_AVATAR && MY_AVATAR.real() && (MY_AVATAR.real().failed || (MY_AVATAR.real().ready && !MY_AVATAR.real().need.length" + (" && MY_AVATAR.real().textures" if textures else "") + "))", timeout=180000)
-            (page or pg).wait_for_timeout(150)
+            (page or pg).wait_for_timeout(40)
         def put(k, v): pg.evaluate('([k, v]) => MY_AVATAR.set(k, v)', [k, v]); ready()
         pg.goto(AVATAR); pg.evaluate('localStorage.clear()'); pg.reload(); ready(textures=True); pg.wait_for_timeout(800)
         check(pg.evaluate('!!window.KID_STARS && !!window.MY_AVATAR'), 'app loads with the star counter')
@@ -101,7 +101,8 @@ try:
                 shapes.append(os.path.relpath(f, ROOT))
         check(not shapes, f'apps that keep stars save them in a shape the counter reads {shapes}')
 
-        # Every look builds.
+        # Every look builds (a small window, so the software renderer used for tests keeps up).
+        pg.set_viewport_size({'width': 900, 'height': 600})
         looks = pg.evaluate('MY_AVATAR.LOOK')
         for k, opts in looks.items():
             for v, _ in opts: put(k, v)
@@ -125,35 +126,56 @@ try:
 
         # Trying on is free; buying needs stars.
         s0 = pg.evaluate('MY_AVATAR.state()')
-        pg.evaluate("MY_AVATAR.setCat('hat')"); pg.click('.item[data-id="crown"]'); pg.wait_for_timeout(600)
+        pg.evaluate("MY_AVATAR.setCat('hat')"); pg.click('.item[data-id="bow"]'); pg.wait_for_timeout(600)
         s1 = pg.evaluate('MY_AVATAR.state()')
-        check(pg.is_visible('#tryon') and s1['spent'] == 0 and s1['design']['hat'] is None, 'trying the crown on shows it without buying it')
+        check(pg.is_visible('#tryon') and s1['spent'] == 0 and s1['design']['hat'] is None, 'trying the bow on shows it without buying it')
         pg.screenshot(path=str(SHOTS / 'avatar-tryon.png'))
         pg.click('#buy'); pg.wait_for_timeout(200); pg.screenshot(path=str(SHOTS / 'avatar-buy.png'))
         pg.click('#mbtns button'); pg.wait_for_timeout(400)
         s2 = pg.evaluate('MY_AVATAR.state()')
-        check(s2['spent'] == 25 and 'crown' in s2['owned'] and s2['design']['hat'] == 'crown' and pg.evaluate('MY_AVATAR.balance()') == 36, f'buying the crown spends 25 stars and puts it on {s2["spent"]}')
-        check(not pg.evaluate("MY_AVATAR.buy('princess')"), 'the princess gown (40) cannot be bought with 36 stars')
-        pg.evaluate("MY_AVATAR.tryOn('princess')"); pg.wait_for_timeout(300)
+        check(s2['spent'] == 35 and 'bow' in s2['owned'] and s2['design']['hat'] == 'bow' and pg.evaluate('MY_AVATAR.balance()') == 26, f'buying the bow spends 35 stars and puts it on {s2["spent"]}')
+        check(not pg.evaluate("MY_AVATAR.buy('cap')"), 'the ball cap (40) cannot be bought with 26 stars')
+        pg.evaluate("MY_AVATAR.tryOn('cap')"); pg.wait_for_timeout(300)
         check('need' in pg.inner_text('#buy'), 'trying on something too dear says how many more stars she needs')
         pg.click('#buy'); pg.wait_for_timeout(200)
         check('more stars' in pg.inner_text('#mtext'), 'tapping buy without enough stars explains instead of buying')
         pg.click('#mbtns button'); pg.evaluate('MY_AVATAR.stopTrying()')
-        pg.click('.item[data-id="crown"]'); pg.wait_for_timeout(200)
-        check(pg.evaluate('MY_AVATAR.state().design.hat') is None and pg.evaluate('MY_AVATAR.state().spent') == 25, 'tapping an owned crown takes it off without spending again')
-        pg.click('.item[data-id="crown"]')
+        pg.click('.item[data-id="bow"]'); pg.wait_for_timeout(200)
+        check(pg.evaluate('MY_AVATAR.state().design.hat') is None and pg.evaluate('MY_AVATAR.state().spent') == 35, 'tapping an owned bow takes it off without spending again')
+        pg.click('.item[data-id="bow"]')
 
         # Every shop item builds (a rich test balance).
-        pg.evaluate("localStorage.setItem('word-wizard-v1', JSON.stringify({ stars: 5000 }))")
+        pg.evaluate("localStorage.setItem('word-wizard-v1', JSON.stringify({ stars: 100000 }))")
         items = pg.evaluate('MY_AVATAR.SHOP.map(i => i.id)')
         for it in items:
             ok = pg.evaluate('id => MY_AVATAR.buy(id)', it)
-            if not ok and it != 'crown': fails.append('could not buy ' + it)
+            if not ok and it != 'bow': fails.append('could not buy ' + it)
         check(not pg.evaluate('MY_AVATAR.errors'), f'every shop item ({len(items)}) builds {pg.evaluate("MY_AVATAR.errors")[:3]}')
         for slot in ['outfit', 'place', 'pet', 'back', 'neck', 'hat', 'shades', 'sparkle']:
             for it in pg.evaluate('s => MY_AVATAR.SHOP.filter(i => i.slot === s).map(i => i.id)', slot):
                 put(slot, it)
         check(not pg.evaluate('MY_AVATAR.errors') and not errs, 'every item can be put on')
+        n = len(items)
+        check(n >= 180, f'the shop has lots to buy ({n} items)')
+        prices = sorted(pg.evaluate('MY_AVATAR.SHOP.map(i => i.price)'))
+        check(prices[0] >= 30 and prices[-1] >= 600, f'prices run from small to big goals ({prices[0]} to {prices[-1]})')
+        # A boy: the same model with the boy shape on, and every piece of clothing following it.
+        put('outfit', None); put('gender', 'boy')
+        boy = pg.evaluate("REAL_AVATAR._body().all.every(m => !m.morphTargetDictionary || m.morphTargetDictionary.boy === undefined || m.morphTargetInfluences[m.morphTargetDictionary.boy] === 1)")
+        check(boy and not pg.evaluate('MY_AVATAR.errors'), 'choosing Boy reshapes the body and everything worn with it')
+        pg.screenshot(path=str(SHOTS / 'avatar-boy.png')); put('gender', 'girl')
+        # Something to hold goes in her hand; app colors change the app.
+        put('hold', 'wand')
+        check(pg.evaluate("(() => { let o = null; REAL_AVATAR._body().root.traverse(x => { if (/wrist/.test(x.name) && x.children.some(c => c.isGroup)) o = x; }); return !!o; })()"), 'a held item is in her hand')
+        put('theme', 'th-ocean')
+        check('1D6FB8' in pg.evaluate("getComputedStyle(document.documentElement).getPropertyValue('--hdr')"), 'app colors change the header')
+        put('theme', None); put('hold', None)
+        put('frame', 'fr-gold'); put('badgebg', 'bg-sky')
+        from PIL import Image as _I
+        pic = _I.open(io.BytesIO(base64.b64decode(pg.evaluate('MY_AVATAR.portrait()').split(',')[1]))).convert('RGBA')
+        check(pic.getpixel((192, 6))[3] > 200 and pic.getpixel((192, 40))[3] > 200, 'her picture gets the frame and background she bought')
+        pic.save(SHOTS / 'avatar-portrait-framed.png'); put('frame', None); put('badgebg', None)
+        pg.set_viewport_size({'width': 1440, 'height': 960})
         looks_for_shots = [
             ('avatar-park', "MY_AVATAR.set('outfit', null); MY_AVATAR.set('place', 'park'); MY_AVATAR.set('pet', 'cat'); MY_AVATAR.set('hat', 'flowers'); MY_AVATAR.set('back', 'fairy'); MY_AVATAR.set('sparkle', 'glitter'); MY_AVATAR.set('pose', 'wave'); MY_AVATAR.set('shades', null); MY_AVATAR.set('neck', 'necklace'); MY_AVATAR.setView('body')"),
             ('avatar-castle', "MY_AVATAR.set('outfit', 'princess'); MY_AVATAR.set('place', 'castle'); MY_AVATAR.set('pet', 'dragon'); MY_AVATAR.set('hat', 'tiara'); MY_AVATAR.set('back', null); MY_AVATAR.set('pose', 'peace'); MY_AVATAR.set('hair', 'hair-double-braid')"),
@@ -212,9 +234,12 @@ try:
             # Another app's new stars reach the home screen.
             ww = ctx.new_page(); ww.goto((APPS / 'word-wizard.html').as_uri()); ww.wait_for_timeout(2500)
             n0 = json.loads(get('/stars'))['earned']
-            ww.evaluate("localStorage.setItem('word-wizard-v1', JSON.stringify(Object.assign(JSON.parse(localStorage.getItem('word-wizard-v1')), { stars: 5003 })))")
-            ww.wait_for_timeout(2000)
-            check(json.loads(get('/stars'))['earned'] == n0 + 3, 'stars earned in Word Wizard reach the home screen')
+            ww.evaluate("localStorage.setItem('word-wizard-v1', JSON.stringify(Object.assign(JSON.parse(localStorage.getItem('word-wizard-v1')), { stars: 100003 })))")
+            for _ in range(30):
+                ww.wait_for_timeout(500)
+                if json.loads(get('/stars'))['earned'] == n0 + 3: break
+            got = json.loads(get('/stars'))['earned']
+            check(got == n0 + 3, f'stars earned in Word Wizard reach the home screen ({n0} then {got})')
             # Bad requests are refused.
             for path, body in [('/portrait', 'data:image/png;base64,AAAA'), ('/avatar', 'not json'), ('/stars', '{}')]:
                 try:

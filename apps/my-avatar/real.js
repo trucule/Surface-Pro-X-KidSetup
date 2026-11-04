@@ -105,6 +105,8 @@
   const loading = {};
   let body = null;             // { root, rig, mesh, parts, bones, mixer, clips, index, vid, scale, eyeY, ... }
   const tex = { skin: {}, eye: {} };
+  // Bones by their MakeHuman name (three.js drops the dots from node names: wrist.L is wristL).
+  const bone = n => body && (body.bones[n] || body.bones[T.PropertyBinding.sanitizeNodeName(n)]);
 
   function load(id) {
     if (cache[id] || loading[id]) return loading[id] || Promise.resolve();
@@ -156,13 +158,15 @@
       // Anchors for the drawn extras, kept relative to a bone so they follow every pose: a head frame (the drawn
       // head's units, radius 0.19, centred where the drawn head's centre would be) and a torso frame (the drawn
       // body's units, so its neck at height 1.13 lands on her neck and its shoulders on hers).
-      const wp = n => (body.bones[n] ? body.bones[n].getWorldPosition(new T.Vector3()) : null);
-      const neck = wp('neck01') || new T.Vector3(0, eyeY - headR * 1.5, 0), la = wp('upperarm01.L'), ra = wp('upperarm01.R');
-      const kTorso = (la && ra ? Math.abs(la.x - ra.x) / 2 : headR * 1.3) / 0.175;
+      const wp = n => (bone(n) ? bone(n).getWorldPosition(new T.Vector3()) : null);
+      // The drawn body's shoulders are 0.175 from its middle; hers are about 1.3 head radii (this keeps the drawn
+      // necklaces, wings and capes at the sizes they were fitted at).
+      const neck = wp('neck01') || new T.Vector3(0, eyeY - headR * 1.5, 0);
+      const kTorso = headR * 1.3 / 0.175;
       const anchor = (boneName, pos, sc) => {
-        const bone = body.bones[boneName]; if (!bone) return null;
+        const b = bone(boneName); if (!b) return null;
         const w = new T.Matrix4().compose(pos, new T.Quaternion(), new T.Vector3(sc, sc, sc));
-        return { bone, local: new T.Matrix4().copy(bone.matrixWorld).invert().multiply(w) };
+        return { bone: b, local: new T.Matrix4().copy(b.matrixWorld).invert().multiply(w) };
       };
       body.headAnchor = anchor('head', new T.Vector3(0, eyeY + headR * 0.01, front - headR * 0.95), headR / 0.19);
       body.torsoAnchor = anchor('spine02', new T.Vector3(0, neck.y - 1.13 * kTorso, neck.z), kTorso);
@@ -282,6 +286,7 @@
     if (shape) m[shape] = 0.7;
     const tune = P.tune || {};
     for (const [k] of R.TUNE) { const v = +tune[k] || 0; if (v) m[k + (v < 0 ? '-' : '+')] = Math.min(1, Math.abs(v)); }
+    if (P.gender === 'boy') m.boy = 1;
     if (P.build === 'slim') m['build-'] = 0.8; else if (P.build === 'sturdy') m['build+'] = 0.8;
     const mouth = { smile: { mouthSmileLeft: 0.45, mouthSmileRight: 0.45 }, grin: { mouthSmileLeft: 0.85, mouthSmileRight: 0.85, cheekSquintLeft: 0.3, cheekSquintRight: 0.3 },
       small: { mouthSmileLeft: 0.2, mouthSmileRight: 0.2, mouthClose: 0.15 }, open: { mouthSmileLeft: 0.7, mouthSmileRight: 0.7, jawOpen: 0.22 } }[P.mouth] || {};
@@ -295,7 +300,7 @@
     }
   }
   function hideUnder(ids) {
-    const hide = new Set(); for (const id of ids) for (const v of A[id].hides || []) hide.add(v);
+    const hide = new Set(); for (const id of ids) for (const v of hidesOf(id)) hide.add(v);
     const src = body.index, vid = body.vid.array, out = [];
     for (let i = 0; i < src.length; i += 3) {
       const a = src[i], b = src[i + 1], c = src[i + 2];
@@ -307,6 +312,11 @@
     const g = body.mesh.geometry; g.setIndex(out); g.index.needsUpdate = true;
   }
 
+  // Some clothes come without a list of the skin they cover, so her skin can show through them where the boy shape is
+  // fuller. They cover at least what a plain T-shirt or shorts cover.
+  const HIDE_LIKE = { 'top-tucked-tee': 'top-tee', 'top-polo': 'top-tee', 'top-sweater': 'top-tee',
+                      'bottom-cargo': 'bottom-jean-shorts', 'bottom-pants': 'bottom-jean-shorts', 'bottom-plaid-skirt': 'bottom-jean-shorts' };
+  const hidesOf = id => ((A[id].hides || []).length ? A[id].hides : (A[HIDE_LIKE[id]] && A[HIDE_LIKE[id]].hides) || []);
   let lastKey = '';
   R.compose = function (group, P) {
     const missing = R.need(P);
@@ -341,7 +351,7 @@
           if (A[id].tint && color) { x.color.copy(lin(color)).multiplyScalar(A[id].kind === 'hair' || A[id].kind === 'eyebrows' ? 1.0 : 1.2); if (k) x.color.multiplyScalar(k); } else x.color.copy(x.userData.base);
         }
       }
-      if ((A[id].hides || []).length) hides.push(id);
+      if (hidesOf(id).length) hides.push(id);
     }
     const hairId = items[0][0];
     if (body.scalp && SCALP.includes(hairId)) {
@@ -367,8 +377,20 @@
       if (an) { an.local.decompose(g.position, g.quaternion, g.scale); an.bone.add(g); } else holder.add(g);
     }
     holder.updateMatrixWorld(true);
+    // Her left hand, for things she holds: upright in the room (whatever the pose), in the drawn head's units.
+    let hand = null;
+    const wrist = bone('wrist.L'), knuckle = bone('finger3-1.L');
+    if (wrist) {
+      hand = new T.Group(); body.anchors.push(hand);
+      const p = wrist.getWorldPosition(new T.Vector3());
+      if (knuckle) p.lerp(knuckle.getWorldPosition(new T.Vector3()), 0.7);
+      const s = body.headR * H / 0.19 * group.getWorldScale(new T.Vector3()).x;
+      const w = new T.Matrix4().compose(p, group.getWorldQuaternion(new T.Quaternion()), new T.Vector3(s, s, s));
+      new T.Matrix4().copy(wrist.matrixWorld).invert().multiply(w).decompose(hand.position, hand.quaternion, hand.scale);
+      wrist.add(hand);
+    }
     const eyeAt = group.worldToLocal(head.getWorldPosition(new T.Vector3()));
-    return { head, torso, H, eyeY: eyeAt.y, headR: body.headR * H, headBone: body.bones.head };
+    return { head, torso, hand, H, eyeY: eyeAt.y, headR: body.headR * H, headBone: body.bones.head };
   };
 
   // Idle life: blinking and a gentle head sway, called every frame by avatar.js.

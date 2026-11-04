@@ -16,7 +16,9 @@ const KEY = 'kid-avatar-v1';
 // ---------------------------------------------------------------------------------------------------------------
 const SKIN = ['#FBE3D0', '#F6D2B8', '#EDC09B', '#E2AC82', '#D39A6C', '#C08157', '#A86B45', '#8D5535', '#6F4128', '#53301E'];
 const HAIR = ['#1E1612', '#3B2416', '#5C3A21', '#8A5A33', '#8E3B1F', '#B4471F', '#D49A5C', '#E3C27A', '#EFE3C2', '#A8A8A8'];
-const DYES = { '#FF6FB5': 'Pink hair', '#9B5DE5': 'Purple hair', '#3A86FF': 'Blue hair', '#22C5B8': 'Teal hair' };
+// The shop list and prices live in extras.js (with the builders for everything added there).
+const EXL = window.AVATAR_EXTRAS || null;
+const DYES = EXL ? Object.fromEntries(Object.entries(EXL.DYES).map(([c, [n]]) => [c, n])) : { '#FF6FB5': 'Pink hair', '#9B5DE5': 'Purple hair', '#3A86FF': 'Blue hair', '#22C5B8': 'Teal hair' };
 const EYES = ['#5B3A1E', '#3A2412', '#7A6A2E', '#4E8B3A', '#3F7CC2', '#7F8C99', '#B07A2A'];
 const CLOTH = ['#FF4F8B', '#FF2D55', '#FF9F1C', '#FFD60A', '#38E54D', '#22C5B8', '#3A86FF', '#1E3A8A', '#9B5DE5', '#FFFFFF', '#9A8C98', '#2B2140'];
 const SHOECOL = ['#FFFFFF', '#2B2140', '#FF4F8B', '#3A86FF', '#FF2D55', '#9B5DE5', '#7A4A20', '#FFD60A'];
@@ -39,6 +41,7 @@ const LOOK = {
   glasses: [['none', 'None'], ['round', 'Round'], ['square', 'Square'], ['cateye', 'Cat-eye']],
   height: [['short', 'Shorter'], ['medium', 'Medium'], ['tall', 'Taller']],
   build: [['slim', 'Slim'], ['medium', 'Medium'], ['sturdy', 'Sturdy']],
+  gender: [['girl', 'Girl'], ['boy', 'Boy']],
   pose: [['stand', 'Stand'], ['wave', 'Wave'], ['hips', 'Hands on hips'], ['cheer', 'Cheer'], ['shy', 'Shy']],
 };
 
@@ -49,7 +52,7 @@ if (REAL) {
 }
 
 // Things to buy. slot: where it goes (one per slot). price in stars.
-const SHOP = [
+const SHOP = EXL ? EXL.SHOP.slice() : [
   { id: 'cap', slot: 'hat', name: 'Ball cap', e: '🧢', price: 10 },
   { id: 'beanie', slot: 'hat', name: 'Beanie', e: '🧶', price: 10 },
   { id: 'sunhat', slot: 'hat', name: 'Sun hat', e: '👒', price: 12 },
@@ -102,19 +105,20 @@ const SHOP = [
 if (REAL) {
   // Real hats and glasses from the model files, next to the drawn ones.
   const add = (id, slot, e, price) => { if (REAL.has(id)) SHOP.push({ id, slot, name: window.AVATAR_CATALOG.assets[id].label, e, price }); };
-  add('hat-newsboy', 'hat', '🧢', 12); add('hat-santa', 'hat', '🎅', 10);
-  add('glasses-3d', 'shades', '🎬', 12); add('glasses-goggles', 'shades', '🥽', 15);
+  const k = EXL ? EXL.PRICE_SCALE : 1, at = (id, slot, e, p) => add(id, slot, e, Math.round(p * k));
+  at('hat-newsboy', 'hat', '🧢', 60); at('hat-santa', 'hat', '🎅', 70);
+  at('glasses-3d', 'shades', '🎬', 60); at('glasses-goggles', 'shades', '🥽', 80);
 }
-Object.entries(DYES).forEach(([c, n]) => SHOP.push({ id: 'dye' + c.slice(1).toLowerCase(), slot: 'dye', name: n, e: '🎨', price: 10, color: c }));
+if (!EXL) Object.entries(DYES).forEach(([c, n]) => SHOP.push({ id: 'dye' + c.slice(1).toLowerCase(), slot: 'dye', name: n, e: '🎨', price: 10, color: c }));
 const ITEM = Object.fromEntries(SHOP.map(i => [i.id, i]));
-const SLOTS = ['hat', 'shades', 'neck', 'back', 'outfit', 'pet', 'place', 'sparkle'];
+const SLOTS = ['hat', 'shades', 'neck', 'back', 'hold', 'outfit', 'pet', 'place', 'sparkle', 'badgebg', 'frame', 'theme'];
 
 const DEFAULT = {
   skin: SKIN[2], face: 'round', eyeShape: 'round', eyeColor: EYES[0], lashes: true, brows: 'natural', nose: 'button', mouth: 'smile',
   freckles: false, blush: true, hair: 'long', hairColor: HAIR[3], top: 'tee', topColor: CLOTH[0], bottom: 'jeans', bottomColor: CLOTH[7],
   shoes: 'sneakers', shoesColor: SHOECOL[0], glasses: 'none', glassesColor: GLASSCOL[0], height: 'medium', build: 'medium', pose: 'stand',
   hat: null, shades: null, neck: null, back: null, outfit: null, pet: null, place: null, sparkle: null,
-  socks: 'socks-low', earrings: 'none', tune: {},
+  socks: 'socks-low', earrings: 'none', tune: {}, gender: 'girl', hold: null, badgebg: null, frame: null, theme: null,
 };
 if (REAL) Object.assign(DEFAULT, { hair: 'hair-long', brows: 'brows-natural', top: 'top-tee', bottom: 'bottom-pants', shoes: 'shoes-sneakers', glasses: 'none' });
 // A design saved by the drawn avatar, or with a choice that no longer exists, gets the nearest real choice.
@@ -220,6 +224,24 @@ function mesh(geo, m, x, y, z, sx, sy, sz) {
   me.castShadow = true; me.receiveShadow = true; return me;
 }
 const SPH = new T.SphereGeometry(1, 32, 24), SPH_LO = new T.SphereGeometry(1, 14, 10), CYL = new T.CylinderGeometry(1, 1, 1, 24);
+// Everything drawn is rebuilt on every change, so the old pieces' GPU memory is freed each time (shared shapes, the
+// cached materials and the realistic model's own meshes are kept).
+function disposeDrawn(root) {
+  if (!root) return;
+  const shared = new Set([SPH, SPH_LO, CYL]), keep = new Set(Object.values(mats));
+  root.traverse(x => {
+    if (!x.isMesh || x.isSkinnedMesh) return;
+    if (!shared.has(x.geometry)) x.geometry.dispose();
+    for (const m of [].concat(x.material)) if (!keep.has(m)) { if (m.map) m.map.dispose(); m.dispose(); }
+  });
+}
+let drawnRoots = [];
+function clearAvatar() {
+  for (const r of drawnRoots) { disposeDrawn(r); r.removeFromParent(); }
+  drawnRoots = [];
+  for (const c of avatar.children.slice()) if (c.name !== 'real') disposeDrawn(c);
+  avatar.clear();
+}
 // Adds a part and returns the part (Object3D.add returns the parent), so it can be turned in place.
 const put = (parent, m) => { parent.add(m); return m; };
 const capsule = (r, len) => new T.CapsuleGeometry(r, len, 8, 20);
@@ -247,7 +269,10 @@ function starsTexture() {
 }
 let floorY = 0;
 function buildPlace(id) {
-  backdrop.clear(); floorY = 0;
+  disposeDrawn(backdrop); backdrop.clear(); floorY = 0; placeAnims.length = 0;
+  if (scene.background && scene.background.isTexture) { scene.background.dispose(); scene.background = null; }
+  const extra = EX && id && !['park', 'beach', 'space', 'castle', 'bedroom', 'underwater'].includes(id) ? EX.place(id) : undefined;
+  if (extra !== undefined) { scene.fog = extra ? new T.Fog(extra, 6, 22) : null; avatar.position.y = floorY; return; }
   const ground = (c, r) => { const g = mesh(new T.CircleGeometry(r || 30, 48), mat(c, { roughness: 0.95 })); g.rotation.x = -Math.PI / 2; g.castShadow = false; backdrop.add(g); return g; };
   const plinth = (c, top) => { floorY = 0.091; backdrop.add(mesh(new T.CylinderGeometry(0.62, 0.66, 0.08, 48), mat(c, { roughness: 0.4 }), 0, 0.04, 0)); backdrop.add(mesh(new T.CylinderGeometry(0.6, 0.6, 0.012, 48), mat(top, { roughness: 0.35 }), 0, 0.085, 0)); };
   let fogC = null;
@@ -343,7 +368,10 @@ function build(d, preview) {
 const HAT_FIT = { s: 0.9, y: -0.035, z: 0.05 };   // the drawn hats on her real head and hair
 // The realistic avatar from real.js, with the drawn hats, wings, outfits extras and pets added to it.
 let lastPreview = null;
-function buildReal(P) {
+function buildReal(P0) {
+  // An outfit can come with a hat, glasses or something to hold; her own choices for those places come first.
+  const P = Object.assign({}, P0), with_ = EXL && EXL.OUTFIT_ITEMS[P0.outfit];
+  if (with_) for (const k in with_) if (!P[k]) P[k] = with_[k];
   if (REAL.need(P).length) {
     loadingNote(true);
     REAL.onReady = () => { loadingNote(false); rebuild(lastPreview); };
@@ -351,8 +379,9 @@ function buildReal(P) {
     return;
   }
   loadingNote(false);
-  avatar.clear(); parts = {}; floaters.length = 0;
+  clearAvatar(); parts = {}; floaters.length = 0; itemAnims.length = 0;
   const r = REAL.compose(avatar, P);
+  drawnRoots = [r.head, r.torso, r.hand].filter(Boolean);
   const out = P.outfit, R = 0.19, W = { slim: 0.94, medium: 1, sturdy: 1.08 }[P.build] || 1;
   const head = r.head, body = r.torso;
   if (P.shades && !REAL.SHADES.includes(P.shades)) buildShades(head, P.shades, R);
@@ -363,11 +392,14 @@ function buildReal(P) {
   if (out === 'superhero') head.add(mesh(new T.TorusGeometry(0.085, 0.02, 8, 30), mat('#FF2D55'), 0, 0.005, R * 0.84, 1.15, 0.45, 1));
   if (out === 'astronaut') { head.add(new T.Mesh(new T.SphereGeometry(R * 1.75, 32, 24), new T.MeshPhysicalMaterial({ color: '#cfe8ff', transparent: true, opacity: 0.2, roughness: 0.05, metalness: 0.1, depthWrite: false }))); put(body, mesh(new T.TorusGeometry(0.12, 0.03, 10, 30), mat('#C0C8D8', { metalness: 0.5, roughness: 0.3 }), 0, 1.13, 0, 1, 1, 0.9)).rotation.x = Math.PI / 2; }
   if (out === 'doctor') put(body, mesh(new T.TorusGeometry(0.06, 0.008, 6, 20), mat('#9A8C98', { metalness: 0.6 }), 0, 0.97, 0.11)).rotation.x = 0.2;
-  if (P.neck && P.neck !== 'necklace') buildNeck(body, P.neck, W);
+  // Things round her neck sit a little forward and larger on her real chest (it is deeper than the drawn one).
+  if (P.neck && P.neck !== 'necklace') { const ng = new T.Group(), ns = 1.15; ng.scale.setScalar(ns); ng.position.set(0, 1.1 * (1 - ns), 0.035); body.add(ng); buildNeck(ng, P.neck, W); }
   // Her real back is shorter and deeper than the drawn one: things on her back sit a little higher and further out.
   const back = new T.Group(); back.position.set(0, 0.1, -0.05); body.add(back);
   if (P.back) buildBack(back, P.back, W, P.hairColor);
   if (out === 'superhero' && P.back !== 'cape') buildBack(back, 'cape', W, '#FF2D55');
+  if (EX && out) EX.outfitExtras(out, { head, hat: hg, body, R });
+  if (EX && P.hold && r.hand) { const hh = new T.Group(); hh.scale.setScalar(1.5); hh.position.z = 0.02; r.hand.add(hh); EX.hold(hh, P.hold); }
   if (P.pet) buildPet(P.pet);
   if (P.sparkle) buildSparkle(P.sparkle, r.H);
   Object.assign(parts, { H: r.H, faceY: r.eyeY, headR: r.headR, real: true });
@@ -379,7 +411,7 @@ function loadingNote(on) {
 }
 
 function buildDrawn(P) {
-  avatar.clear(); parts = {};
+  clearAvatar(); parts = {}; itemAnims.length = 0;
   const H = { short: 0.92, medium: 1, tall: 1.07 }[P.height] || 1, W = { slim: 0.9, medium: 1, sturdy: 1.13 }[P.build] || 1;
   const body = new T.Group(); body.scale.set(1, H, 1); avatar.add(body);
   const skin = mat(P.skin, { roughness: 0.55 });
@@ -653,6 +685,7 @@ function buildGlasses(head, kind, color, R) {
   head.add(limb(new T.Vector3(-0.03, y + 0.004, z + 0.004), new T.Vector3(0.03, y + 0.004, z + 0.004), 0.005, m));
 }
 function buildShades(head, id, R) {
+  if (!['sunglasses', 'heartglasses', 'starglasses'].includes(id)) { if (EX) EX.shades(head, id, R); return; }
   const z = R * 0.97, y = 0.015, frame = mat('#2B2140', { roughness: 0.3 });
   const lensC = { sunglasses: '#20202a', heartglasses: '#FF2D78', starglasses: '#FFD60A' }[id];
   const lens = new T.MeshStandardMaterial({ color: lensC, roughness: 0.1, metalness: 0.3, transparent: true, opacity: 0.92 });
@@ -680,10 +713,12 @@ function buildHat(head, id, hairColor, R) {
     case 'wizard': g.add(mesh(new T.CylinderGeometry(R * 1.7, R * 1.7, 0.012, 40), mat('#3A2A8A'), 0, -R * 0.1, 0)); g.add(mesh(new T.ConeGeometry(R * 1.0, R * 2.6, 32), mat('#3A2A8A'), 0, R * 1.2, -0.02)); for (let i = 0; i < 4; i++) g.add(mesh(SPH_LO, mat('#FFD60A', { emissive: new T.Color('#FFD60A'), emissiveIntensity: 0.5 }), Math.cos(i * 2) * R * 0.5, R * (0.4 + i * 0.4), Math.sin(i * 2) * R * 0.5 + R * 0.3 - i * 0.02, 0.015)); break;
     case 'unicorn': { const h = mesh(new T.ConeGeometry(0.035, 0.2, 24), mat('#FFF3B0', { metalness: 0.3, roughness: 0.3 }), 0, R * 0.62, R * 0.45); h.rotation.x = 0.35; g.add(h); for (let i = 0; i < 4; i++) put(g, mesh(new T.TorusGeometry(0.03 - i * 0.006, 0.004, 6, 16), mat('#FF8FB5'), 0, R * 0.38 + i * 0.035, R * 0.38 + i * 0.012)).rotation.x = Math.PI / 2 + 0.35; break; }
     case 'tiara': { const t = mesh(new T.TorusGeometry(R * 0.95, 0.008, 8, 40, Math.PI), mat('#E8E8F0', { metalness: 0.8, roughness: 0.2 }), 0, -R * 0.1, 0); t.rotation.x = -0.2; g.add(t); for (let i = 0; i < 5; i++) { const a = Math.PI * (0.2 + i * 0.15); g.add(mesh(new T.ConeGeometry(0.012, 0.04 + (i === 2 ? 0.03 : 0), 6), mat('#E8E8F0', { metalness: 0.8, roughness: 0.2 }), Math.cos(a) * R * 0.95, -R * 0.02 + (i === 2 ? 0.015 : 0), Math.sin(a) * R * 0.95 * 0.98)); } g.add(mesh(SPH, mat('#C77DFF', { metalness: 0.2, roughness: 0.1 }), 0, R * 0.12, R * 0.94, 0.016)); break; }
+    default: if (EX) EX.hat(g, id, R); break;
     case 'crown': { g.add(mesh(new T.CylinderGeometry(R * 0.85, R * 0.8, R * 0.45, 32, 1, true), new T.MeshStandardMaterial({ color: '#FFC93C', metalness: 0.65, roughness: 0.25, side: T.DoubleSide }), 0, R * 0.12, 0)); for (let i = 0; i < 8; i++) { const a = i / 8 * Math.PI * 2; g.add(mesh(new T.ConeGeometry(0.025, 0.07, 8), gold, Math.cos(a) * R * 0.85, R * 0.42, Math.sin(a) * R * 0.85)); g.add(mesh(SPH_LO, mat(['#FF2D55', '#3A86FF', '#38E54D'][i % 3], { roughness: 0.1 }), Math.cos(a) * R * 0.87, R * 0.1, Math.sin(a) * R * 0.87, 0.014)); } break; }
   }
 }
 function buildNeck(body, id, W) {
+  if (EX && !['necklace', 'scarf', 'bowtie', 'medal'].includes(id)) return EX.neck(body, id);
   if (id === 'necklace') for (let i = 0; i < 18; i++) { const a = Math.PI * 0.1 + i / 17 * Math.PI * 0.8; body.add(mesh(SPH_LO, mat('#FFF8EE', { roughness: 0.2 }), Math.cos(a) * 0.085, 1.09 - Math.sin(a) * 0.05, Math.sin(a) * 0.07 + 0.02, 0.011)); }
   if (id === 'scarf') { put(body, mesh(new T.TorusGeometry(0.075, 0.032, 10, 30), mat('#FF2D55', { roughness: 0.95 }), 0, 1.12, 0, 1, 1, 0.9)).rotation.x = Math.PI / 2; body.add(mesh(new T.BoxGeometry(0.06, 0.22, 0.03), mat('#FF2D55', { roughness: 0.95 }), 0.05, 0.99, 0.11)); }
   if (id === 'bowtie') { for (const s of [-1, 1]) { const w = mesh(new T.ConeGeometry(0.03, 0.055, 4), mat('#FF2D55'), s * 0.03, 1.1, 0.085); w.rotation.z = s * Math.PI / 2; body.add(w); } body.add(mesh(SPH_LO, mat('#FF2D55'), 0, 1.1, 0.088, 0.014)); }
@@ -693,6 +728,7 @@ function buildBack(body, id, W, hairColor) {
   const g = new T.Group(); g.position.set(0, 0.95, -0.1); body.add(g);
   const wingMat = (c, o) => new T.MeshStandardMaterial({ color: c, transparent: true, opacity: o || 0.7, side: T.DoubleSide, roughness: 0.3, emissive: new T.Color(c), emissiveIntensity: 0.15, depthWrite: false });
   const wing = (shape, m, s, rot) => { const w = new T.Mesh(new T.ShapeGeometry(shape, 24), m); w.scale.x = s; w.rotation.y = s * (rot || 0.45); return w; };
+  if (EX && !['backpack', 'cape', 'fairy', 'butterfly', 'angel', 'dragonwings'].includes(id)) return EX.back(g, id, parts);
   switch (id) {
     case 'backpack': g.add(mesh(new T.BoxGeometry(0.22 * W, 0.26, 0.1), mat('#FF9F1C'), 0, -0.05, -0.02)); g.add(mesh(new T.BoxGeometry(0.16, 0.1, 0.03), mat('#FFD60A'), 0, -0.1, -0.075)); for (const s of [-1, 1]) g.add(mesh(new T.BoxGeometry(0.025, 0.28, 0.02), mat('#2B2140'), s * 0.07, 0.0, 0.1)); break;
     case 'cape': { const c = new T.Mesh(new T.CylinderGeometry(0.16 * W, 0.34 * W, 0.78, 32, 1, true, Math.PI * 0.6, Math.PI * 0.8), new T.MeshStandardMaterial({ color: hairColor && hairColor[0] === '#' && hairColor !== '#FF2D55' ? '#FF2D55' : '#FF2D55', roughness: 0.6, side: T.DoubleSide })); c.position.set(0, -0.25, 0.08); c.castShadow = true; g.add(c); break; }
@@ -713,6 +749,7 @@ function buildPet(id) {
   const g = new T.Group(); g.position.set(-0.55, 0, 0.25); g.rotation.y = 0.5; avatar.add(g);
   const eyes = (p, x, y, z, r, gap) => { for (const s of [-1, 1]) { p.add(mesh(SPH, mat('#ffffff', { roughness: 0.2 }), x + s * gap, y, z, r)); p.add(mesh(SPH, mat('#1b1230'), x + s * gap, y, z + r * 0.6, r * 0.6)); } };
   const legs = (c, sp, y, r, h) => { for (const [x, z] of [[-sp, sp], [sp, sp], [-sp, -sp], [sp, -sp]]) g.add(mesh(CYL, mat(c), x, y, z, r, h, r)); };
+  if (EX && !['cat', 'fox', 'dog', 'bunny', 'owl', 'dragon'].includes(id)) return EX.pet(g, id);
   if (id === 'cat' || id === 'fox' || id === 'dog') {
     const c = { cat: '#FF9F1C', fox: '#FF6B1A', dog: '#C77D3A' }[id];
     g.add(mesh(SPH, mat(c), 0, 0.17, 0, 0.11, 0.09, 0.15)); g.add(mesh(SPH, mat(c), 0, 0.28, 0.12, 0.085));
@@ -742,6 +779,7 @@ const floaters = [];
 function buildSparkle(id, H) {
   floaters.length = 0;
   const g = new T.Group(); avatar.add(g); parts.sparkle = g;
+  if (EX && EX.sparkle(id, H, (m, u) => { m.userData = u; g.add(m); floaters.push(m); })) return;
   const n = id === 'stars' ? 10 : 22;
   for (let i = 0; i < n; i++) {
     let m;
@@ -758,6 +796,22 @@ function buildSparkle(id, H) {
 // ---------------------------------------------------------------------------------------------------------------
 // Camera, turning, idle life
 // ---------------------------------------------------------------------------------------------------------------
+// Builders for the items in extras.js, and the little animations they use (spinning, bobbing, flickering).
+const itemAnims = [], placeAnims = [];
+const EX = EXL ? EXL.make({
+  T, mesh, mat, put, limb, SPH, SPH_LO, CYL, capsule, backdrop,
+  anim: f => placeAnims.push(f),
+  spin: (o, sp, ax) => itemAnims.push((dt) => { o.rotation[ax || 'y'] += dt * sp; }),
+  bob: (o, a, sp) => { const y0 = o.position.y, ph = Math.random() * 6; itemAnims.push((dt, t) => { o.position.y = y0 + Math.sin(t * sp + ph) * a; }); },
+  flicker: o => { const s0 = o.scale.clone(); itemAnims.push((dt, t) => { o.scale.copy(s0).multiplyScalar(0.85 + 0.15 * Math.sin(t * 23) * Math.sin(t * 7)); }); },
+  hop: (o, a, sp) => { const y0 = o.position.y; itemAnims.push((dt, t) => { o.position.y = y0 + Math.max(0, Math.sin(t * sp * 3)) * a; }); },
+  wag: () => {}, waddle: o => { itemAnims.push((dt, t) => { o.rotation.z = Math.sin(t * 4) * 0.08; }); },
+  sky: (top, bottom, stars) => { scene.background = stars ? starsTexture() : gradientTexture(top, bottom); },
+  ground: (c, r) => { const g = mesh(new T.CircleGeometry(r || 30, 48), mat(c, { roughness: 0.95 })); g.rotation.x = -Math.PI / 2; g.castShadow = false; backdrop.add(g); return g; },
+  plinth: (c, top) => { floorY = 0.091; backdrop.add(mesh(new T.CylinderGeometry(0.62, 0.66, 0.08, 48), mat(c, { roughness: 0.4 }), 0, 0.04, 0)); backdrop.add(mesh(new T.CylinderGeometry(0.6, 0.6, 0.012, 48), mat(top, { roughness: 0.35 }), 0, 0.085, 0)); },
+  setFloor: y => { floorY = y; },
+}) : null;
+
 let view = 'body', yaw = 0.25, yawGoal = 0.25;
 const camGoal = { body: { y: 0.82, d: 4.6, look: 0.8 }, face: { y: 1.38, d: 1.45, look: 1.36 } };
 let camNow = Object.assign({}, camGoal.body);
@@ -786,7 +840,9 @@ function frame() {
   if (parts.real) { const b = t > blinkAt && t < blinkAt + 0.16 ? 1 : 0; REAL.tick(t, b); if (t > blinkAt + 0.2) blinkAt = t + 2.5 + Math.random() * 3; }
   if (parts.lids) { const b = t > blinkAt ? Math.min(1, (t - blinkAt) / 0.08) : 0; const close = b > 0 && t < blinkAt + 0.16; parts.lids.forEach(l => { l.scale.y = close ? 1.9 : 1; }); if (t > blinkAt + 0.2) blinkAt = t + 2.5 + Math.random() * 3; }
   for (const s of [-1, 1]) if (parts['wing' + s]) parts['wing' + s].rotation.y = s * (0.5 + Math.sin(t * 2.4) * 0.12);
-  for (const f of floaters) { const u = f.userData; u.a += dt * u.sp * 0.6; if (u.kind === 'stars') { f.position.set(Math.cos(u.a) * u.r, u.y + Math.sin(u.a * 2) * 0.05, Math.sin(u.a) * u.r); f.rotation.y = -u.a; } else { u.y += dt * u.sp * 0.25; if (u.y > 1.9) u.y = 0.05; f.position.set(Math.cos(u.a) * u.r, u.y, Math.sin(u.a) * u.r); f.lookAt(camera.position); } }
+  for (const f of itemAnims) f(dt, t);
+  for (const f of placeAnims) f(dt, t);
+  for (const f of floaters) { const u = f.userData; if (u.update) { u.update(f, dt, t, camera.position); continue; } u.a += dt * u.sp * 0.6; if (u.kind === 'stars') { f.position.set(Math.cos(u.a) * u.r, u.y + Math.sin(u.a * 2) * 0.05, Math.sin(u.a) * u.r); f.rotation.y = -u.a; } else { u.y += dt * u.sp * 0.25; if (u.y > 1.9) u.y = 0.05; f.position.set(Math.cos(u.a) * u.r, u.y, Math.sin(u.a) * u.r); f.lookAt(camera.position); } }
   renderer.render(scene, camera);
   if (portraitDue && showingDesign()) { portraitDue = false; sendHome(true); }
 }
@@ -794,19 +850,29 @@ renderer.setAnimationLoop(frame);
 
 // The home screen portrait: head and shoulders on a clear background, 384 pixels square.
 let pr = null, pcam = null;
-function portrait() {
+function portrait(look) {
+  look = Object.assign({ badgebg: S.design.badgebg, frame: S.design.frame }, look || {});
   if (!pr) { pr = new T.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true }); pr.setSize(384, 384, false); pr.setPixelRatio(1); pr.outputEncoding = renderer.outputEncoding; pr.toneMapping = renderer.toneMapping; pr.toneMappingExposure = renderer.toneMappingExposure; pcam = new T.PerspectiveCamera(30, 1, 0.05, 50); }
   const H = parts.H || 1, bg = scene.background, fog = scene.fog, ry = avatar.rotation.y, sp = parts.sparkle;
   scene.background = null; scene.fog = null; backdrop.visible = false; avatar.rotation.y = 0.22; if (sp) sp.visible = false;
   // Frame the head and a little of the shoulders; step back for tall hats and big hair.
-  const tall = (S.design.hat && ['wizard', 'party', 'unicorn', 'crown', 'bunnyears', 'tiara'].includes(S.design.hat)) || S.design.outfit === 'chef' || S.design.outfit === 'astronaut' ? 1 : 0;
+  const hatNow = S.design.hat || (EXL && (EXL.OUTFIT_ITEMS[S.design.outfit] || {}).hat);
+  const low = ['bow', 'flowerclip', 'beret', 'cap', 'beanie', 'bucket', 'headphones', 'bearears', 'mouseears', 'catears', 'foxears', 'hat-newsboy', 'flowers'];
+  const tall = (hatNow && !low.includes(hatNow)) || S.design.outfit === 'chef' || S.design.outfit === 'astronaut' ? 1 : 0;
   const big = ['afro', 'bun', 'hair-afro', 'hair-curls', 'hair-bun', 'hair-braid-bun'].includes(S.design.hair) ? 0.5 : 0;
   const hy = (parts.faceY || 1.375 * H) + floorY, k = parts.headR ? parts.headR / 0.19 : 1;
   const back = parts.real ? 0.04 : 0, drop = parts.real ? 0.035 : 0;   // real heads are smaller; show a little more of her
   pcam.position.set(0, hy + (0.02 + (tall + big) * 0.04) * k, (1.45 + (tall + big) * 0.3) * k + back); pcam.lookAt(0, hy + (-0.06 + (tall + big) * 0.05) * k - drop + 0.03, 0);
   pr.setClearColor(0x000000, 0); pr.render(scene, pcam);
   scene.background = bg; scene.fog = fog; backdrop.visible = true; avatar.rotation.y = ry; if (sp) sp.visible = true;
-  return pr.domElement.toDataURL('image/png');
+  if (!EX || (!look.badgebg && !look.frame)) return pr.domElement.toDataURL('image/png');
+  // Her picture's background behind her and frame around her, as she chose them in the shop.
+  const c = document.createElement('canvas'); c.width = c.height = 384; const g = c.getContext('2d');
+  g.save(); g.beginPath(); g.arc(192, 192, 192, 0, 7); g.clip();
+  if (look.badgebg) EX.badgeBackground(g, look.badgebg, 384);
+  g.drawImage(pr.domElement, 0, 0); g.restore();
+  if (look.frame) EX.badgeFrame(g, look.frame, 384);
+  return c.toDataURL('image/png');
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -816,9 +882,10 @@ const CATS = [
   { id: 'body', e: '🧍', name: 'Body', view: 'body' }, { id: 'face', e: '🙂', name: 'Face', view: 'face' },
   { id: 'eyes', e: '👀', name: 'Eyes', view: 'face' }, { id: 'hair', e: '💇', name: 'Hair', view: 'face' },
   { id: 'clothes', e: '👕', name: 'Clothes', view: 'body' }, { id: 'pose', e: '🙋', name: 'Pose', view: 'body' }, null,
-  { id: 'hat', e: '👑', name: 'Hats', view: 'face', shop: ['hat'] }, { id: 'acc', e: '🎒', name: 'Extras', view: 'body', shop: ['shades', 'neck', 'back'] },
+  { id: 'hat', e: '👑', name: 'Hats', view: 'face', shop: ['hat'] }, { id: 'acc', e: '🎒', name: 'Extras', view: 'body', shop: ['hold', 'shades', 'neck', 'back'] },
   { id: 'outfit', e: '🦸', name: 'Outfits', view: 'body', shop: ['outfit'] }, { id: 'pet', e: '🐶', name: 'Pets', view: 'body', shop: ['pet'] },
   { id: 'place', e: '🏞️', name: 'Places', view: 'body', shop: ['place'] }, { id: 'sparkle', e: '✨', name: 'Sparkles', view: 'body', shop: ['sparkle'] },
+  { id: 'home', e: '🖼️', name: 'My picture', view: 'face', shop: ['badgebg', 'frame'] }, { id: 'theme', e: '🎨', name: 'Colors', view: 'body', shop: ['theme'] },
 ];
 let cat = 'body', trying = null;      // trying: a shop item shown on her before she buys it
 function nav() {
@@ -831,7 +898,7 @@ function nav() {
     n.appendChild(b);
   }
 }
-function set(k, v) { S.design[k] = v; persist(); if (k === 'place') buildPlace(v); rebuild(); render(); }
+function set(k, v) { S.design[k] = v; persist(); if (k === 'place') buildPlace(v); if (k === 'theme') applyTheme(v); rebuild(); render(); }
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text !== undefined) e.textContent = text; return e; }
 function opts(title, k, list) {
   const p = $('panel'); p.appendChild(el('h3', '', title)); const r = el('div', 'row'); p.appendChild(r);
@@ -868,7 +935,7 @@ function render() {
 function renderReal() {
   const p = $('panel'), d = S.design, tints = id => REAL.tints(id);
   switch (cat) {
-    case 'body': swatches('Skin', 'skin', SKIN); toggle('Freckles', 'freckles'); opts('Height', 'height', LOOK.height); opts('Build', 'build', LOOK.build); return true;
+    case 'body': opts('I am a', 'gender', LOOK.gender); swatches('Skin', 'skin', SKIN); toggle('Freckles', 'freckles'); opts('Height', 'height', LOOK.height); opts('Build', 'build', LOOK.build); return true;
     case 'face': opts('Face shape', 'face', LOOK.face); opts('Mouth', 'mouth', LOOK.mouth); sliders('Make it look like you', REAL.TUNE); opts('Earrings', 'earrings', LOOK.earrings); return true;
     case 'eyes': swatches('Eye color', 'eyeColor', EYES); opts('Eyebrows', 'brows', LOOK.brows); toggle('Eyelashes', 'lashes'); opts('Glasses', 'glasses', LOOK.glasses); return true;
     case 'hair': opts('Hair style', 'hair', LOOK.hair); swatches('Hair color', 'hairColor', HAIR); swatches('Fun colors ⭐', 'hairColor', Object.keys(DYES), true); return true;
@@ -899,8 +966,15 @@ function sliders(title, list) {
 function shop(c) {
   const p = $('panel');
   p.appendChild(el('h3', '', 'Tap to try it on. Buy it with your stars to keep it.'));
+  if (c.id === 'home') {
+    // How her picture looks on the home screen, with what she is trying.
+    const pick = k => (trying && trying.slot === k ? trying.id : S.design[k]);
+    const img = document.createElement('img'); img.className = 'homepic'; img.alt = 'Your picture on the home screen';
+    try { img.src = portrait({ badgebg: pick('badgebg'), frame: pick('frame') }); } catch (e) {}
+    p.appendChild(img);
+  }
   for (const slot of c.shop) {
-    const names = { hat: 'Hats', shades: 'Fun glasses', neck: 'Around your neck', back: 'On your back', outfit: 'Outfits', pet: 'Pets', place: 'Places', sparkle: 'Sparkles' };
+    const names = { hat: 'Hats', shades: 'Fun glasses', neck: 'Around your neck', back: 'On your back', hold: 'In your hand', outfit: 'Outfits', pet: 'Pets', place: 'Places', sparkle: 'Sparkles', badgebg: 'Backgrounds', frame: 'Frames', theme: 'App colors' };
     if (c.shop.length > 1) p.appendChild(el('h3', '', names[slot]));
     const r = el('div', 'row'); p.appendChild(r);
     for (const it of SHOP.filter(i => i.slot === slot)) {
@@ -914,12 +988,19 @@ function shop(c) {
 }
 function tryOn(it) {
   trying = it; const pv = {}; if (it.slot === 'dye') pv.hairColor = it.color; else pv[it.slot] = it.id;
+  if (it.slot === 'theme') applyTheme(it.id);
   if (it.slot === 'place') buildPlace(it.id); rebuild(pv);
   const short = balance() < it.price;
   $('tryname').textContent = `${it.e} ${it.name}`; $('buy').textContent = short ? `⭐ ${it.price} (need ${it.price - balance()} more)` : `Buy for ⭐ ${it.price}`;
   $('buy').classList.toggle('short', short); $('tryon').classList.add('on'); render();
 }
-function stopTrying() { if (!trying) return; trying = null; $('tryon').classList.remove('on'); buildPlace(S.design.place); rebuild(); }
+function stopTrying() { if (!trying) return; trying = null; $('tryon').classList.remove('on'); applyTheme(S.design.theme); buildPlace(S.design.place); rebuild(); }
+// App colors she bought: header, side bar and panel.
+function applyTheme(id) {
+  const t = (EXL && EXL.THEMES[id]) || { hdr: 'linear-gradient(90deg, #8A3FFC, #FF4F8B, #FFB703)', nav: '#2B2140', navBtn: '#3d3160', card: '#FFF9E8' };
+  const r = document.documentElement.style;
+  r.setProperty('--hdr', t.hdr); r.setProperty('--nav', t.nav); r.setProperty('--navbtn', t.navBtn); r.setProperty('--card', t.card);
+}
 $('takeoff').onclick = () => { stopTrying(); render(); };
 $('buy').onclick = () => {
   const it = trying; if (!it) return;
@@ -930,6 +1011,7 @@ function buy(it) {
   if (S.owned.includes(it.id) || balance() < it.price) return false;
   S.owned.push(it.id); S.spent += it.price;
   if (it.slot === 'dye') S.design.hairColor = it.color; else S.design[it.slot] = it.id;
+  if (it.slot === 'theme') applyTheme(it.id);
   trying = null; $('tryon').classList.remove('on'); persist(); buildPlace(S.design.place); rebuild(); render();
   say(`You got the ${it.name}!`); return true;
 }
@@ -953,5 +1035,5 @@ window.MY_AVATAR = {
   portraitDue: () => portraitDue, showingDesign: () => showingDesign(),
   real: () => (REAL ? { ready: REAL.ready, failed: REAL.failed, need: REAL.need(Object.assign({}, S.design, lastPreview || {})), textures: !!REAL.texturesReady, errors: REAL.errors.slice() } : null),
 };
-buildPlace(S.design.place); rebuild(); nav(); render(); setView('body'); resize();
+applyTheme(S.design.theme); buildPlace(S.design.place); rebuild(); nav(); render(); setView('body'); resize();
 restoreFromHome().then(() => { if (!S.savedAt) persist(true); else sendHome(true); });

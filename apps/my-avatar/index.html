@@ -215,20 +215,20 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>My Avatar</title>
 <style>
-  :root { --ink: #2B2140; --card: #FFF9E8; --accent: #8A3FFC; }
+  :root { --ink: #2B2140; --card: #FFF9E8; --accent: #8A3FFC; --hdr: linear-gradient(90deg, #8A3FFC, #FF4F8B, #FFB703); --nav: #2B2140; --navbtn: #3d3160; }
   html, body { margin: 0; height: 100%; overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; color: var(--ink); background: #1d1640; }
   body { touch-action: none; user-select: none; -webkit-user-select: none; }
   button { font-family: inherit; color: var(--ink); cursor: pointer; }
   #app { position: fixed; inset: 0; display: grid; grid-template-rows: auto 1fr; grid-template-columns: 132px minmax(0, 1fr) 430px; }
   /* The right 210px of the header stays clear: the Home pill sits there. */
-  header { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; padding: 10px 210px 10px 16px; background: linear-gradient(90deg, #8A3FFC, #FF4F8B, #FFB703); }
+  header { grid-column: 1 / -1; display: flex; align-items: center; gap: 14px; padding: 10px 210px 10px 16px; background: var(--hdr); }
   header h1 { margin: 0; font-size: 27px; font-weight: 900; color: #fff; text-shadow: 0 3px 0 #2B2140; white-space: nowrap; }
   #balance { font-size: 24px; font-weight: 900; background: #fff; border: 3px solid var(--ink); border-radius: 999px; padding: 4px 16px; white-space: nowrap; }
   #balance small { font-size: 15px; font-weight: 700; color: #6b5f80; margin-left: 6px; }
   #saved { margin-left: auto; color: #fff; font-weight: 800; font-size: 16px; opacity: 0; transition: opacity .3s; white-space: nowrap; }
   #saved.on { opacity: 1; }
-  nav { background: #2B2140; display: flex; flex-direction: column; gap: 6px; padding: 8px 8px; overflow-y: auto; touch-action: pan-y; }
-  nav button { border: 0; border-radius: 16px; background: #3d3160; color: #fff; padding: 8px 4px; font-size: 15px; font-weight: 800; display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 66px; }
+  nav { background: var(--nav); display: flex; flex-direction: column; gap: 6px; padding: 8px 8px; overflow-y: auto; touch-action: pan-y; }
+  nav button { border: 0; border-radius: 16px; background: var(--navbtn); color: #fff; padding: 8px 4px; font-size: 15px; font-weight: 800; display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 66px; }
   nav button .e { font-size: 28px; line-height: 1.1; }
   nav button.on { background: #FFE45C; color: var(--ink); }
   nav .sep { height: 2px; background: #4b3f73; margin: 4px 6px; border-radius: 2px; }
@@ -265,6 +265,7 @@
   .item .p { font-size: 15px; font-weight: 900; color: #8A3FFC; }
   .item.owned .p { color: #1e9e4a; }
   .item.on { background: #FFE45C; }
+  .homepic { display: block; width: 190px; height: 190px; margin: 4px auto 6px; border-radius: 50%; background: linear-gradient(#FFE45C, #FF8FB5); box-shadow: 0 0 0 5px #fff, 0 0 0 8px var(--ink); }
   .item.trying { outline: 4px dashed #8A3FFC; outline-offset: 2px; }
   #modal { position: fixed; inset: 0; background: #2B214088; display: none; align-items: center; justify-content: center; z-index: 9; }
   #modal.on { display: flex; }
@@ -295,6 +296,7 @@
 <script src="three-gltf.min.js"></script>
 <script src="models/catalog.js"></script>
 <script src="real.js"></script>
+<script src="extras.js"></script>
 <script src="avatar.js"></script>
 </body>
 </html>
