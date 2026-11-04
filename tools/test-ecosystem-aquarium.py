@@ -9,6 +9,11 @@ and that the page throws no errors. Screenshots go to /tmp/claude-0/tests/.
 import json, pathlib, sys
 from playwright.sync_api import sync_playwright
 
+# Files a test run does not have: voice-config.js (written on the tablet) and the home screen's local service.
+EXPECTED_MISSING = ('voice-config.js', 'http://127.0.0.1:47821')
+def real_error(m):
+    return m.type == 'error' and not (m.text.startswith('Failed to load resource') and any(x in (m.location or {}).get('url', '') for x in EXPECTED_MISSING))
+
 APP = pathlib.Path(__file__).resolve().parent.parent / 'apps' / 'ecosystem-aquarium.html'
 OUT = pathlib.Path('/tmp/claude-0/tests'); OUT.mkdir(parents=True, exist_ok=True)
 problems = []
@@ -22,7 +27,7 @@ with sync_playwright() as p:
     pg.set_default_timeout(120000)
     errors = []
     pg.on('pageerror', lambda e: errors.append(str(e)))
-    pg.on('console', lambda m: errors.append(m.text) if m.type == 'error' else None)
+    pg.on('console', lambda m: errors.append(m.text) if real_error(m) else None)
     pg.goto(APP.as_uri()); pg.wait_for_timeout(1200)
     pg.evaluate("localStorage.clear()"); pg.reload(); pg.wait_for_timeout(1200)
 

@@ -73,8 +73,10 @@ and brings the tiles back. Turning the screen off and on does the same thing.
 Everything personal lives in two places: `C:\ProgramData\KidTablet\config.json` (the child's name, apps, allowed
 domains, wallpaper, text scale) and the apps' own content.
 
-- **Apps and domains.** The defaults are a starter list (Teach Your Monster to Read, Starfall, PBS KIDS, PhET,
-  Chrome Music Lab, Kleki, Tux Paint, Paint). Change them with the module commands after
+- **Apps and domains.** The defaults are a starter list (Teach Your Monster to Read, Starfall, PhET, Chrome Music
+  Lab, Kleki, Tux Paint, Paint). Sites one family subscribes to are not defaults: Scarlett's (Epic, PBS KIDS
+  Games, AdaptedMind Math) are set by `etducky/Set-ScarlettApps.ps1`, and they are not part of Duckling Tablet's app
+  collection. Change them with the module commands after
   `Import-Module KidTablet`: `Add-KidWebApp -Name 'Name' -Url https://...` (its domain is allowed automatically),
   `Add-KidAllowedDomain`, `Add-KidStoreApp -StoreId ...`, `Add-KidDesktopApp`, `Remove-KidApp`, `Set-KidApp` (tile
   image and colour). `Sync-KidTablet -RestartSession` applies the change.

@@ -258,6 +258,23 @@ try:
             bad = pg.evaluate("document.body.scrollWidth > innerWidth || [...document.querySelectorAll('header *')].some(e => e.getBoundingClientRect().right > innerWidth - 210 && e.id !== 'saved' && e.getBoundingClientRect().width > 0 && getComputedStyle(e).opacity !== '0')")
             check(not bad, f'fits at {w} x {h} with the top-right corner clear for the Home pill')
             pg.screenshot(path=str(SHOTS / f'avatar-{w}.png'))
+        # Finger taps: a tap on the side bar works once, also when the finger wobbles a few pixels.
+        pg.goto('about:blank')   # frees the software renderer for this page
+        tctx = b.new_context(viewport={'width': 1440, 'height': 960}, has_touch=True)
+        tp = tctx.new_page(); tp.goto(AVATAR, wait_until='domcontentloaded', timeout=120000); ready(tp)
+        tp.evaluate("window._n = 0; document.querySelector('nav button[data-c=face]').addEventListener('click', () => window._n++)")
+        cdp = tctx.new_cdp_session(tp)
+        def touch(sel, wobble):
+            box = tp.locator(sel).bounding_box(); x, y = box['x'] + box['width'] / 2, box['y'] + box['height'] / 2
+            cdp.send('Input.dispatchTouchEvent', {'type': 'touchStart', 'touchPoints': [{'x': x, 'y': y}]})
+            for k in range(1, 5 if wobble else 1): cdp.send('Input.dispatchTouchEvent', {'type': 'touchMove', 'touchPoints': [{'x': x + k, 'y': y + k * 2}]})
+            cdp.send('Input.dispatchTouchEvent', {'type': 'touchEnd', 'touchPoints': []}); tp.wait_for_timeout(1000)
+        touch('nav button[data-c=face]', False)
+        check(tp.evaluate('window._n') == 1 and 'Face' in tp.inner_text('#panel h2'), f'a finger tap opens Face once ({tp.evaluate("window._n")} clicks)')
+        touch('nav button[data-c=body]', True)
+        check('Body' in tp.inner_text('#panel h2'), 'a finger tap that wobbles a little still opens Body')
+        tctx.close()
+
         check(not errs, f'no page errors {errs[:3]}')
         b.close()
 finally:

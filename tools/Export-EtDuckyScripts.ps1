@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Writes the ET Ducky scripts (Deploy, Update, Sync, Status, Update-Apps, Set-Voices) into a scripts repo folder.
+    Writes the ET Ducky scripts (Deploy, Update, Sync, Status, Update-Apps, Set-Voices, Set-ScarlettApps) into a scripts repo folder.
 
 .DESCRIPTION
     Update-KidTablet.ps1 is built from etducky\Update-KidTablet.template.ps1 with the current
@@ -35,6 +35,7 @@ Copy-Item (Join-Path $root 'etducky\Get-KidTabletStatus.ps1') (Join-Path $Destin
 Copy-Item (Join-Path $root 'etducky\Update-KidTabletApps.ps1') (Join-Path $Destination 'Update-KidTabletApps.ps1') -Force
 Copy-Item (Join-Path $root 'etducky\Add-KidTabletWebApp.ps1') (Join-Path $Destination 'Add-KidTabletWebApp.ps1') -Force
 Copy-Item (Join-Path $root 'etducky\Set-KidTabletTravelMode.ps1') (Join-Path $Destination 'Set-KidTabletTravelMode.ps1') -Force
+Copy-Item (Join-Path $root 'etducky\Set-ScarlettApps.ps1')       (Join-Path $Destination 'Set-ScarlettApps.ps1') -Force
 # Set-KidTabletVoices holds this household's voice server address in its Settings block, so an existing copy in the
 # scripts repo is left alone; the package copy has a placeholder address.
 $voicesScript = Join-Path $Destination 'Set-KidTabletVoices.ps1'

@@ -387,7 +387,13 @@ function buildReal(P0) {
   if (P.shades && !REAL.SHADES.includes(P.shades)) buildShades(head, P.shades, R);
   // Drawn hats sit on top of real hair, which is fuller than the drawn hair.
   const hg = new T.Group(); hg.scale.setScalar(HAT_FIT.s); hg.position.set(0, HAT_FIT.y, HAT_FIT.z); head.add(hg);
-  if (P.hat && !REAL.has(P.hat)) buildHat(hg, P.hat, P.hairColor, R);
+  // Crowns sit up on top of real hair rather than round the forehead like a band.
+  const ON_TOP = { crown: { y: 0.065, s: 0.8, tilt: -0.18 }, starcrown: { y: 0.06, s: 0.85, tilt: -0.25 }, tiara: { y: 0.03, s: 0.95, tilt: -0.15 } };
+  if (P.hat && !REAL.has(P.hat)) {
+    const f = ON_TOP[P.hat], g2 = new T.Group(); hg.add(g2);
+    if (f) { g2.position.y = f.y; g2.scale.setScalar(f.s); g2.rotation.x = f.tilt; }
+    buildHat(g2, P.hat, P.hairColor, R);
+  }
   if (out === 'chef') { hg.add(mesh(CYL, mat('#ffffff', { roughness: 0.9 }), 0, R * 0.72, -0.01, R * 1.02, R * 0.7, R * 1.02)); hg.add(mesh(SPH, mat('#ffffff', { roughness: 0.9 }), 0, R * 1.17, -0.01, R * 1.25, R * 0.55, R * 1.25)); }
   if (out === 'superhero') head.add(mesh(new T.TorusGeometry(0.085, 0.02, 8, 30), mat('#FF2D55'), 0, 0.005, R * 0.84, 1.15, 0.45, 1));
   if (out === 'astronaut') { head.add(new T.Mesh(new T.SphereGeometry(R * 1.75, 32, 24), new T.MeshPhysicalMaterial({ color: '#cfe8ff', transparent: true, opacity: 0.2, roughness: 0.05, metalness: 0.1, depthWrite: false }))); put(body, mesh(new T.TorusGeometry(0.12, 0.03, 10, 30), mat('#C0C8D8', { metalness: 0.5, roughness: 0.3 }), 0, 1.13, 0, 1, 1, 0.9)).rotation.x = Math.PI / 2; }

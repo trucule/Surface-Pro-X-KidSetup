@@ -106,7 +106,8 @@ $script:TravelApps = @(
 )
 
 # ---------------------------------------------------------------------------
-# Defaults (used only when no config exists, or with -ResetConfig)
+# Defaults (used only when no config exists, or with -ResetConfig). Sites that one family subscribes to (Scarlett's
+# Epic, PBS KIDS, AdaptedMind) are not defaults: etducky\Set-ScarlettApps.ps1 adds hers to her tablet.
 # ---------------------------------------------------------------------------
 
 function New-DefaultConfig {
@@ -118,16 +119,13 @@ function New-DefaultConfig {
         WebApps          = @(
             [pscustomobject]@{ Name = 'Teach Your Monster to Read'; Url = 'https://www.teachyourmonstertoread.com' }
             [pscustomobject]@{ Name = 'Starfall';                   Url = 'https://www.starfall.com' }
-            [pscustomobject]@{ Name = 'AdaptedMind Math';           Url = 'https://www.adaptedmind.com' }
-            [pscustomobject]@{ Name = 'PBS KIDS Games';             Url = 'https://pbskids.org/games' }
             [pscustomobject]@{ Name = 'PhET Science';               Url = 'https://phet.colorado.edu/en/simulations/browse' }
             [pscustomobject]@{ Name = 'Chrome Music Lab';           Url = 'https://musiclab.chromeexperiments.com' }
             [pscustomobject]@{ Name = 'Kleki Paint';                Url = 'https://kleki.com' }
         )
         AllowedDomains   = @(
-            'teachyourmonstertoread.com', 'teachyourmonster.org', 'starfall.com', 'adaptedmind.com',
-            'pbskids.org', 'pbs.org', 'phet.colorado.edu', 'musiclab.chromeexperiments.com',
-            'kleki.com'
+            'teachyourmonstertoread.com', 'teachyourmonster.org', 'starfall.com', 'phet.colorado.edu',
+            'musiclab.chromeexperiments.com', 'kleki.com'
         )
         DesktopApps      = @(
             [pscustomobject]@{ Name = 'Tux Paint'; WingetId = 'NewBreedSoftware.TuxPaint'; ExeName = 'tuxpaint.exe'; Path = $null }

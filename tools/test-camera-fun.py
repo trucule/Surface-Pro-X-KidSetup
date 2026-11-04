@@ -5,6 +5,11 @@ Run: python3 tools/test-camera-fun.py   (needs ffmpeg and playwright)"""
 import pathlib, subprocess, sys
 from playwright.sync_api import sync_playwright
 
+# Files a test run does not have: voice-config.js (written on the tablet) and the home screen's local service.
+EXPECTED_MISSING = ('voice-config.js', 'http://127.0.0.1:47821')
+def real_error(m):
+    return m.type == 'error' and not (m.text.startswith('Failed to load resource') and any(x in (m.location or {}).get('url', '') for x in EXPECTED_MISSING))
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP = (ROOT / 'apps' / 'camera-fun' / 'index.html').as_uri()
 SHOTS = pathlib.Path('/tmp/claude-0/tests'); SHOTS.mkdir(parents=True, exist_ok=True)
@@ -25,7 +30,7 @@ def main():
         ctx = b.new_context(viewport={'width': 1440, 'height': 960}); ctx.add_init_script(GUARD)
         pg = ctx.new_page(); errs = []
         pg.on('pageerror', lambda e: errs.append(str(e)))
-        pg.on('console', lambda m: errs.append('console: ' + m.text) if m.type == 'error' else None)
+        pg.on('console', lambda m: errs.append('console: ' + m.text) if real_error(m) else None)
         pg.goto(APP); pg.wait_for_timeout(1500)
         ids = pg.evaluate("() => CF.C.filters.map(f => f.id)")
         for fid in ids:

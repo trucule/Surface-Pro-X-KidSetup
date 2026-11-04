@@ -4,6 +4,11 @@ and rule cards), and the page has no errors. Run: python3 tools/test-pattern-mac
 import pathlib, sys
 from playwright.sync_api import sync_playwright
 
+# Files a test run does not have: voice-config.js (written on the tablet) and the home screen's local service.
+EXPECTED_MISSING = ('voice-config.js', 'http://127.0.0.1:47821')
+def real_error(m):
+    return m.type == 'error' and not (m.text.startswith('Failed to load resource') and any(x in (m.location or {}).get('url', '') for x in EXPECTED_MISSING))
+
 APP = (pathlib.Path(__file__).resolve().parent.parent / 'apps' / 'pattern-machine.html').as_uri()
 SHOTS = pathlib.Path('/tmp/claude-0/tests'); SHOTS.mkdir(parents=True, exist_ok=True)
 problems = []
@@ -91,7 +96,7 @@ with sync_playwright() as p:
     pg = b.new_page(viewport={'width': 1440, 'height': 960})
     errors = []
     pg.on('pageerror', lambda e: errors.append(str(e)))
-    pg.on('console', lambda m: m.type == 'error' and errors.append(m.text))
+    pg.on('console', lambda m: real_error(m) and errors.append(m.text))
     pg.goto(APP); pg.wait_for_timeout(1200)
     pg.screenshot(path=str(SHOTS / 'pattern-machine-start.png'))
 
