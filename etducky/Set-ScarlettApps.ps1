@@ -16,9 +16,13 @@
 #>
 
 # ---- Settings ---------------------------------------------------------------
+# Hosts that Sign in with Google needs (the sign-in page, its scripts, styles, fonts and profile pictures). They do not
+# include Google search, which stays blocked.
+$GoogleSignIn = @('accounts.google.com', 'apis.google.com', 'accounts.youtube.com', 'gstatic.com', 'fonts.googleapis.com',
+                  'lh3.googleusercontent.com')
 # Name, address (host and path, opened over https), the domains her browser may open for it, tile emoji and colour.
 $Sites = @(
-    @{ Name = 'Epic';             Address = 'www.getepic.com/';   Domains = @('getepic.com');            Icon = 'U+1F4DA'; Color = '#E8590C' }
+    @{ Name = 'Epic';             Address = 'www.getepic.com/';   Domains = @('getepic.com') + $GoogleSignIn; Icon = 'U+1F4DA'; Color = '#E8590C' }
     @{ Name = 'PBS KIDS Games';   Address = 'pbskids.org/games';  Domains = @('pbskids.org', 'pbs.org'); Icon = 'U+1F3AE'; Color = '#2F9E44' }
     @{ Name = 'AdaptedMind Math'; Address = 'www.adaptedmind.com'; Domains = @('adaptedmind.com');       Icon = 'U+1F522'; Color = '#1C7ED6' }
 )
